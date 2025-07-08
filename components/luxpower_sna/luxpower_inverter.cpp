@@ -30,13 +30,15 @@ float LuxPowerInverter::get_setup_priority() const {
 }
 
 // loop() method: Called repeatedly to manage TCP connection and process incoming data
+// loop() method: Called repeatedly to manage TCP connection and process incoming data
 void LuxPowerInverter::loop() {
   const uint32_t now = millis();
 
   // 1. Manage TCP Connection
   if (!this->client_.connected()) {
     // If not connected, try to reconnect after the specified interval
-    if (network::is_connected() && (now - this->last_connect_attempt_) > RECONNECT_INTERVAL_MS) {
+    // Original: if (network::is_connected() && (now - this->last_connect_attempt_) > RECONNECT_INTERVAL_MS) {
+    if ((now - this->last_connect_attempt_) > RECONNECT_INTERVAL_MS) { // MODIFIED LINE: Removed network::is_connected()
       ESP_LOGI(TAG, "Attempting to connect to %s:%u...", this->host_.c_str(), this->port_);
       this->client_.stop(); // Ensure any previous connection is closed
       if (this->client_.connect(this->host_.c_str(), this->port_)) {
@@ -51,59 +53,6 @@ void LuxPowerInverter::loop() {
     }
     return; // Do not proceed to read/parse data if not connected
   }
-
-  // 2. Process incoming data (only if connected)
-  // Clear the buffer if no data has been received for a while (timeout)
-  if ((now - this->last_byte_received_) > this->read_timeout_) {
-    if (this->data_buffer_.size() > 0) {
-      ESP_LOGW(TAG, "Buffer timeout! Discarding %zu bytes.", this->data_buffer_.size());
-      this->data_buffer_.clear();
-    }
-  }
-
-  // Read all available bytes from the TCP client buffer
-  while (this->client_.available()) {
-    uint8_t byte = this->client_.read();
-    this->data_buffer_.push_back(byte); // Add the byte to the internal buffer
-    this->last_byte_received_ = now;   // Update timestamp of the last received byte
-
-    // Check for the A1 1A packet prefix
-    if (this->data_buffer_.size() >= 2) {
-      if (this->data_buffer_[0] == 0xA1 && this->data_buffer_[1] == 0x1A) {
-        // Potential A1 packet detected.
-        // We need at least 6 bytes to read the `frame_length` field (bytes 4 and 5).
-        if (this->data_buffer_.size() >= 6) {
-          // Extract `frame_length` (little-endian)
-          uint16_t frame_length = (this->data_buffer_[5] << 8) | this->data_buffer_[4];
-          // Calculate the total expected length of the A1 packet (frame_length + 6 header bytes)
-          uint16_t calculated_packet_length = frame_length + 6;
-
-          // If we have received enough bytes for the complete packet
-          if (this->data_buffer_.size() >= calculated_packet_length) {
-            ESP_LOGV(TAG, "Full A1 packet received! Length: %u", calculated_packet_length);
-            // Extract the complete packet into a temporary vector
-            std::vector<uint8_t> packet(this->data_buffer_.begin(), this->data_buffer_.begin() + calculated_packet_length);
-            this->parse_luxpower_response_packet(packet); // Parse the packet
-
-            // Remove the processed packet from the buffer
-            this->data_buffer_.erase(this->data_buffer_.begin(), this->data_buffer_.begin() + calculated_packet_length);
-            // Continue processing in case there are more packets in the buffer
-            continue;
-          }
-        }
-      } else {
-        // The current start of the buffer does not match the A1 1A prefix.
-        // Discard the first byte and continue to check the next byte as the potential start.
-        ESP_LOGW(TAG, "Unknown prefix 0x%02X%02X. Discarding byte 0x%02X from buffer.",
-                 this->data_buffer_[0], (this->data_buffer_.size() > 1 ? this->data_buffer_[1] : 0x00), this->data_buffer_[0]);
-        this->data_buffer_.erase(this->data_buffer_.begin());
-        // Continue to the next iteration of the `while (this->client_.available())` loop
-        // to re-evaluate the buffer from its new start.
-        continue;
-      }
-    }
-  }
-}
 
 // parse_luxpower_response_packet() method: Decodes the A1 packet contents
 void LuxPowerInverter::parse_luxpower_response_packet(const std::vector<uint8_t> &data) {
