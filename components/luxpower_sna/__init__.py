@@ -8,7 +8,6 @@ from esphome.const import (
 from esphome.components import sensor
 
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
-# CORRECTED LINE: Reference the actual C++ class name "LuxPowerInverter"
 LuxPowerInverter = luxpower_sna_ns.class_("LuxPowerInverter", cg.Component)
 LuxpowerSnaSensor = luxpower_sna_ns.class_("LuxpowerSnaSensor", sensor.Sensor)
 
@@ -52,7 +51,6 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        # CORRECTED LINE: Reference the updated Python variable for LuxPowerInverter
         cv.GenerateID(): cv.declare_id(LuxPowerInverter),
         cv.Required(CONF_HOST): cv.string,
         cv.Required(CONF_PORT): cv.port,
@@ -67,16 +65,19 @@ CONFIG_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
-    # CORRECTED LINE: Instantiate the LuxPowerInverter class
-    var = cg.new_Pvariable(config[CONF_ID])
+    # Pass all constructor arguments to cg.new_Pvariable
+    var = cg.new_Pvariable(
+        config[CONF_ID],
+        config[CONF_HOST],
+        config[CONF_PORT],
+        config[CONF_UPDATE_INTERVAL],
+        config[CONF_DONGLE_SERIAL],
+        config[CONF_INVERTER_SERIAL_NUMBER]
+    )
     await cg.register_component(var, config)
 
-    # These setter methods will need to be added to LuxPowerInverter class in .h and .cpp
-    cg.add(var.set_inverter_host(config[CONF_HOST]))
-    cg.add(var.set_inverter_port(config[CONF_PORT]))
-    cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
-    cg.add(var.set_inverter_serial_number(config[CONF_INVERTER_SERIAL_NUMBER]))
-    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
+    # Removed individual setter calls for host, port, update_interval, dongle_serial, inverter_serial_number
+    # as they are now handled by the constructor.
 
     if CONF_SENSORS in config:
         for sens_config in config[CONF_SENSORS]:
