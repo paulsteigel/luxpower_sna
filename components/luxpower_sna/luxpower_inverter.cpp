@@ -1,8 +1,9 @@
-// src/esphome/components/luxpower_sna/luxpower_inverter.cpp
-
+#include "esphome/core/component.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/switch/switch.h"
 #include "luxpower_inverter.h" // Keep this first
-#include "esphome/core/log.h" // <--- ADD THIS LINE for LOG_SENSOR and other logging macros
-//#include "esphome/components/sensor/sensor.h" // <--- Ensure this is included if LuxpowerSnaSensor inherits from esphome::sensor::Sensor
 //#include "luxpower_sna_constants.h" // <--- ADD THIS LINE if LUXPOWER_END_BYTE_LENGTH is defined here
 // Other includes as needed, e.g., for specific utility functions or data types
 
