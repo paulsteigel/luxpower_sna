@@ -25,19 +25,17 @@ void LuxpowerInverterComponent::setup() {
     this->is_connected_ = false;
   });
 
+  // The onData lambda now calls our new parsing function
   this->client_->onData([this](void *arg, AsyncClient *c, void *data, size_t len) {
-    this->on_data_received(data, len);
+    this->parse_inverter_data(data, len);
   });
 }
 
 void LuxpowerInverterComponent::update() {
   if (!this->is_connected_) {
-    ESP_LOGD(TAG, "Not connected. Attempting to connect...");
     this->connect_to_inverter();
     return;
   }
-  
-  ESP_LOGD(TAG, "Polling update: Requesting test data from inverter.");
   this->request_test_data();
 }
 
@@ -46,32 +44,51 @@ void LuxpowerInverterComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Host: %s:%d", this->host_.c_str(), this->port_);
 }
 
-// --- Setters ---
+void LuxpowerInverterComponent::parse_inverter_data(void *data, size_t len) {
+  std::vector<uint8_t> packet;
+  packet.assign((uint8_t *) data, (uint8_t *) data + len);
+
+  // Basic validation
+  if (len < 37 || packet[0] != 0xA1 || packet[1] != 0x1A || packet[7] != 0xC2) {
+    ESP_LOGW(TAG, "Received invalid or non-data packet");
+    return;
+  }
+  
+  // The actual register data starts at byte 35
+  const int DATA_FRAME_START = 35;
+  
+  // Extract just the register values
+  std::vector<uint8_t> register_data(packet.begin() + DATA_FRAME_START, packet.end() - 2);
+
+  // --- TEST: Extract Battery Voltage (Register 4) ---
+  // Each register is 2 bytes, so we look at an offset of 4 * 2 = 8
+  int register_offset = 4 * 2; 
+
+  if(register_data.size() > register_offset + 1) {
+    uint16_t raw_value = (uint16_t(register_data[register_offset + 1]) << 8) | register_data[register_offset];
+    float voltage = raw_value / 10.0f;
+    ESP_LOGI(TAG, "SUCCESS! Parsed Battery Voltage: %.1f V", voltage);
+  } else {
+    ESP_LOGW(TAG, "Data packet too short to read register 4");
+  }
+}
+
+// --- All other functions remain the same ---
+
 void LuxpowerInverterComponent::set_host(const std::string &host) { this->host_ = host; }
 void LuxpowerInverterComponent::set_port(uint16_t port) { this->port_ = port; }
 void LuxpowerInverterComponent::set_dongle_serial(const std::vector<uint8_t> &serial) { this->dongle_serial_ = serial; }
 void LuxpowerInverterComponent::set_inverter_serial_number(const std::vector<uint8_t> &serial) { this->inverter_serial_ = serial; }
 
-// --- Protected Methods ---
 void LuxpowerInverterComponent::connect_to_inverter() {
   if (this->is_connected_ || this->client_->connected()) return;
+  ESP_LOGD(TAG, "Attempting connection to %s:%d", this->host_.c_str(), this->port_);
   this->client_->connect(this->host_.c_str(), this->port_);
-}
-
-void LuxpowerInverterComponent::on_data_received(void *data, size_t len) {
-  ESP_LOGI(TAG, "Received %d bytes from inverter.", len);
-  
-  std::string raw_data_hex = "";
-  for (size_t i = 0; i < len; i++) {
-    char hex_byte[4];
-    sprintf(hex_byte, "%02X ", ((uint8_t*)data)[i]);
-    raw_data_hex += hex_byte;
-  }
-  ESP_LOGD(TAG, "Received raw data: %s", raw_data_hex.c_str());
 }
 
 void LuxpowerInverterComponent::request_test_data() {
   if (!this->is_connected_) return;
+  ESP_LOGD(TAG, "Polling update: Requesting test data from inverter.");
   
   uint16_t start_register = 0;
   uint16_t num_registers = 40;
@@ -81,7 +98,6 @@ void LuxpowerInverterComponent::request_test_data() {
   
   if (this->client_->space() > packet.size() && this->client_->canSend()) {
     this->client_->write((const char*)packet.data(), packet.size());
-    ESP_LOGD(TAG, "Sent test data request (start=%d, count=%d)", start_register, num_registers);
   } else {
     ESP_LOGW(TAG, "Cannot send data request, client buffer full or not ready.");
   }
