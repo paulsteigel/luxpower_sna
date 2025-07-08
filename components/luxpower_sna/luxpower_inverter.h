@@ -6,9 +6,21 @@
 #include <vector>
 #include <string>
 #include <utility> // For std::move
+#include <WiFiClient.h> // <--- ADD THIS LINE FOR WiFiClient
 
 namespace esphome {
 namespace luxpower_sna {
+
+// Define LuxpowerRegType enum directly in C++
+enum LuxpowerRegType {
+    LUX_REG_TYPE_INT = 0,
+    LUX_REG_TYPE_FLOAT_DIV10 = 1,
+    LUX_REG_TYPE_SIGNED_INT = 2,
+    LUX_REG_TYPE_FIRMWARE = 3,
+    LUX_REG_TYPE_MODEL = 4,
+    LUX_REG_TYPE_BITMASK = 5,
+    LUX_REG_TYPE_TIME_MINUTES = 6,
+};
 
 class LuxpowerSnaSensor; // Forward declaration
 
@@ -27,7 +39,7 @@ public:
 
 protected:
   // Internal TCP client
-  WiFiClient client_;
+  WiFiClient client_; // This should now be recognized
   std::string host_;
   uint16_t port_;
   uint32_t last_connect_attempt_{0};
