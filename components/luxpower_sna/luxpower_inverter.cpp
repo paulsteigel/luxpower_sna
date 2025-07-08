@@ -2,6 +2,7 @@
 #include "luxpower_inverter.h" // Changed to luxpower_inverter.h
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/defines.h" // Added for ESP_LOG_BUFFER_HEXDUMP
 // #include <arpa/inet.h> // Removed: This header is not available on ESP32
 
 namespace esphome {
