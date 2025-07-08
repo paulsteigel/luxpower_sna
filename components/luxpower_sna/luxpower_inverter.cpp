@@ -168,7 +168,7 @@ bool LuxpowerPacket::decode_packet(const std::vector<uint8_t>& raw_data, Luxpowe
     }
 
     if (raw_data[0] != LUX_START_BYTE_1 || raw_data[1] != LUX_START_BYTE_2) {
-        ESP_LOGW(TAG, "Invalid start bytes: 0x%02X 0x%02X", raw_data[0], raw_data[1]);
+        ESP_LOGW(TAG, "Invalid start bytes in buffer. Dropping byte.");
         return false;
     }
 
@@ -262,9 +262,13 @@ void LuxpowerInverterComponent::update() {
     this->connect_to_inverter_();
   } else {
     ESP_LOGD(TAG, "Connected to inverter. Sending read holding registers command...");
-    // Example: Read Bank 0 Holding Registers (0x0000 to 0x0027)
-    std::vector<uint8_t> command_packet = LuxpowerPacket::build_read_holding_command(
-        this->inverter_serial_number_, this->dongle_serial_, REG_HOLD_START_BANK0, REG_HOLD_COUNT_BANK0);
+    // We need to request the correct register bank that contains battery data.
+    // Based on LXPPacket.py, battery data is often in a bank starting around register 100.
+    // Let's request a block that covers these.
+    // Assuming REG_BATTERY_VOLTAGE (100) and REG_BATTERY_DISCHARGE_POWER (107) are in the same block.
+    // A block of 10 registers from 100 (0x64) to 109 (0x6D) should cover these.
+    std::vector<uint8_t> command_packet = LuxpowerPacket::build_read_input_command( // Changed to build_read_input_command
+        this->inverter_serial_number_, this->dongle_serial_, REG_BATTERY_VOLTAGE, 10); // Request 10 registers from 0x64
     this->send_packet_(command_packet);
   }
 }
@@ -318,8 +322,7 @@ void LuxpowerInverterComponent::send_packet_(const std::vector<uint8_t>& packet)
 
     ESP_LOGD(TAG, "Sending packet of %u bytes.", packet.size());
     // Log packet bytes for debugging
-    std::string packet_hex = format_hex_pretty(packet.data(), packet.size());
-    ESP_LOGV(TAG, "Packet (hex): %s", packet_hex.c_str());
+    ESP_LOG_BUFFER_HEXDUMP(TAG, packet.data(), packet.size()); // Log sent packet
 
     this->client_.write(reinterpret_cast<const char*>(packet.data()), packet.size());
 }
@@ -327,6 +330,13 @@ void LuxpowerInverterComponent::send_packet_(const std::vector<uint8_t>& packet)
 void LuxpowerInverterComponent::process_received_data_() {
     // This function will be called when new data arrives in the buffer.
     // It should attempt to parse complete Luxpower packets from the buffer.
+
+    // Log the current state of the receive buffer before processing
+    if (!this->receive_buffer_.empty()) {
+        ESP_LOGV(TAG, "Receive buffer before processing (%u bytes):", this->receive_buffer_.size());
+        ESP_LOG_BUFFER_HEXDUMP(TAG, this->receive_buffer_.data(), this->receive_buffer_.size());
+    }
+
 
     while (this->receive_buffer_.size() >= 4) { // Minimum size for header (AA 55 Len1 Len2)
         if (this->receive_buffer_[0] != LUX_START_BYTE_1 || this->receive_buffer_[1] != LUX_START_BYTE_2) {
@@ -378,9 +388,23 @@ void LuxpowerInverterComponent::parse_modbus_response_(const std::vector<uint8_t
         uint16_t num_registers = data_payload.size() / 2;
         ESP_LOGD(TAG, "Parsing %u registers from Modbus response (Func: 0x%02X, Start: 0x%04X).", num_registers, function_code, start_address);
 
+        // Determine the actual start address of the received data.
+        // The Modbus response doesn't explicitly state the start address of the *response*,
+        // only the function code and byte count. We need to infer it from the request.
+        // For now, we'll assume the response corresponds to the last request sent.
+        // A more robust solution would involve tracking outstanding requests.
+        // For this iteration, we'll use a hardcoded start address for parsing.
+        // In the Luxpower protocol, the response to a read command (0xC3) with Modbus function 0x03 or 0x04
+        // carries the data. The actual Modbus address is implicit.
+        // For the battery data, these are typically input registers.
+
+        // For this specific case, since we're requesting from REG_BATTERY_VOLTAGE (100)
+        // and reading 10 registers, the received data corresponds to registers 100-109.
+        uint16_t actual_start_address = REG_BATTERY_VOLTAGE; // Use the known start of our requested block
+
         for (uint16_t i = 0; i < num_registers; ++i) {
             uint16_t register_value = (static_cast<uint16_t>(data_payload[i * 2]) << 8) | data_payload[(i * 2) + 1];
-            uint16_t current_register_address = start_address + i; // Assuming sequential addresses from request
+            uint16_t current_register_address = actual_start_address + i;
 
             // Store the value in the map
             this->register_values_[current_register_address] = register_value;
@@ -410,6 +434,9 @@ void LuxpowerInverterComponent::onDisconnect(void *arg, AsyncClient *client) { /
 void LuxpowerInverterComponent::onData(void *arg, AsyncClient *client, void *data, size_t len) { // Type changed
   LuxpowerInverterComponent *comp = static_cast<LuxpowerInverterComponent *>(arg); // Type changed
   ESP_LOGD(TAG, "Received %u bytes from inverter.", len);
+
+  // Log the raw incoming data for debugging
+  ESP_LOG_BUFFER_HEXDUMP(TAG, static_cast<const uint8_t*>(data), len);
 
   // Append received data to the buffer
   const uint8_t* byte_data = static_cast<const uint8_t*>(data);
