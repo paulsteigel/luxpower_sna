@@ -16,7 +16,7 @@ from esphome.const import (
     UNIT_AMPERE,
     UNIT_WATT,
     UNIT_KILOWATT_HOURS,
-    UNIT_AMPERE_HOURS,
+    # UNIT_AMPERE_HOURS, <-- CHANGE 1: REMOVED THIS LINE
 )
 
 # Local constants
@@ -68,7 +68,8 @@ SENSORS_SCHEMA = cv.Schema({
         accuracy_decimals=1,
     ),
     cv.Optional(CONF_BATTERY_CAPACITY_AH): sensor.sensor_schema(
-        unit_of_measurement=UNIT_AMPERE_HOURS,
+        # CHANGE 2: Replaced the constant with a direct string
+        unit_of_measurement="Ah",
         icon="mdi:battery-medium",
         state_class=STATE_CLASS_MEASUREMENT,
         accuracy_decimals=0,
