@@ -16,13 +16,15 @@ from esphome.const import (
     UNIT_KILOWATT_HOURS,
 )
 
-from . import luxpower_sna_ns, LuxpowerSNAComponent
+# --- Import the linking schema and ID from __init__.py, just like jk_bms does ---
+from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
+# --- Local constants for our custom sensor types ---
 CONF_BATTERY_CAPACITY_AH = "battery_capacity_ah"
 CONF_POWER_FROM_GRID = "power_from_grid"
 CONF_DAILY_SOLAR_GENERATION = "daily_solar_generation"
 
+# --- A dictionary that defines all possible sensors ---
 SENSOR_TYPES = {
     CONF_VOLTAGE: sensor.sensor_schema(
         unit_of_measurement=UNIT_VOLT,
@@ -56,26 +58,21 @@ SENSOR_TYPES = {
     ),
 }
 
-
-# =========================================================================
-# ======================== THE CORRECTED LINE =============================
-# =========================================================================
-# The variable MUST be named CONFIG_SCHEMA for the loader to find it.
-CONFIG_SCHEMA = cv.All(
-    sensor.sensor_schema().extend(
-# =========================================================================
-# =========================================================================
-        {
-            cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-            **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-        }
-    ),
-    cv.has_at_least_one_key(*SENSOR_TYPES),
+# --- The CONFIG_SCHEMA for the sensor platform ---
+# It starts with the imported linking schema and extends it with all sensor options.
+CONFIG_SCHEMA = LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
+    {
+        **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
+    }
 )
 
 async def to_code(config):
+    # Get the hub object using the ID from the linking schema
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    for key, conf in config.items():
-        if key in SENSOR_TYPES:
+    
+    # Loop through our defined sensor types and create the ones the user configured
+    for key in SENSOR_TYPES:
+        if key in config:
+            conf = config[key]
             sens = await sensor.new_sensor(conf)
             cg.add(hub.add_sensor(key, sens))
