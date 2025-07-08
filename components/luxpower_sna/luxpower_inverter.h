@@ -71,7 +71,6 @@ class LuxpowerInverterComponent : public PollingComponent { // Class name change
   static void onData(void *arg, AsyncClient *client, void *data, size_t len);
   // Callback for when data is sent
   static void onAck(void *arg, AsyncClient *client, size_t len, uint32_t time);
-  // Removed: static void onWriteBufferFull(void *arg, AsyncClient *client, size_t len);
   // Callback for error
   static void onError(void *arg, AsyncClient *client, int8_t error);
 
