@@ -1,19 +1,16 @@
 # custom_components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-# Import only core constants that should be available from esphome.const for general usage
 from esphome.const import (
     CONF_ID, CONF_NAME, CONF_UNIT_OF_MEASUREMENT, CONF_DEVICE_CLASS,
     CONF_STATE_CLASS, CONF_ACCURACY_DECIMALS, CONF_ICON
 )
 from esphome.components import sensor
 
-# The base component namespace (this matches your C++ namespace)
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
 LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", cg.Component)
-LuxpowerSnaSensor = luxpower_sna_ns.class_("LuxpowerSnaSensor", sensor.Sensor) # RENAMED CLASS
+LuxpowerSnaSensor = luxpower_sna_ns.class_("LuxpowerSnaSensor", sensor.Sensor) # Class name remains the same
 
-# Enum for register types (must match C++ enum in luxpower_inverter.h)
 LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType")
 LUX_REG_TYPES = {
     "INT": LuxpowerRegType.LUX_REG_TYPE_INT,
@@ -25,7 +22,6 @@ LUX_REG_TYPES = {
     "TIME_MINUTES": LuxpowerRegType.LUX_REG_TYPE_TIME_MINUTES,
 }
 
-# Define configuration keys locally to avoid ImportError issues
 CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UPDATE_INTERVAL = "update_interval"
@@ -38,8 +34,6 @@ CONF_REGISTER_ADDRESS = "register"
 CONF_REG_TYPE = "reg_type"
 CONF_BANK = "bank"
 
-
-# Schema for a Luxpower sensor
 LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=cv.Optional(CONF_UNIT_OF_MEASUREMENT),
     device_class=cv.Optional(CONF_DEVICE_CLASS),
@@ -48,14 +42,13 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
     icon=cv.Optional(CONF_ICON),
 ).extend(
     {
-        cv.GenerateID(): cv.declare_id(LuxpowerSnaSensor), # RENAMED CLASS
+        cv.GenerateID(): cv.declare_id(LuxpowerSnaSensor),
         cv.Required(CONF_REGISTER_ADDRESS): cv.hex_uint16_t,
         cv.Required(CONF_REG_TYPE): cv.enum(LUX_REG_TYPES, upper=True),
         cv.Optional(CONF_BANK, default=0): cv.uint8_t,
     }
 )
 
-# Main component schema
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(LuxPowerInverterComponent),
@@ -71,8 +64,6 @@ CONFIG_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-
-# Code generation for the main component
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
