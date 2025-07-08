@@ -3,8 +3,10 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
-    CONF_BATTERY_VOLTAGE,
-    CONF_BATTERY_CURRENT,
+    # --- CORRECTED IMPORTS ---
+    CONF_VOLTAGE,
+    CONF_CURRENT,
+    # --- Standard constants that were already correct ---
     DEVICE_CLASS_VOLTAGE,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_POWER,
@@ -25,14 +27,15 @@ CONF_POWER_FROM_GRID = "power_from_grid"
 CONF_DAILY_SOLAR_GENERATION = "daily_solar_generation"
 
 # --- A dictionary that defines all possible sensors ---
+# We now use the standard CONF_VOLTAGE and CONF_CURRENT as keys
 SENSOR_TYPES = {
-    CONF_BATTERY_VOLTAGE: sensor.sensor_schema(
+    CONF_VOLTAGE: sensor.sensor_schema(
         unit_of_measurement=UNIT_VOLT,
         device_class=DEVICE_CLASS_VOLTAGE,
         state_class=STATE_CLASS_MEASUREMENT,
         accuracy_decimals=1,
     ),
-    CONF_BATTERY_CURRENT: sensor.sensor_schema(
+    CONF_CURRENT: sensor.sensor_schema(
         unit_of_measurement=UNIT_AMPERE,
         device_class=DEVICE_CLASS_CURRENT,
         state_class=STATE_CLASS_MEASUREMENT,
@@ -58,27 +61,21 @@ SENSOR_TYPES = {
     ),
 }
 
-# --- Schema for the 'sensor:' platform ---
+# --- Schema for the 'sensor:' platform (No changes needed here) ---
 PLATFORM_SCHEMA = cv.All(
     sensor.PLATFORM_SCHEMA.extend(
         {
-            # This is the key that links to the hub
             cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-            # Make all our defined sensors optional
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
         }
     ),
-    # Ensure at least one sensor is defined
     cv.has_at_least_one_key(*SENSOR_TYPES),
 )
 
 async def to_code(config):
-    # Get the hub object using the ID
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    
-    # Loop through the configuration and create the sensors that were defined
     for key, conf in config.items():
         if key in SENSOR_TYPES:
             sens = await sensor.new_sensor(conf)
-            # Register the sensor with the hub, e.g., add_sensor("battery_voltage", sens_obj)
+            # The key will now be "voltage" or "current", which is what we want
             cg.add(hub.add_sensor(key, sens))
