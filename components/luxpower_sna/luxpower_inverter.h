@@ -1,4 +1,4 @@
-// components/luxpower_sna/luxpower_sna.h
+// components/luxpower_sna/luxpower_inverter.h
 #pragma once
 
 #include "esphome/core/component.h"
@@ -21,13 +21,13 @@ class LuxpowerPacket;
 // CRC16 calculation function (Modbus CRC)
 uint16_t calculate_crc16(const uint8_t *data, size_t length);
 
-// Define the LuxpowerSnaComponent class, inheriting from PollingComponent
+// Define the LuxpowerInverterComponent class, inheriting from PollingComponent
 // PollingComponent provides the update() method that will be called periodically
-class LuxpowerSnaComponent : public PollingComponent {
+class LuxpowerInverterComponent : public PollingComponent { // Class name changed
  public:
   // Constructor: Initializes the component with a default update interval.
   // The update interval can be overridden by the YAML configuration.
-  LuxpowerSnaComponent();
+  LuxpowerInverterComponent(); // Constructor name changed
 
   // Setters for the configuration parameters from YAML
   void set_host(const std::string &host) { this->host_ = host; }
@@ -116,7 +116,7 @@ public:
     // raw_data: The raw byte vector received from the inverter
     // comp: Pointer to the main component to update register values
     // Returns true if decoding was successful, false otherwise.
-    static bool decode_packet(const std::vector<uint8_t>& raw_data, LuxpowerSnaComponent* comp);
+    static bool decode_packet(const std::vector<uint8_t>& raw_data, LuxpowerInverterComponent* comp); // Type changed
 
 private:
     // Helper to convert string serial to byte vector
