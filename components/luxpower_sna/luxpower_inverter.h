@@ -7,7 +7,6 @@
 
 // For TCP/IP communication, we use WiFiClient from the Arduino framework
 #include <WiFiClient.h>
-// #include "esphome/components/network/network.h" // Keep this line commented out for now
 
 // Include your constants file
 #include "luxpower_sna_constants.h"
@@ -25,10 +24,6 @@ class LuxPowerInverter : public Component {
   void loop() override;
   float get_setup_priority() const override;
 
-  // You might want to add methods here for publishing sensor data later
-  // For example:
-  // void set_voltage_sensor(sensor::Sensor *voltage_sensor) { this->voltage_sensor_ = voltage_sensor; }
-
  protected:
   // Private members for TCP client and connection management
   WiFiClient client_;
@@ -37,18 +32,17 @@ class LuxPowerInverter : public Component {
   uint32_t last_connect_attempt_;
   std::vector<uint8_t> data_buffer_;
 
-  // New: Members for managing periodic requests based on update_interval
+  // Members for managing periodic requests based on update_interval
   uint32_t last_request_time_;
   uint32_t update_interval_; // Stored in milliseconds after conversion in constructor
 
   // Private helper methods for internal logic
   void parse_luxpower_response_packet(const std::vector<uint8_t> &data);
   void parse_and_publish_register(uint16_t reg_address, uint16_t value); // Example for publishing
-  void status_set_warning(); // Corrected: ESPHome base class method
-  void status_set_ok();      // Corrected: ESPHome base class method
 
-  // Add any sensor pointers here if you add sensors later in your YAML
-  // sensor::Sensor *voltage_sensor_{nullptr}; // Example sensor
+  // Corrected: ESPHome base class method declaration now accepts an optional message
+  void status_set_warning(const std::string &message = "");
+  void status_set_ok(); // This still correctly takes no arguments for clearing status
 };
 
 } // namespace luxpower_sna
