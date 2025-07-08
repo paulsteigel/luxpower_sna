@@ -1,134 +1,96 @@
-// components/luxpower_sna/luxpower_inverter.h
+// src/esphome/components/luxpower_sna/luxpower_inverter.h
+// Corrected to add missing member variable declarations
+
 #pragma once
 
-#include "esphome/core/component.h"
-#include "esphome/core/helpers.h"
-#include "esphome/core/log.h" // This header defines LogLevel and LOG_LEVEL_VERBOSE
-#include <ESPAsyncTCP.h> // Include the ESPAsyncTCP library
-#include <vector>
-#include <string>
-#include <map> // For storing register values
+#include "esphome/core/component.h" // For esphome::Component base class
+#include "esphome/components/network/network.h" // For network status if needed (optional)
+#include "esphome/core/helpers.h" // For optional utility functions (e.g., format_hex_pretty)
+#include "esphome/core/time.h" // For ESPHome's internal time (millis(), etc.)
+#include "esphome/components/sensor/sensor.h" // Needed if LuxpowerSnaSensor is a sensor::Sensor
+#include "sensors.h" // For LuxpowerSnaSensor class definition
+#include "consts.h" // For constants like LUXPOWER_START_BYTE, etc.
 
-#include "consts.h" // Include the new constants file
-#include "sensors.h"    // Include the new sensor header
+#include <AsyncTCP.h>      // For AsyncClient
+#include <vector>          // For std::vector
+#include <string>          // For std::string
+#include <deque>           // For std::deque (rx_buffer_)
+#include <map>             // For std::map (current_raw_registers_)
+#include <chrono>          // <--- ADD THIS INCLUDE FOR std::chrono::milliseconds
 
 namespace esphome {
 namespace luxpower_sna {
 
-// Forward declaration of LuxpowerPacket helper class
-class LuxpowerPacket;
+// Forward declaration for the component itself, needed for set_parent() in LuxpowerSnaSensor
+class LuxPowerInverterComponent;
 
-// CRC16 calculation function (Modbus CRC)
-uint16_t calculate_crc16(const uint8_t *data, size_t length);
-
-// Define the LuxpowerInverterComponent class, inheriting from PollingComponent
-// PollingComponent provides the update() method that will be called periodically
-class LuxpowerInverterComponent : public PollingComponent {
-  // Grant LuxpowerPacket access to protected/private members of this class
-  friend class LuxpowerPacket;
-
- public:
-  // Constructor: Initializes the component with a default update interval.
-  // The update interval can be overridden by the YAML configuration.
-  LuxpowerInverterComponent();
-
-  // Setters for the configuration parameters from YAML
-  void set_host(const std::string &host) { this->host_ = host; }
-  void set_port(uint16_t port) { this->port_ = port; }
-  void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
-  void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_number_ = serial; }
-
-  // Add a sensor to be managed by this component
-  void add_sensor(LuxpowerSnaSensor *sensor) { this->sensors_.push_back(sensor); }
-
-  // setup() is called once when the ESPHome device starts up.
-  void setup() override;
-
-  // update() is called periodically based on the update_interval.
-  void update() override;
-
-  // dump_config() is used for logging the component's configuration.
-  void dump_config() override;
-
- protected:
-  std::string host_;
-  uint16_t port_;
-  std::string dongle_serial_;
-  std::string inverter_serial_number_;
-
-  AsyncClient client_; // The TCP client for communication
-  bool connected_ = false; // Flag to track connection status
-  std::vector<uint8_t> receive_buffer_; // Buffer to accumulate incoming data
-  std::map<uint16_t, uint16_t> register_values_; // Map to store parsed register values (address -> value)
-
-  std::vector<LuxpowerSnaSensor *> sensors_; // List of sensors managed by this component
-
-  // Callback for when the client connects
-  static void onConnect(void *arg, AsyncClient *client);
-  // Callback for when the client disconnects
-  static void onDisconnect(void *arg, AsyncClient *client);
-  // Callback for when data is received
-  static void onData(void *arg, AsyncClient *client, void *data, size_t len);
-  // Callback for when data is sent
-  static void onAck(void *arg, AsyncClient *client, size_t len, uint32_t time);
-  // Callback for error
-  static void onError(void *arg, AsyncClient *client, int8_t error);
-
-  // Helper method to connect to the inverter
-  void connect_to_inverter_();
-
-  // Helper method to send a raw packet
-  void send_packet_(const std::vector<uint8_t>& packet);
-
-  // Helper method to process received data
-  void process_received_data_();
-
-  // Helper method to parse Modbus RTU data within a Luxpower packet
-  // This will extract register values and update the register_values_ map
-  void parse_modbus_response_(const std::vector<uint8_t>& data_payload, uint8_t function_code, uint16_t start_address);
-
-  // Custom helper for logging byte buffers as hex dump
-  void log_buffer_hexdump_(const char* tag, const uint8_t* buffer, size_t len, LogLevel level = LOG_LEVEL_VERBOSE);
-};
-
-// --- LuxpowerPacket Helper Class ---
-// This class will encapsulate the logic for building and parsing Luxpower packets.
-// It will be a C++ equivalent of the LXPPacket.py functionality.
-class LuxpowerPacket {
+class LuxPowerInverterComponent : public Component { // Inherit from esphome::Component
 public:
-    // Builds a read holding registers command packet
-    // target_serial: Inverter serial number (10 bytes)
-    // dongle_serial: Dongle serial number (10 bytes)
-    // start_address: Starting register address
-    // num_registers: Number of registers to read
-    static std::vector<uint8_t> build_read_holding_command(
-        const std::string& target_serial,
-        const std::string& dongle_serial,
-        uint16_t start_address,
-        uint16_t num_registers
-    );
+  // Constructor
+  LuxPowerInverterComponent();
 
-    // Builds a read input registers command packet
-    // target_serial: Inverter serial number (10 bytes)
-    // dongle_serial: Dongle serial number (10 bytes)
-    // start_address: Starting register address
-    // num_registers: Number of registers to read
-    static std::vector<uint8_t> build_read_input_command(
-        const std::string& target_serial,
-        const std::string& dongle_serial,
-        uint16_t start_address,
-        uint16_t num_registers
-    );
+  // Lifecycle methods
+  void setup() override;
+  void loop() override;
+  void dump_config() override;
+  float get_setup_priority() const override; // Component setup priority
 
-    // Decodes a received Luxpower packet
-    // raw_data: The raw byte vector received from the inverter
-    // comp: Pointer to the main component to update register values
-    // Returns true if decoding was successful, false otherwise.
-    static bool decode_packet(const std::vector<uint8_t>& raw_data, LuxpowerInverterComponent* comp);
+  // Setters for configuration variables (called by YAML config)
+  void set_inverter_host(const std::string &host) { this->inverter_host_ = host; }
+  void set_inverter_port(uint16_t port) { this->inverter_port_ = port; }
+  void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; } // <--- ADD THIS SETTER
+  void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_number_ = serial; } // <--- ADD THIS SETTER
+  void set_update_interval(uint32_t update_interval_ms) { this->update_interval_ = std::chrono::milliseconds(update_interval_ms); } // <--- ADD THIS SETTER
 
-private:
-    // Helper to convert string serial to byte vector
-    static std::vector<uint8_t> serial_string_to_bytes(const std::string& serial_str);
+  // Method to add LuxpowerSnaSensor instances created from YAML
+  // obj is already a configured LuxpowerSnaSensor from the YAML
+  void add_luxpower_sensor(LuxpowerSnaSensor *obj, const std::string &name, uint16_t reg_addr, LuxpowerRegType reg_type, uint8_t bank);
+
+
+protected:
+  // TCP Client and connection management
+  AsyncClient *client_{nullptr};
+  bool client_connected_{false};
+  std::deque<uint8_t> rx_buffer_; // Buffer for incoming TCP data
+  uint32_t last_request_time_;
+  uint32_t last_connection_attempt_time_; // <--- CORRECTED NAME, WAS last_connect_attempt_
+  const uint32_t connect_retry_interval_ = 5000; // 5 seconds retry interval
+
+  // Configuration variables
+  std::string inverter_host_;
+  uint16_t inverter_port_;
+  std::string dongle_serial_;       // <--- ADD THIS MEMBER
+  std::string inverter_serial_number_; // <--- ADD THIS MEMBER
+  std::chrono::milliseconds update_interval_; // <--- ADD THIS MEMBER
+
+  // Map to store current raw register values (address -> value)
+  std::map<uint16_t, uint16_t> current_raw_registers_;
+
+  // List of associated LuxpowerSnaSensor objects
+  std::vector<LuxpowerSnaSensor *> luxpower_sensors_;
+
+  // Internal connection helper methods
+  bool is_connected();
+  bool connect_to_inverter();
+  void disconnect_from_inverter();
+  bool send_data(const std::vector<uint8_t>& data);
+
+  // AsyncTCP Callbacks
+  static void on_connect_cb(void *arg, AsyncClient *client);
+  static void on_disconnect_cb(void *arg, AsyncClient *client);
+  static void on_data_cb(void *arg, AsyncClient *client, void *data, size_t len);
+  static void on_error_cb(void *arg, AsyncClient *client, int error);
+
+  // Luxpower Proprietary Protocol Helpers
+  uint16_t calculate_luxpower_crc16(const std::vector<uint8_t>& data);
+  std::vector<uint8_t> build_luxpower_request_packet(uint8_t function_code, uint16_t register_address, uint16_t num_registers_or_data, const std::vector<uint8_t>& additional_data = {});
+  bool parse_luxpower_response_packet(const std::vector<uint8_t>& response_packet, std::vector<uint8_t>& out_payload);
+  bool interpret_modbus_read_holding_registers_payload(const std::vector<uint8_t>& payload, uint16_t expected_start_address, uint16_t expected_num_registers);
+
+  // Sensor value interpretation
+  float get_sensor_value_(uint16_t raw_value, LuxpowerRegType reg_type);
+  std::string get_firmware_version_(const std::vector<uint16_t>& data); // New helper for firmware string
+  std::string get_model_name_(const std::vector<uint16_t>& data);     // New helper for model string
 };
 
 } // namespace luxpower_sna
