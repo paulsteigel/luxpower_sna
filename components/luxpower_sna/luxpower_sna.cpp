@@ -7,6 +7,23 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
+// Standard Modbus CRC-16 calculation
+uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (int j = 0; j < 8; j++) {
+      if ((crc & 0x0001) != 0) {
+        crc >>= 1;
+        crc ^= 0xA001;
+      } else {
+        crc >>= 1;
+      }
+    }
+  }
+  return crc;
+}
+
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA Hub...");
 }
@@ -61,7 +78,6 @@ void LuxpowerSNAComponent::request_data_() {
     this->tcp_client_ = nullptr;
   }, nullptr);
 
-  // --- THE FIX: Corrected .c_c_str() to .c_str() ---
   if (!this->tcp_client_->connect(this->host_.c_str(), this->port_)) {
     ESP_LOGW(TAG, "Failed to initiate connection.");
     delete this->tcp_client_;
@@ -69,13 +85,28 @@ void LuxpowerSNAComponent::request_data_() {
     return;
   }
 
-  // Simplified request packet (25 bytes)
-  uint8_t request[25] = {0xAA, 0x55, 0x01, 0x1A, 0x01, 0x02, 0x19};
+  // --- THE FIX: Build the correct 29-byte packet ---
+  uint8_t request[29];
+  request[0] = 0xAA; // Header
+  request[1] = 0x55; // Header
+  request[2] = 0x01; // Address
+  request[3] = 0x1A; // Address
+  request[4] = 0x01; // Inverter ID
+  request[5] = 0x02; // Function Code
+  request[6] = 20;   // Data Length (10 bytes dongle + 10 bytes inverter)
+
+  // Copy serial numbers into the correct positions
   memcpy(request + 7, this->dongle_serial_.data(), 10);
   memcpy(request + 17, this->inverter_serial_.data(), 10);
+
+  // Calculate CRC on the packet from Address to the end of data (25 bytes)
+  uint16_t crc = this->calculate_crc_(request + 2, 25);
+  request[27] = crc & 0xFF;          // CRC Low Byte
+  request[28] = (crc >> 8) & 0xFF;   // CRC High Byte
   
-  this->tcp_client_->write((char*)request, 25);
-  ESP_LOGD(TAG, "Data request sent.");
+  // Send the full 29-byte packet
+  this->tcp_client_->write((char*)request, 29);
+  ESP_LOGD(TAG, "Data request (29 bytes) sent.");
 }
 
 void LuxpowerSNAComponent::handle_packet_(void *arg, AsyncClient *client, void *data, size_t len) {
