@@ -9,7 +9,7 @@
 #include <map>
 
 #include <ESPAsyncTCP.h> // <--- ADD THIS LINE for AsyncClient
-#include "luxpower_sna_sensor.h" // <--- ADD THIS LINE for LuxpowerSnaSensor definition
+//#include "luxpower_sna_sensor.h" // <--- ADD THIS LINE for LuxpowerSnaSensor definition
 
 // Other includes as needed
 
