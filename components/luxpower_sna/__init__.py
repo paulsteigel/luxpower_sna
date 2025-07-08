@@ -1,13 +1,16 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_HOST, CONF_PORT, CONF_UPDATE_INTERVAL
+# Corrected import: We only import constants we know exist.
+from esphome.const import CONF_ID, CONF_UPDATE_INTERVAL
 
 # Automatically load the sensor platform when luxpower_sna is used
 AUTO_LOAD = ["sensor"]
 MULTI_CONF = True
 
-# Local constants
+# --- THE FIX: Define constants locally to support older ESPHome versions ---
+CONF_HOST = "host"
+CONF_PORT = "port"
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
 CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
@@ -15,7 +18,7 @@ CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
 LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.PollingComponent)
 
-# Schema for the main component
+# Schema for the main component, using our local constants
 CONFIG_SCHEMA = (
     cv.Schema(
         {
