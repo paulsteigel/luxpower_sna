@@ -4,7 +4,7 @@
 #pragma once
 
 #include "esphome/core/component.h" // For esphome::Component base class
-#include "esphome/components/network/network.h" // For network status if needed (optional)
+//#include "esphome/components/network/network.h" // For network status if needed (optional)
 #include "esphome/core/helpers.h" // For optional utility functions (e.g., format_hex_pretty)
 #include "esphome/core/time.h" // For ESPHome's internal time (millis(), etc.)
 #include "esphome/components/sensor/sensor.h" // Needed if LuxpowerSnaSensor is a sensor::Sensor
