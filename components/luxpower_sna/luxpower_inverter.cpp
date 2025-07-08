@@ -8,6 +8,7 @@ static const char *const TAG = "luxpower_sna";
 void LuxpowerInverterComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
   this->client_ = new AsyncClient();
+  this->rx_buffer_.reserve(256); // Pre-allocate some memory
 
   this->client_->onConnect([this](void *arg, AsyncClient *client) {
     ESP_LOGI(TAG, "Connected to inverter at %s:%d", this->host_.c_str(), this->port_);
@@ -25,70 +26,96 @@ void LuxpowerInverterComponent::setup() {
     this->is_connected_ = false;
   });
 
-  // The onData lambda now calls our new parsing function
   this->client_->onData([this](void *arg, AsyncClient *c, void *data, size_t len) {
-    this->parse_inverter_data(data, len);
+    this->on_data(data, len);
   });
 }
+
+void LuxpowerInverterComponent::on_data(void *data, size_t len) {
+    this->rx_buffer_.insert(this->rx_buffer_.end(), (uint8_t*)data, (uint8_t*)data + len);
+
+    while (true) {
+        if (this->rx_buffer_.size() < 6) {
+            return; // Not enough data for a header
+        }
+        
+        if (this->rx_buffer_[0] != 0xA1 || this->rx_buffer_[1] != 0x1A) {
+            ESP_LOGW(TAG, "Invalid start of packet found, discarding one byte.");
+            this->rx_buffer_.erase(this->rx_buffer_.begin());
+            continue; // Try again with the next byte
+        }
+
+        uint16_t packet_len = (uint16_t(this->rx_buffer_[5]) << 8) | this->rx_buffer_[4];
+
+        if (this->rx_buffer_.size() < packet_len) {
+            return; // Incomplete packet, wait for more data
+        }
+
+        // We have a full packet
+        std::vector<uint8_t> packet(this->rx_buffer_.begin(), this->rx_buffer_.begin() + packet_len);
+        this->handle_packet(packet);
+
+        // Remove the processed packet from the buffer
+        this->rx_buffer_.erase(this->rx_buffer_.begin(), this->rx_buffer_.begin() + packet_len);
+    }
+}
+
+void LuxpowerInverterComponent::handle_packet(const std::vector<uint8_t> &packet) {
+    // Basic validation
+    if (packet[7] != 0xC2) {
+        ESP_LOGD(TAG, "Received non-data packet, ignoring.");
+        return;
+    }
+
+    const int DATA_FRAME_START = 35;
+    if (packet.size() < DATA_FRAME_START + 2) {
+        ESP_LOGW(TAG, "Received packet is too short to contain data.");
+        return;
+    }
+
+    // Extract just the register values
+    std::vector<uint8_t> d(packet.begin() + DATA_FRAME_START, packet.end() - 2);
+
+    // --- PARSE AND PUBLISH ---
+    // Each register is 2 bytes wide.
+    float battery_voltage = get_16bit_unsigned(d, 4) / 10.0f;
+    float battery_current = get_16bit_signed(d, 5) / 10.0f;
+    float power_from_grid = get_16bit_signed(d, 16);
+    float battery_capacity_ah = get_16bit_unsigned(d, 21);
+    float daily_solar_generation = get_16bit_unsigned(d, 25) / 10.0f;
+
+    ESP_LOGD(TAG, "Parsed: V:%.1f, A:%.1f, Grid:%.0fW, Cap:%.0fAh, Solar:%.1fkWh", 
+             battery_voltage, battery_current, power_from_grid, battery_capacity_ah, daily_solar_generation);
+
+    if (this->battery_voltage_sensor_ != nullptr) this->battery_voltage_sensor_->publish_state(battery_voltage);
+    if (this->battery_current_sensor_ != nullptr) this->battery_current_sensor_->publish_state(battery_current);
+    if (this->power_from_grid_sensor_ != nullptr) this->power_from_grid_sensor_->publish_state(power_from_grid);
+    if (this->battery_capacity_ah_sensor_ != nullptr) this->battery_capacity_ah_sensor_->publish_state(battery_capacity_ah);
+    if (this->daily_solar_generation_sensor_ != nullptr) this->daily_solar_generation_sensor_->publish_state(daily_solar_generation);
+}
+
 
 void LuxpowerInverterComponent::update() {
   if (!this->is_connected_) {
     this->connect_to_inverter();
     return;
   }
-  this->request_test_data();
+  this->request_inverter_data();
 }
 
 void LuxpowerInverterComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%d", this->host_.c_str(), this->port_);
+  LOG_SENSOR("  ", "Battery Voltage", this->battery_voltage_sensor_);
+  LOG_SENSOR("  ", "Battery Current", this->battery_current_sensor_);
+  LOG_SENSOR("  ", "Battery Capacity AH", this->battery_capacity_ah_sensor_);
+  LOG_SENSOR("  ", "Power from Grid", this->power_from_grid_sensor_);
+  LOG_SENSOR("  ", "Daily Solar", this->daily_solar_generation_sensor_);
 }
 
-void LuxpowerInverterComponent::parse_inverter_data(void *data, size_t len) {
-  std::vector<uint8_t> packet;
-  packet.assign((uint8_t *) data, (uint8_t *) data + len);
-
-  // Basic validation
-  if (len < 37 || packet[0] != 0xA1 || packet[1] != 0x1A || packet[7] != 0xC2) {
-    ESP_LOGW(TAG, "Received invalid or non-data packet");
-    return;
-  }
-  
-  // The actual register data starts at byte 35
-  const int DATA_FRAME_START = 35;
-  
-  // Extract just the register values
-  std::vector<uint8_t> register_data(packet.begin() + DATA_FRAME_START, packet.end() - 2);
-
-  // --- TEST: Extract Battery Voltage (Register 4) ---
-  // Each register is 2 bytes, so we look at an offset of 4 * 2 = 8
-  int register_offset = 4 * 2; 
-
-  if(register_data.size() > register_offset + 1) {
-    uint16_t raw_value = (uint16_t(register_data[register_offset + 1]) << 8) | register_data[register_offset];
-    float voltage = raw_value / 10.0f;
-    ESP_LOGI(TAG, "SUCCESS! Parsed Battery Voltage: %.1f V", voltage);
-  } else {
-    ESP_LOGW(TAG, "Data packet too short to read register 4");
-  }
-}
-
-// --- All other functions remain the same ---
-
-void LuxpowerInverterComponent::set_host(const std::string &host) { this->host_ = host; }
-void LuxpowerInverterComponent::set_port(uint16_t port) { this->port_ = port; }
-void LuxpowerInverterComponent::set_dongle_serial(const std::vector<uint8_t> &serial) { this->dongle_serial_ = serial; }
-void LuxpowerInverterComponent::set_inverter_serial_number(const std::vector<uint8_t> &serial) { this->inverter_serial_ = serial; }
-
-void LuxpowerInverterComponent::connect_to_inverter() {
-  if (this->is_connected_ || this->client_->connected()) return;
-  ESP_LOGD(TAG, "Attempting connection to %s:%d", this->host_.c_str(), this->port_);
-  this->client_->connect(this->host_.c_str(), this->port_);
-}
-
-void LuxpowerInverterComponent::request_test_data() {
+void LuxpowerInverterComponent::request_inverter_data() {
   if (!this->is_connected_) return;
-  ESP_LOGD(TAG, "Polling update: Requesting test data from inverter.");
+  ESP_LOGD(TAG, "Polling update: Requesting data from inverter.");
   
   uint16_t start_register = 0;
   uint16_t num_registers = 40;
@@ -101,6 +128,30 @@ void LuxpowerInverterComponent::request_test_data() {
   } else {
     ESP_LOGW(TAG, "Cannot send data request, client buffer full or not ready.");
   }
+}
+
+// --- Helper Functions and Setters ---
+uint16_t LuxpowerInverterComponent::get_16bit_unsigned(const std::vector<uint8_t> &data, int offset_reg) {
+    int offset_bytes = offset_reg * 2;
+    if (data.size() < offset_bytes + 2) return 0;
+    return (uint16_t(data[offset_bytes + 1]) << 8) | data[offset_bytes];
+}
+
+int16_t LuxpowerInverterComponent::get_16bit_signed(const std::vector<uint8_t> &data, int offset_reg) {
+    int offset_bytes = offset_reg * 2;
+    if (data.size() < offset_bytes + 2) return 0;
+    return (int16_t)((uint16_t(data[offset_bytes + 1]) << 8) | data[offset_bytes]);
+}
+
+void LuxpowerInverterComponent::set_host(const std::string &host) { this->host_ = host; }
+void LuxpowerInverterComponent::set_port(uint16_t port) { this->port_ = port; }
+void LuxpowerInverterComponent::set_dongle_serial(const std::vector<uint8_t> &serial) { this->dongle_serial_ = serial; }
+void LuxpowerInverterComponent::set_inverter_serial_number(const std::vector<uint8_t> &serial) { this->inverter_serial_ = serial; }
+
+void LuxpowerInverterComponent::connect_to_inverter() {
+  if (this->is_connected_ || this->client_->connected()) return;
+  ESP_LOGD(TAG, "Attempting connection to %s:%d", this->host_.c_str(), this->port_);
+  this->client_->connect(this->host_.c_str(), this->port_);
 }
 
 std::vector<uint8_t> LuxpowerInverterComponent::prepare_packet_for_read(uint16_t start, uint16_t count, uint8_t func) {
