@@ -2,16 +2,14 @@
 #pragma once
 
 #include "esphome/components/sensor/sensor.h" // For the base sensor::Sensor class
-#include "luxpower_sna_constants.h"          // <--- This should be line 4 or close to it
+#include "luxpower_sna_constants.h"          // For LuxpowerRegType enum definition
 #include <string>                            // For std::string
 #include <cstdint>                           // For uint16_t, uint8_t
 
 // Forward declaration for LuxPowerInverterComponent
-// This tells the compiler that LuxPowerInverterComponent is a class,
-// without needing its full definition here. This prevents circular includes.
 namespace esphome {
 namespace luxpower_sna {
-class LuxPowerInverterComponent; // This is the forward declaration
+class LuxPowerInverterComponent;
 } // namespace luxpower_sna
 } // namespace esphome
 
@@ -23,7 +21,7 @@ public:
   // Constructor
   LuxpowerSnaSensor(const std::string &name, uint16_t register_address, LuxpowerRegType reg_type, uint8_t bank);
 
-  // ESPHome lifecycle methods (if implemented in luxpower_sna_sensor.cpp)
+  // ESPHome lifecycle methods (should now correctly override from sensor::Sensor's base Component)
   void setup() override;
   void dump_config() override;
   void loop() override;
@@ -33,13 +31,14 @@ public:
 
   // Getters for sensor properties
   uint16_t get_register_address() const { return register_address_; }
-  LuxpowerRegType get_reg_type() const { return reg_type_; }
+  LuxpowerRegType get_reg_type() const { return reg_type_; } // Accesses the corrected member name
   uint8_t get_bank() const { return bank_; }
 
 protected:
   LuxPowerInverterComponent *parent_; // Pointer to the main inverter component
   uint16_t register_address_;
-  LuxpowerRegtype reg_type_;
+  // TYPO FIXED: Changed 'LuxpowerRegtype' to 'LuxpowerRegType'
+  LuxpowerRegType reg_type_; // <--- CORRECTED TYPO HERE
   uint8_t bank_;
 };
 
