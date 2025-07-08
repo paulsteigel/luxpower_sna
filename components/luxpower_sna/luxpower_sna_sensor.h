@@ -2,7 +2,7 @@
 #pragma once
 
 #include "esphome/components/sensor/sensor.h" // For the base sensor::Sensor class
-#include "luxpower_sna_constants.h"          // <--- ADDED: For LuxpowerRegType enum definition
+#include "luxpower_sna_constants.h"          // <--- This should be line 4 or close to it
 #include <string>                            // For std::string
 #include <cstdint>                           // For uint16_t, uint8_t
 
@@ -11,7 +11,7 @@
 // without needing its full definition here. This prevents circular includes.
 namespace esphome {
 namespace luxpower_sna {
-class LuxPowerInverterComponent; // <--- ADDED: Forward declaration
+class LuxPowerInverterComponent; // This is the forward declaration
 } // namespace luxpower_sna
 } // namespace esphome
 
@@ -24,7 +24,6 @@ public:
   LuxpowerSnaSensor(const std::string &name, uint16_t register_address, LuxpowerRegType reg_type, uint8_t bank);
 
   // ESPHome lifecycle methods (if implemented in luxpower_sna_sensor.cpp)
-  // These should be declared here if they are defined in your .cpp file.
   void setup() override;
   void dump_config() override;
   void loop() override;
@@ -40,7 +39,7 @@ public:
 protected:
   LuxPowerInverterComponent *parent_; // Pointer to the main inverter component
   uint16_t register_address_;
-  LuxpowerRegType reg_type_;
+  LuxpowerRegtype reg_type_;
   uint8_t bank_;
 };
 
