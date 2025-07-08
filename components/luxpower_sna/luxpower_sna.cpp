@@ -15,8 +15,14 @@ void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "LuxpowerSNA Hub:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%d", this->host_.c_str(), this->port_);
   LOG_UPDATE_INTERVAL(this);
+  
+  // --- CORRECTED PART ---
+  // We cannot use LOG_SENSOR with a dynamic key.
+  // We must use a standard logger instead.
+  ESP_LOGCONFIG(TAG, "  Configured Sensors:");
   for (auto const& [key, val] : this->sensors_) {
-    LOG_SENSOR("  ", key.c_str(), val);
+    // Log the sensor type (the key) and its friendly name
+    ESP_LOGCONFIG(TAG, "    - Type: '%s', Name: '%s'", key.c_str(), val->get_name().c_str());
   }
 }
 
@@ -108,15 +114,12 @@ void LuxpowerSNAComponent::handle_packet_(void *arg, AsyncClient *client, void *
   float power_from_grid = (raw[43] << 8 | raw[44]);
   float daily_solar_gen = (raw[59] << 8 | raw[60]) / 10.0f;
 
-  // --- UPDATED to use standard keys ---
-  // Publish to a sensor ONLY if it has been registered
   if (this->sensors_.count("voltage")) {
     this->sensors_["voltage"]->publish_state(battery_voltage);
   }
   if (this->sensors_.count("current")) {
     this->sensors_["current"]->publish_state(battery_current);
   }
-  // These custom ones were already correct
   if (this->sensors_.count("battery_capacity_ah")) {
     this->sensors_["battery_capacity_ah"]->publish_state(battery_capacity_ah);
   }
