@@ -9,7 +9,7 @@
 #include "luxpower_sna_sensor.h"      // For LuxpowerSnaSensor class definition
 #include "luxpower_sna_constants.h"   // For LuxpowerRegType enum and other constants
 
-#include <functional> // For std::bind and std::placeholders
+#include <functional> // For std::bind and std::placeholders (though simplified below)
 #include <algorithm>  // For std::min, std::max (if used in future logic)
 #include <cmath>      // For NAN (Not-a-Number)
 #include <deque>      // For std::deque (rx_buffer_)
@@ -24,7 +24,7 @@ LuxPowerInverterComponent::LuxPowerInverterComponent() : Component() {
   this->client_ = new AsyncClient();
   this->client_connected_ = false;
   this->last_request_time_ = 0;
-  this->last_connect_attempt_ = 0;
+  this->last_connection_attempt_time_ = 0; // <--- CORRECTED NAME HERE
   // Default values for host/port/serials, will be overridden by YAML config
   this->inverter_host_ = "";
   this->inverter_port_ = 0;
@@ -42,11 +42,11 @@ void LuxPowerInverterComponent::setup() {
   ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", this->inverter_serial_number_.c_str());
   ESP_LOGCONFIG(TAG, "  Update Interval: %u ms", (uint32_t) this->update_interval_.count());
 
-  // Bind callbacks for AsyncClient events
-  this->client_->onConnect(std::bind(&LuxPowerInverterComponent::on_connect_cb, this, std::placeholders::_1, std::placeholders::_2));
-  this->client_->onDisconnect(std::bind(&LuxPowerInverterComponent::on_disconnect_cb, this, std::placeholders::_1, std::placeholders::_2));
-  this->client_->onData(std::bind(&LuxPowerInverterComponent::on_data_cb, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-  this->client_->onError(std::bind(&LuxPowerInverterComponent::on_error_cb, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+  // Bind callbacks for AsyncClient events - CORRECTED BINDING FOR STATIC MEMBERS
+  this->client_->onConnect(&LuxPowerInverterComponent::on_connect_cb, this);
+  this->client_->onDisconnect(&LuxPowerInverterComponent::on_disconnect_cb, this);
+  this->client_->onData(&LuxPowerInverterComponent::on_data_cb, this);
+  this->client_->onError(&LuxPowerInverterComponent::on_error_cb, this);
 
   // Attempt initial connection
   this->connect_to_inverter();
@@ -56,7 +56,7 @@ void LuxPowerInverterComponent::setup() {
 void LuxPowerInverterComponent::loop() {
   // Connection management: Periodically attempt to reconnect if not currently connected
   if (!this->is_connected()) {
-    if (millis() - this->last_connect_attempt_ > this->connect_retry_interval_) {
+    if (millis() - this->last_connection_attempt_time_ > this->connect_retry_interval_) { // <--- CORRECTED NAME HERE
       ESP_LOGD(TAG, "Client not connected, attempting reconnect to %s:%u", this->inverter_host_.c_str(), this->inverter_port_);
       this->connect_to_inverter();
     }
@@ -188,7 +188,6 @@ void LuxPowerInverterComponent::dump_config() {
   }
   for (auto *s : this->luxpower_sensors_) {
     // Use LOG_SENSOR for standard ESPHome sensor config output
-    // Note: You'll need to pass the LuxpowerSnaSensor object, not just its name/address directly
     LOG_SENSOR("  ", "Sensor", s);
   }
 }
@@ -210,7 +209,7 @@ bool LuxPowerInverterComponent::connect_to_inverter() {
     return true;
   }
 
-  this->last_connect_attempt_ = millis();
+  this->last_connection_attempt_time_ = millis(); // <--- CORRECTED NAME HERE
   ESP_LOGI(TAG, "Connecting to LuxPower Inverter at %s:%u...", this->inverter_host_.c_str(), this->inverter_port_);
 
   if (!this->client_->connect(this->inverter_host_.c_str(), this->inverter_port_)) {
@@ -251,7 +250,7 @@ bool LuxPowerInverterComponent::send_data(const std::vector<uint8_t>& data) {
 }
 
 // --- AsyncTCP Callbacks ---
-
+// Ensure these functions are STATIC as declared in header
 void LuxPowerInverterComponent::on_connect_cb(void *arg, AsyncClient *client) {
   LuxPowerInverterComponent *comp = static_cast<LuxPowerInverterComponent*>(arg);
   ESP_LOGI(TAG, "Connected to LuxPower Inverter!");
@@ -421,7 +420,7 @@ bool LuxPowerInverterComponent::parse_luxpower_response_packet(const std::vector
 
     // 5. Verify CRC
     // CRC is 2 bytes, but the order is usually LSB then MSB in Modbus/LuxPower
-    uint16_t received_crc = (static_cast<uint16_t>(response_packet[actual_total_length - 2]) << 8) | response_packet[actual_total_length - 3];
+    uint16_t received_crc = (static_cast<uint16_t>(payload_for_crc[payload_for_crc.size() - 1]) << 8) | payload_for_crc[payload_for_crc.size() - 2];
     uint16_t calculated_crc = calculate_luxpower_crc16(payload_for_crc);
 
     if (received_crc != calculated_crc) {
@@ -469,4 +468,89 @@ bool LuxPowerInverterComponent::interpret_modbus_read_holding_registers_payload(
     }
 
     uint8_t byte_count = payload[1];
-    if (byte_count != (expected_num_registers *
+    if (byte_count != (expected_num_registers * 2)) {
+        ESP_LOGW(TAG, "Modbus Byte Count mismatch in payload. Expected %u, got %u", (expected_num_registers * 2), byte_count);
+        return false;
+    }
+    if (payload.size() < (2 + byte_count)) { // 2 bytes header + byte_count for data
+        ESP_LOGW(TAG, "Modbus response data truncated in payload. Expected %u bytes, got %u", (2 + byte_count), payload.size());
+        return false;
+    }
+
+    this->current_raw_registers_.clear();
+    for (uint16_t i = 0; i < expected_num_registers; ++i) {
+        // Data starts from index 2 in the payload
+        uint16_t reg_value = (static_cast<uint16_t>(payload[2 + (i * 2)]) << 8) | payload[3 + (i * 2)];
+        this->current_raw_registers_[expected_start_address + i] = reg_value;
+    }
+
+    ESP_LOGD(TAG, "Successfully interpreted Modbus FC 0x03 payload for %u registers starting at 0x%04X", expected_num_registers, expected_start_address);
+    return true;
+}
+
+// get_sensor_value_() implementation: Converts raw register values to sensor values
+float LuxPowerInverterComponent::get_sensor_value_(uint16_t raw_value, LuxpowerRegType reg_type) {
+  switch (reg_type) {
+    case LUX_REG_TYPE_INT:
+      return static_cast<float>(raw_value);
+    case LUX_REG_TYPE_FLOAT_DIV10:
+      return static_cast<float>(raw_value) / 10.0f;
+    case LUX_REG_TYPE_SIGNED_INT:
+      return static_cast<float>(static_cast<int16_t>(raw_value)); // Cast to signed 16-bit
+    case LUX_REG_TYPE_FIRMWARE: {
+      // For firmware, assuming raw_value is part of a larger sequence or needs special handling.
+      // This function typically decodes a single register. Firmware is multi-register.
+      // Returning NAN here is appropriate, as the string decoding happens elsewhere.
+      return NAN;
+    }
+    case LUX_REG_TYPE_MODEL: {
+      // Similar to firmware, model is multi-register and string-based.
+      return NAN;
+    }
+    case LUX_REG_TYPE_BITMASK:
+    case LUX_REG_TYPE_TIME_MINUTES:
+      return static_cast<float>(raw_value);
+    default:
+      ESP_LOGW(TAG, "Unknown LuxpowerRegType: %d. Returning NAN.", static_cast<int>(reg_type));
+      return NAN;
+  }
+}
+
+// get_firmware_version_() implementation
+std::string LuxPowerInverterComponent::get_firmware_version_(const std::vector<uint16_t>& data) {
+  // Expects 5 registers for firmware (10 characters)
+  if (data.size() < 5) return "";
+  char buffer[11]; // 10 chars + null terminator
+  buffer[0] = (data[0] >> 8) & 0xFF;
+  buffer[1] = data[0] & 0xFF;
+  buffer[2] = (data[1] >> 8) & 0xFF;
+  buffer[3] = data[1] & 0xFF;
+  buffer[4] = (data[2] >> 8) & 0xFF;
+  buffer[5] = data[2] & 0xFF;
+  buffer[6] = (data[3] >> 8) & 0xFF;
+  buffer[7] = data[3] & 0xFF;
+  buffer[8] = (data[4] >> 8) & 0xFF;
+  buffer[9] = data[4] & 0xFF;
+  buffer[10] = '\0';
+  return std::string(buffer);
+}
+
+// get_model_name_() implementation
+std::string LuxPowerInverterComponent::get_model_name_(const std::vector<uint16_t>& data) {
+  // Expects 4 registers for model (8 characters)
+  if (data.size() < 4) return "";
+  char buffer[9]; // 8 chars + null terminator
+  buffer[0] = (data[0] >> 8) & 0xFF;
+  buffer[1] = data[0] & 0xFF;
+  buffer[2] = (data[1] >> 8) & 0xFF;
+  buffer[3] = data[1] & 0xFF;
+  buffer[4] = (data[2] >> 8) & 0xFF;
+  buffer[5] = data[2] & 0xFF;
+  buffer[6] = (data[3] >> 8) & 0xFF;
+  buffer[7] = data[3] & 0xFF;
+  buffer[8] = '\0';
+  return std::string(buffer);
+}
+
+} // namespace luxpower_sna
+} // namespace esphome
