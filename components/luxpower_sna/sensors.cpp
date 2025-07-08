@@ -1,5 +1,5 @@
-// components/luxpower_sna/luxpower_sna_sensor.cpp
-#include "luxpower_sna_sensor.h"
+// components/luxpower_sna/sensors.cpp
+#include "sensors.h"
 #include "luxpower_inverter.h" // Include the main component header
 #include "esphome/core/log.h"
 
