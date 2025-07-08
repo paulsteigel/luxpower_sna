@@ -24,6 +24,9 @@ uint16_t calculate_crc16(const uint8_t *data, size_t length);
 // Define the LuxpowerInverterComponent class, inheriting from PollingComponent
 // PollingComponent provides the update() method that will be called periodically
 class LuxpowerInverterComponent : public PollingComponent { // Class name changed
+  // Grant LuxpowerPacket access to protected/private members of this class
+  friend class LuxpowerPacket; // Added friend declaration
+
  public:
   // Constructor: Initializes the component with a default update interval.
   // The update interval can be overridden by the YAML configuration.
@@ -68,8 +71,7 @@ class LuxpowerInverterComponent : public PollingComponent { // Class name change
   static void onData(void *arg, AsyncClient *client, void *data, size_t len);
   // Callback for when data is sent
   static void onAck(void *arg, AsyncClient *client, size_t len, uint32_t time);
-  // Callback for write buffer full
-  static void onWriteBufferFull(void *arg, AsyncClient *client, size_t len);
+  // Removed: static void onWriteBufferFull(void *arg, AsyncClient *client, size_t len);
   // Callback for error
   static void onError(void *arg, AsyncClient *client, int8_t error);
 
