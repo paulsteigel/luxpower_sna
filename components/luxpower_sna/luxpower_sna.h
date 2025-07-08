@@ -8,7 +8,7 @@
 #ifdef USE_ESP32
 #include <AsyncTCP.h>
 #elif USE_ESP8266
-#include <ESPAsyncTCP.hh>
+#include <ESPAsyncTCP.h>
 #endif
 
 namespace esphome {
