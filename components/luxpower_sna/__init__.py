@@ -8,8 +8,9 @@ from esphome.const import (
 from esphome.components import sensor
 
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
-LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", cg.Component)
-LuxpowerSnaSensor = luxpower_sna_ns.class_("LuxpowerSnaSensor", sensor.Sensor) # Class name remains the same
+# CORRECTED LINE: Reference the actual C++ class name "LuxPowerInverter"
+LuxPowerInverter = luxpower_sna_ns.class_("LuxPowerInverter", cg.Component)
+LuxpowerSnaSensor = luxpower_sna_ns.class_("LuxpowerSnaSensor", sensor.Sensor)
 
 LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType")
 LUX_REG_TYPES = {
@@ -51,7 +52,8 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(LuxPowerInverterComponent),
+        # CORRECTED LINE: Reference the updated Python variable for LuxPowerInverter
+        cv.GenerateID(): cv.declare_id(LuxPowerInverter),
         cv.Required(CONF_HOST): cv.string,
         cv.Required(CONF_PORT): cv.port,
         cv.Required(CONF_DONGLE_SERIAL): cv.string,
@@ -65,9 +67,11 @@ CONFIG_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
+    # CORRECTED LINE: Instantiate the LuxPowerInverter class
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
+    # These setter methods will need to be added to LuxPowerInverter class in .h and .cpp
     cg.add(var.set_inverter_host(config[CONF_HOST]))
     cg.add(var.set_inverter_port(config[CONF_PORT]))
     cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
@@ -78,6 +82,7 @@ async def to_code(config):
         for sens_config in config[CONF_SENSORS]:
             sens = cg.new_Pvariable(sens_config[CONF_ID])
             await sensor.register_sensor(sens, sens_config)
+            # This method (add_luxpower_sensor) will need to be added to LuxPowerInverter class
             cg.add(var.add_luxpower_sensor(sens,
                                             sens_config[CONF_NAME],
                                             sens_config[CONF_REGISTER_ADDRESS],
