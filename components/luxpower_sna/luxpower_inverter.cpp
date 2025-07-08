@@ -31,10 +31,10 @@ void LuxPowerInverter::loop() {
       this->client_.stop(); // Ensure any previous connection is closed
       if (this->client_.connect(this->host_.c_str(), this->port_)) {
         ESP_LOGI(TAG, "Successfully connected to LuxPower Inverter!");
-        this->status_set_ok(); // Corrected call: removed underscore
+        this->status_set_ok();
       } else {
         ESP_LOGW(TAG, "Failed to connect to LuxPower Inverter. Client status: %d", this->client_.status());
-        this->status_set_warning("Connection Failed"); // Corrected call: removed underscore, added message
+        this->status_set_warning("Connection Failed"); // This call is correct as per the .h file
       }
       this->last_connect_attempt_ = now; // Update timestamp of this connection attempt
       this->data_buffer_.clear();       // Clear buffer on (re)connection attempt to avoid stale data
@@ -94,12 +94,17 @@ void LuxPowerInverter::parse_and_publish_register(uint16_t reg_address, uint16_t
     // and publish them, e.g., this->voltage_sensor_->publish_state(value / 10.0f);
 }
 
-void LuxPowerInverter::status_set_warning() {
-    this->status_set_warning("Inverter Warning"); // Calls the public method from Component
+// Corrected: The definition must match the declaration in the .h file, including the parameter.
+void LuxPowerInverter::status_set_warning(const std::string &message) {
+    // Call the base Component's status_set_warning method.
+    // ESPHome provides a public status_set_warning that accepts a const char*
+    // Convert std::string to const char*
+    Component::status_set_warning(message.c_str());
 }
 
 void LuxPowerInverter::status_set_ok() {
-    this->status_clear_warning(); // Calls the public method from Component
+    // Call the base Component's status_clear_warning method.
+    this->status_clear_warning();
 }
 
 } // namespace luxpower_sna
