@@ -39,7 +39,7 @@ CONF_IS_SIGNED = "is_signed"
 SENSOR_SCHEMA = sensor.SENSOR_SCHEMA.extend({
     cv.GenerateID(): cv.declare_id(LuxpowerSnaSensor), # Each sensor needs an ID
     cv.Required("name"): cv.string, # Sensor name
-    cv.Required(CONF_REGISTER_ADDRESS): cv.hex_uint16, # Register address as hex (e.g., 0x007D)
+    cv.Required(CONF_REGISTER_ADDRESS): cv.hex_uint16_t, # Corrected: Register address as hex (e.g., 0x007D)
     cv.Optional(CONF_DIVISOR, default=1.0): cv.float_, # Divisor for scaling (e.g., 10.0 for 0.1 precision)
     cv.Optional(CONF_IS_SIGNED, default=False): cv.boolean, # Whether the register value is signed
 }).extend(cv.polling_component_schema("60s")) # Sensors can have their own update interval if desired
