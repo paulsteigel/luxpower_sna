@@ -2,7 +2,6 @@
 #include "luxpower_inverter.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
-// No longer need esphome/core/defines.h for ESP_LOG_BUFFER_HEXDUMP, as we're implementing our own
 // #include <arpa/inet.h> // Removed: This header is not available on ESP32
 
 namespace esphome {
@@ -321,7 +320,7 @@ void LuxpowerInverterComponent::send_packet_(const std::vector<uint8_t>& packet)
     }
 
     ESP_LOGD(TAG, "Sending packet of %u bytes.", packet.size());
-    this->log_buffer_hexdump_(TAG, packet.data(), packet.size(), esphome::LogLevel::LOG_LEVEL_VERBOSE); // Use custom hexdump
+    this->log_buffer_hexdump_(TAG, packet.data(), packet.size(), esphome::log::LOG_LEVEL_VERBOSE); // Use custom hexdump
 
     this->client_.write(reinterpret_cast<const char*>(packet.data()), packet.size());
 }
@@ -333,7 +332,7 @@ void LuxpowerInverterComponent::process_received_data_() {
     // Log the current state of the receive buffer before processing
     if (!this->receive_buffer_.empty()) {
         ESP_LOGV(TAG, "Receive buffer before processing (%u bytes):", this->receive_buffer_.size());
-        this->log_buffer_hexdump_(TAG, this->receive_buffer_.data(), this->receive_buffer_.size(), esphome::LogLevel::LOG_LEVEL_VERBOSE); // Use custom hexdump
+        this->log_buffer_hexdump_(TAG, this->receive_buffer_.data(), this->receive_buffer_.size(), esphome::log::LOG_LEVEL_VERBOSE); // Use custom hexdump
     }
 
     while (this->receive_buffer_.size() >= 4) { // Minimum size for header (AA 55 Len1 Len2)
@@ -417,7 +416,7 @@ void LuxpowerInverterComponent::onData(void *arg, AsyncClient *client, void *dat
   LuxpowerInverterComponent *comp = static_cast<LuxpowerInverterComponent *>(arg);
   ESP_LOGD(TAG, "Received %u bytes from inverter.", len);
 
-  comp->log_buffer_hexdump_(TAG, static_cast<const uint8_t*>(data), len, esphome::LogLevel::LOG_LEVEL_VERBOSE); // Use custom hexdump
+  comp->log_buffer_hexdump_(TAG, static_cast<const uint8_t*>(data), len, esphome::log::LOG_LEVEL_VERBOSE); // Use custom hexdump
 
   const uint8_t* byte_data = static_cast<const uint8_t*>(data);
   comp->receive_buffer_.insert(comp->receive_buffer_.end(), byte_data, byte_data + len);
@@ -437,9 +436,9 @@ void LuxpowerInverterComponent::onError(void *arg, AsyncClient *client, int8_t e
 }
 
 // --- Custom Hexdump Logger Implementation ---
-void LuxpowerInverterComponent::log_buffer_hexdump_(const char* tag, const uint8_t* buffer, size_t len, esphome::LogLevel level) {
+void LuxpowerInverterComponent::log_buffer_hexdump_(const char* tag, const uint8_t* buffer, size_t len, esphome::log::LogLevel level) {
     if (len == 0) {
-        ESP_LOG_LEVEL(level, tag, "Buffer is empty.");
+        ESPHOME_LOG_LEVEL(level, tag, "Buffer is empty.");
         return;
     }
 
@@ -469,7 +468,7 @@ void LuxpowerInverterComponent::log_buffer_hexdump_(const char* tag, const uint8
                     hex_line += "   "; // 3 spaces for each missing hex byte
                 }
             }
-            ESP_LOG_LEVEL(level, tag, "%s %s", hex_line.c_str(), ascii_line.c_str());
+            ESPHOME_LOG_LEVEL(level, tag, "%s %s", hex_line.c_str(), ascii_line.c_str());
             hex_line.clear();
             ascii_line.clear();
         }
