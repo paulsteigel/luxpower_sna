@@ -487,5 +487,80 @@ std::string LuxPowerInverterComponent::get_model_name_(const std::vector<uint16_
   return std::string(buffer);
 }
 
+// In luxpower_inverter.cpp
+
+void LuxPowerInverter::parse_luxpower_response_packet(
+    const std::vector<uint8_t> &data) {
+  this->rx_count_++;
+  if (data.size() < LUXPOWER_A1_MIN_LENGTH) {
+    ESP_LOGW(TAG, "A1 response too short (%zu bytes)!", data.size());
+    this->status_set_warning();
+    return;
+  }
+
+  // A1 prefix already checked by the loop() function caller
+
+  // uint16_t protocol_number = (data[3] << 8) | data[2]; // Bytes 2-3: Protocol number (always 0x012C or 300)
+  uint16_t frame_length = (data[5] << 8) | data[4]; // Bytes 4-5: Frame Length (length from byte 6 to CRC)
+
+  // Verify calculated packet length against actual received length
+  uint16_t calculated_packet_length = frame_length + 6; // 6 bytes for prefix (2), protocol (2), frame_length (2)
+  if (data.size() != calculated_packet_length) {
+    ESP_LOGW(TAG, "A1 response length mismatch! Expected %u, got %zu.",
+             calculated_packet_length, data.size());
+    this->status_set_warning();
+    return;
+  }
+
+  uint8_t tcp_function_code = data[6]; // Byte 6: TCP Function Code (0xC2 or 194 for TRANSLATED_DATA)
+  // std::vector<uint8_t> dongle_serial(data.begin() + 7, data.begin() + 17); // Bytes 7-16: Dongle Serial (10 bytes)
+
+  uint16_t modbus_data_length = (data[18] << 8) | data[17]; // Bytes 17-18: Data Length (byte length of actual Modbus payload)
+  uint8_t address_action = data[19]; // Byte 19: Address Action (0x01 for read)
+  uint8_t modbus_function_code = data[20]; // Byte 20: Modbus Function Code (e.g., 0x04 Read Input, 0x03 Read Holding)
+  // std::vector<uint8_t> inverter_serial(data.begin() + 21, data.begin() + 31); // Bytes 21-30: Inverter Serial (10 bytes)
+  uint16_t modbus_start_register = (data[32] << 8) | data[31]; // Bytes 31-32: Starting Register (Modbus address)
+  uint16_t number_of_registers = (data[34] << 8) | data[33]; // Bytes 33-34: Number of Registers (count of 16-bit registers)
+
+  // The actual Modbus payload starts at offset 35
+  const uint8_t *modbus_payload_ptr = &data[35];
+
+  if (modbus_data_length != (number_of_registers * 2)) {
+      ESP_LOGW(TAG, "A1 response Modbus data length mismatch! Expected %u, got %u.",
+               number_of_registers * 2, modbus_data_length);
+      this->status_set_warning();
+      return;
+  }
+
+  // Handle different Modbus function codes
+  if (modbus_function_code == MODBUS_CMD_READ_INPUT_REGISTER) { // 0x04
+    // Process input registers
+    ESP_LOGD(TAG, "Received A1 Read Input Registers response for registers %u-%u, length %u",
+             modbus_start_register, modbus_start_register + number_of_registers - 1, number_of_registers);
+
+    for (int i = 0; i < number_of_registers; ++i) {
+      uint16_t reg_address = modbus_start_register + i;
+      // Modbus values are typically big-endian, matching LXPPacket.py's struct.unpack(">H")
+      uint16_t value = (modbus_payload_ptr[(i * 2) + 1] << 8) | modbus_payload_ptr[i * 2];
+      this->parse_and_publish_register(reg_address, value);
+    }
+    this->status_set_ok();
+  } else if (modbus_function_code == MODBUS_CMD_READ_HOLDING_REGISTER) { // 0x03
+    // Process holding registers
+    ESP_LOGD(TAG, "Received A1 Read Holding Registers response for registers %u-%u, length %u",
+             modbus_start_register, modbus_start_register + number_of_registers - 1, number_of_registers);
+    for (int i = 0; i < number_of_registers; ++i) {
+      uint16_t reg_address = modbus_start_register + i;
+      // Modbus values are typically big-endian, matching LXPPacket.py's struct.unpack(">H")
+      uint16_t value = (modbus_payload_ptr[(i * 2) + 1] << 8) | modbus_payload_ptr[i * 2];
+      this->parse_and_publish_register(reg_address, value);
+    }
+    this->status_set_ok();
+  } else {
+    ESP_LOGW(TAG, "Unsupported Modbus function code in A1 packet: 0x%02X", modbus_function_code);
+    this->status_set_warning();
+  }
+}
+
 } // namespace luxpower_sna
 } // namespace esphome
