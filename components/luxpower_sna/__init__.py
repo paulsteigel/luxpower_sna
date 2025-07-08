@@ -1,7 +1,7 @@
 # custom_components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-# Import only constants that are most reliably available from esphome.const for general usage
+# Import only core constants that should be available from esphome.const for general usage
 from esphome.const import (
     CONF_ID, CONF_NAME, CONF_UNIT_OF_MEASUREMENT, CONF_DEVICE_CLASS,
     CONF_STATE_CLASS, CONF_ACCURACY_DECIMALS, CONF_ICON
@@ -14,7 +14,8 @@ LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", 
 LuxpowerSensor = luxpower_sna_ns.class_("LuxpowerSensor", sensor.Sensor)
 
 # Enum for register types (must match C++ enum in luxpower_inverter.h)
-LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType", is_declaration=True)
+# REMOVED 'is_declaration=True' as it's no longer supported
+LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType")
 LUX_REG_TYPES = {
     "INT": LuxpowerRegType.LUX_REG_TYPE_INT,
     "FLOAT_DIV10": LuxpowerRegType.LUX_REG_TYPE_FLOAT_DIV10,
@@ -30,7 +31,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_SENSORS = "sensors"
-CONF_UNIQUE_ID = "unique_id" # Defined locally now
+CONF_UNIQUE_ID = "unique_id"
 
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
@@ -46,7 +47,7 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
     state_class=cv.Optional(CONF_STATE_CLASS),
     accuracy_decimals=cv.Optional(CONF_ACCURACY_DECIMALS),
     icon=cv.Optional(CONF_ICON),
-    unique_id=cv.Optional(CONF_UNIQUE_ID), # Use locally defined CONF_UNIQUE_ID
+    unique_id=cv.Optional(CONF_UNIQUE_ID),
 ).extend(
     {
         cv.GenerateID(): cv.declare_id(LuxpowerSensor),
@@ -60,12 +61,12 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(LuxPowerInverterComponent),
-        cv.Required(CONF_HOST): cv.string, # Use locally defined CONF_HOST
-        cv.Required(CONF_PORT): cv.port,   # Use locally defined CONF_PORT
+        cv.Required(CONF_HOST): cv.string,
+        cv.Required(CONF_PORT): cv.port,
         cv.Required(CONF_DONGLE_SERIAL): cv.string,
         cv.Required(CONF_INVERTER_SERIAL_NUMBER): cv.string,
-        cv.Optional(CONF_UPDATE_INTERVAL, default="60s"): cv.update_interval, # Use locally defined CONF_UPDATE_INTERVAL
-        cv.Optional(CONF_SENSORS): cv.All( # Use locally defined CONF_SENSORS
+        cv.Optional(CONF_UPDATE_INTERVAL, default="60s"): cv.update_interval,
+        cv.Optional(CONF_SENSORS): cv.All(
             cv.ensure_list(LUXPOWER_SENSOR_SCHEMA),
             cv.Length(min=1)
         ),
@@ -78,13 +79,13 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cg.add(var.set_inverter_host(config[CONF_HOST])) # Use locally defined CONF_HOST
-    cg.add(var.set_inverter_port(config[CONF_PORT])) # Use locally defined CONF_PORT
+    cg.add(var.set_inverter_host(config[CONF_HOST]))
+    cg.add(var.set_inverter_port(config[CONF_PORT]))
     cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
     cg.add(var.set_inverter_serial_number(config[CONF_INVERTER_SERIAL_NUMBER]))
-    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL])) # Use locally defined CONF_UPDATE_INTERVAL
+    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
 
-    if CONF_SENSORS in config: # Use locally defined CONF_SENSORS
+    if CONF_SENSORS in config:
         for sens_config in config[CONF_SENSORS]:
             sens = cg.new_Pvariable(sens_config[CONF_ID])
             await sensor.register_sensor(sens, sens_config)
