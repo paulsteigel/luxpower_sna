@@ -76,8 +76,13 @@ async def to_code(config):
     )
     await cg.register_component(var, config)
 
-    # Removed individual setter calls for host, port, update_interval, dongle_serial, inverter_serial_number
-    # as they are now handled by the constructor.
+    # These setter calls are removed because the values are now passed via the constructor.
+    # Make sure these lines are NOT present in your __init__.py file:
+    # cg.add(var.set_inverter_host(config[CONF_HOST]))
+    # cg.add(var.set_inverter_port(config[CONF_PORT]))
+    # cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
+    # cg.add(var.set_inverter_serial_number(config[CONF_INVERTER_SERIAL_NUMBER]))
+    # cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
 
     if CONF_SENSORS in config:
         for sens_config in config[CONF_SENSORS]:
