@@ -1,27 +1,37 @@
+// components/luxpower_sna/luxpower_sna_sensor.h
 #pragma once
 
 #include "esphome/components/sensor/sensor.h"
-#include "luxpower_inverter.h" // Include this to get LuxpowerRegType definition
+#include "esphome/core/component.h"
+#include "esphome/core/log.h"
+#include <map> // For std::map<uint16_t, uint16_t>
+#include <string>
 
 namespace esphome {
 namespace luxpower_sna {
 
+// Forward declaration of the main component
+class LuxpowerSnaComponent;
+
 class LuxpowerSnaSensor : public sensor::Sensor {
-public:
-  // Setters for internal variables
-  void set_register_address(uint16_t reg_address) { this->register_address_ = reg_address; }
-  void set_reg_type(LuxpowerRegType reg_type) { this->reg_type_ = reg_type; }
-  void set_bank(uint8_t bank) { this->bank_ = bank; }
+ public:
+  // Set the parent component (LuxpowerSnaComponent)
+  void set_parent(LuxpowerSnaComponent *parent) { this->parent_ = parent; }
+  // Set the register address this sensor will read from
+  void set_register_address(uint16_t address) { this->register_address_ = address; }
+  // Set the factor to divide the raw register value by (e.g., 10 for 0.1 precision)
+  void set_divisor(float divisor) { this->divisor_ = divisor; }
+  // Set whether the value is signed
+  void set_is_signed(bool is_signed) { this->is_signed_ = is_signed; }
 
-  // Getters for internal variables
-  uint16_t get_register_address() const { return this->register_address_; }
-  LuxpowerRegType get_reg_type() const { return this->reg_type_; }
-  uint8_t get_bank() const { return this->bank_; }
+  // This method will be called by the main component when new data is available.
+  void update_value(const std::map<uint16_t, uint16_t>& register_values);
 
-protected:
-  uint16_t register_address_; // The Modbus register address this sensor reads from
-  LuxpowerRegType reg_type_;  // The type of register (e.g., INT, FLOAT_DIV10)
-  uint8_t bank_;              // The data bank for the register (if applicable)
+ protected:
+  LuxpowerSnaComponent *parent_{nullptr};
+  uint16_t register_address_{0};
+  float divisor_{1.0f}; // Default to no division
+  bool is_signed_{false}; // Default to unsigned
 };
 
 } // namespace luxpower_sna
