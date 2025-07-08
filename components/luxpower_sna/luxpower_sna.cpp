@@ -61,7 +61,8 @@ void LuxpowerSNAComponent::request_data_() {
     this->tcp_client_ = nullptr;
   }, nullptr);
 
-  if (!this->tcp_client_->connect(this->host_.c_c_str(), this->port_)) {
+  // --- THE FIX: Corrected .c_c_str() to .c_str() ---
+  if (!this->tcp_client_->connect(this->host_.c_str(), this->port_)) {
     ESP_LOGW(TAG, "Failed to initiate connection.");
     delete this->tcp_client_;
     this->tcp_client_ = nullptr;
