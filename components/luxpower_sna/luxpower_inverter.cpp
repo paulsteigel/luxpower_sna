@@ -9,13 +9,13 @@
 #include "sensors.h"      // For LuxpowerSnaSensor class definition
 #include "consts.h"   // For LuxpowerRegType enum and other constants
 
-#include <functional> // For std::bind and std::placeholders (though simplified below)
+#include <functional> // Included for general C++ features, but specific bind usage is simplified
 #include <algorithm>  // For std::min, std::max (if used in future logic)
 #include <cmath>      // For NAN (Not-a-Number)
 #include <deque>      // For std::deque (rx_buffer_)
 
 namespace esphome {
-namespace luxpower_sna { // <--- CORRECTED NAMESPACE
+namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna.inverter"; // Tag for logging in this component
 
@@ -24,7 +24,9 @@ LuxPowerInverterComponent::LuxPowerInverterComponent() : Component() {
   this->client_ = new AsyncClient();
   this->client_connected_ = false;
   this->last_request_time_ = 0;
-  this->last_connection_attempt_time_ = 0; // <--- CORRECTED NAME HERE
+  // --- START FIX for 'last_connect_attempt_' ---
+  this->last_connection_attempt_time_ = 0;
+  // --- END FIX ---
   // Default values for host/port/serials, will be overridden by YAML config
   this->inverter_host_ = "";
   this->inverter_port_ = 0;
@@ -43,10 +45,12 @@ void LuxPowerInverterComponent::setup() {
   ESP_LOGCONFIG(TAG, "  Update Interval: %u ms", (uint32_t) this->update_interval_.count());
 
   // Bind callbacks for AsyncClient events - CORRECTED BINDING FOR STATIC MEMBERS
+  // --- START FIX for AsyncClient callbacks ---
   this->client_->onConnect(&LuxPowerInverterComponent::on_connect_cb, this);
   this->client_->onDisconnect(&LuxPowerInverterComponent::on_disconnect_cb, this);
   this->client_->onData(&LuxPowerInverterComponent::on_data_cb, this);
   this->client_->onError(&LuxPowerInverterComponent::on_error_cb, this);
+  // --- END FIX ---
 
   // Attempt initial connection
   this->connect_to_inverter();
@@ -56,7 +60,7 @@ void LuxPowerInverterComponent::setup() {
 void LuxPowerInverterComponent::loop() {
   // Connection management: Periodically attempt to reconnect if not currently connected
   if (!this->is_connected()) {
-    if (millis() - this->last_connection_attempt_time_ > this->connect_retry_interval_) { // <--- CORRECTED NAME HERE
+    if (millis() - this->last_connection_attempt_time_ > this->connect_retry_interval_) {
       ESP_LOGD(TAG, "Client not connected, attempting reconnect to %s:%u", this->inverter_host_.c_str(), this->inverter_port_);
       this->connect_to_inverter();
     }
@@ -209,7 +213,7 @@ bool LuxPowerInverterComponent::connect_to_inverter() {
     return true;
   }
 
-  this->last_connection_attempt_time_ = millis(); // <--- CORRECTED NAME HERE
+  this->last_connection_attempt_time_ = millis();
   ESP_LOGI(TAG, "Connecting to LuxPower Inverter at %s:%u...", this->inverter_host_.c_str(), this->inverter_port_);
 
   if (!this->client_->connect(this->inverter_host_.c_str(), this->inverter_port_)) {
