@@ -7,7 +7,7 @@ namespace esphome {
 namespace luxpower_sna {
 
 // Luxpower Protocol Constants
-const uint8_t LUXPOWER_START_BYTE = 0x68; // Start of Luxpower frame
+const uint8_t LUXPOWER_START_BYTE = 0xA1; // Start of Luxpower frame
 const uint8_t LUXPOWER_END_BYTE = 0x16;   // End of Luxpower frame
 const uint8_t LUXPOWER_END_BYTE_LENGTH = 1; // Length of the end byte for calculations
 
