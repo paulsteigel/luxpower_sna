@@ -3,8 +3,8 @@ import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
     CONF_ID,
-    CONF_HOST,
-    CONF_PORT,
+    # CONF_HOST, <-- REMOVED FROM IMPORT
+    # CONF_PORT, <-- REMOVED FROM IMPORT
     CONF_UPDATE_INTERVAL,
     CONF_VOLTAGE,
     CONF_CURRENT,
@@ -27,6 +27,9 @@ luxpower_sna_ns = cg.esphome_ns.namespace('luxpower_sna')
 LuxpowerInverterComponent = luxpower_sna_ns.class_('LuxpowerInverterComponent', cg.PollingComponent)
 
 # --- Local constants for our component ---
+# Defining these locally makes the component compatible with older ESPHome versions
+CONF_HOST = "host"
+CONF_PORT = "port"
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
 
@@ -39,7 +42,6 @@ CONF_DAILY_SOLAR_GENERATION = "daily_solar_generation"
 
 
 # --- The main configuration schema ---
-# All configuration, including sensors, is now defined here.
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(LuxpowerInverterComponent),
@@ -48,7 +50,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_DONGLE_SERIAL): cv.string,
         cv.Required(CONF_INVERTER_SERIAL_NUMBER): cv.string,
 
-        # Sensor schemas are now part of the main component config
+        # Sensor schemas
         cv.Optional(CONF_BATTERY_VOLTAGE): sensor.sensor_schema(
             unit_of_measurement=UNIT_VOLT,
             device_class=DEVICE_CLASS_VOLTAGE,
@@ -84,8 +86,6 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
-    # This function now receives a single 'config' dictionary
-    # containing both the main settings and any sensor settings.
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
