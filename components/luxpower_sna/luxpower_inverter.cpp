@@ -1,4 +1,3 @@
-```cpp
 // components/luxpower_sna/luxpower_inverter.cpp
 #include "luxpower_inverter.h"
 #include "esphome/core/log.h"
@@ -195,4 +194,287 @@ bool LuxpowerPacket::decode_packet(const std::vector<uint8_t>& raw_data, Luxpowe
         return false;
     }
 
-    // Packet seems valid, now parse the
+    // Packet seems valid, now parse the content based on command
+    uint8_t command_code = raw_data[14]; // Assuming command is at byte 14 (after 10-byte serial + 2 header bytes)
+    uint8_t function_code = raw_data[15]; // Modbus function code
+
+    ESP_LOGD(TAG, "Packet decoded: Command=0x%02X, Function=0x%02X", command_code, function_code);
+
+    if (command_code == LUX_TRANSLATED_DATA) { // This is a data response
+        if (function_code == MODBUS_READ_HOLDING_REGISTERS || function_code == MODBUS_READ_INPUT_REGISTERS) {
+            uint8_t byte_count = raw_data[16]; // Number of data bytes following
+            ESP_LOGD(TAG, "Modbus Read Response. Function: 0x%02X, Byte Count: %u", function_code, byte_count);
+
+            // Ensure we have enough bytes for the data payload + dongle serial + CRC
+            // Header (16 bytes) + Byte Count (1 byte) + Data (byte_count) + Dongle Serial (10 bytes) + CRC (2 bytes)
+            // Total expected length: 16 (header) + 1 (byte_count) + byte_count + 10 (dongle) + 2 (crc)
+            // declared_len = (10 serial) + (1 cmd) + (1 func) + (1 byte_count) + (data bytes) + (10 dongle serial) + (2 crc)
+            // So, data starts at index 17.
+            if (declared_len < (1 + 1 + 1 + byte_count + 10 + 2)) { // Min payload for Modbus RTU response
+                ESP_LOGW(TAG, "Incomplete Modbus Read response payload. Declared len: %u, Byte count: %u", declared_len, byte_count);
+                return false;
+            }
+
+            // Extract the data payload (Modbus RTU data)
+            std::vector<uint8_t> data_payload_bytes;
+            data_payload_bytes.reserve(byte_count);
+            for (size_t i = 0; i < byte_count; ++i) {
+                data_payload_bytes.push_back(raw_data[17 + i]);
+            }
+
+            // The start address of the response is not explicitly in the response packet.
+            // It's implicitly linked to the request. For now, we assume the component
+            // knows which request this response belongs to.
+            // A more robust solution would involve tracking outstanding requests.
+            // For simplicity, let's assume the component will know the start address.
+            // For now, we'll pass a dummy 0x0000 and let parse_modbus_response_ figure it out.
+            comp->parse_modbus_response_(data_payload_bytes, function_code, 0x0000);
+
+        } else {
+            ESP_LOGI(TAG, "Unhandled TRANSLATED_DATA function code: 0x%02X", function_code);
+        }
+    } else {
+        ESP_LOGI(TAG, "Unhandled command code: 0x%02X", command_code);
+    }
+
+    return true;
+}
+
+// --- LuxpowerInverterComponent Implementation ---
+
+LuxpowerInverterComponent::LuxpowerInverterComponent() : PollingComponent(20000) {
+  this->client_.onConnect(LuxpowerInverterComponent::onConnect, this);
+  this->client_.onDisconnect(LuxpowerInverterComponent::onDisconnect, this);
+  this->client_.onData(LuxpowerInverterComponent::onData, this);
+  this->client_.onAck(LuxpowerInverterComponent::onAck, this);
+  this->client_.onError(LuxpowerInverterComponent::onError, this);
+}
+
+void LuxpowerInverterComponent::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
+  this->connect_to_inverter_();
+}
+
+void LuxpowerInverterComponent::update() {
+  ESP_LOGD(TAG, "Luxpower SNA Component updating...");
+  if (!this->connected_) {
+    ESP_LOGW(TAG, "Not connected to inverter. Attempting to reconnect...");
+    this->connect_to_inverter_();
+  } else {
+    ESP_LOGD(TAG, "Connected to inverter. Sending read holding registers command...");
+    // We need to request the correct register bank that contains battery data.
+    // Based on LXPPacket.py, battery data is often in a bank starting around register 100.
+    // Let's request a block that covers these.
+    // Assuming REG_BATTERY_VOLTAGE (100) and REG_BATTERY_DISCHARGE_POWER (107) are in the same block.
+    // A block of 10 registers from 100 (0x64) to 109 (0x6D) should cover these.
+    std::vector<uint8_t> command_packet = LuxpowerPacket::build_read_input_command(
+        this->inverter_serial_number_, this->dongle_serial_, REG_BATTERY_VOLTAGE, 10); // Request 10 registers from 0x64
+    this->send_packet_(command_packet);
+  }
+}
+
+void LuxpowerInverterComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
+  ESP_LOGCONFIG(TAG, "  Host: %s", this->host_.c_str());
+  ESP_LOGCONFIG(TAG, "  Port: %u", this->port_);
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial Number: %s", this->inverter_serial_number_.c_str());
+  ESP_LOGCONFIG(TAG, "  Update Interval: %lu ms", this->get_update_interval());
+
+  for (auto *sensor : this->sensors_) {
+    LOG_SENSOR("  ", "Sensor", sensor);
+  }
+}
+
+void LuxpowerInverterComponent::connect_to_inverter_() {
+  if (this->client_.connected()) {
+    ESP_LOGI(TAG, "Already connected to %s:%u", this->host_.c_str(), this->port_);
+    this->connected_ = true;
+    return;
+  }
+
+  ESP_LOGI(TAG, "Attempting to connect to %s:%u...", this->host_.c_str(), this->port_);
+  IPAddress ip_address;
+  if (!ip_address.fromString(this->host_.c_str())) {
+    ESP_LOGE(TAG, "Invalid host IP address: %s", this->host_.c_str());
+    this->connected_ = false;
+    return;
+  }
+
+  if (this->client_.connect(ip_address, this->port_)) {
+    ESP_LOGI(TAG, "Connection initiated to %s:%u", this->host_.c_str(), this->port_);
+    // Connection is asynchronous, onConnect will be called if successful
+  } else {
+    ESP_LOGE(TAG, "Failed to initiate connection to %s:%u", this->host_.c_str(), this->port_);
+    this->connected_ = false;
+  }
+}
+
+void LuxpowerInverterComponent::send_packet_(const std::vector<uint8_t>& packet) {
+    if (!this->client_.connected()) {
+        ESP_LOGW(TAG, "Cannot send packet: client not connected.");
+        return;
+    }
+    if (packet.empty()) {
+        ESP_LOGW(TAG, "Cannot send empty packet.");
+        return;
+    }
+
+    ESP_LOGD(TAG, "Sending packet of %u bytes.", packet.size());
+    this->log_buffer_hexdump_(TAG, packet.data(), packet.size(), esphome::LogLevel::LOG_LEVEL_VERBOSE); // Use custom hexdump
+
+    this->client_.write(reinterpret_cast<const char*>(packet.data()), packet.size());
+}
+
+void LuxpowerInverterComponent::process_received_data_() {
+    // This function will be called when new data arrives in the buffer.
+    // It should attempt to parse complete Luxpower packets from the buffer.
+
+    // Log the current state of the receive buffer before processing
+    if (!this->receive_buffer_.empty()) {
+        ESP_LOGV(TAG, "Receive buffer before processing (%u bytes):", this->receive_buffer_.size());
+        this->log_buffer_hexdump_(TAG, this->receive_buffer_.data(), this->receive_buffer_.size(), esphome::LogLevel::LOG_LEVEL_VERBOSE); // Use custom hexdump
+    }
+
+    while (this->receive_buffer_.size() >= 4) { // Minimum size for header (AA 55 Len1 Len2)
+        if (this->receive_buffer_[0] != LUX_START_BYTE_1 || this->receive_buffer_[1] != LUX_START_BYTE_2) {
+            ESP_LOGW(TAG, "Invalid start bytes in buffer. Dropping byte.");
+            // If header is invalid, shift buffer to find next potential start
+            this->receive_buffer_.erase(this->receive_buffer_.begin());
+            continue;
+        }
+
+        uint16_t declared_len = (static_cast<uint16_t>(this->receive_buffer_[2]) << 8) | this->receive_buffer_[3];
+        uint16_t total_packet_len = 4 + declared_len; // AA 55 Len1 Len2 + declared_len
+
+        if (this->receive_buffer_.size() < total_packet_len) {
+            // Not enough data for a complete packet yet
+            ESP_LOGV(TAG, "Incomplete packet in buffer. Need %u, have %u.", total_packet_len, this->receive_buffer_.size());
+            break; // Wait for more data
+        }
+
+        // We have a complete packet!
+        std::vector<uint8_t> complete_packet(this->receive_buffer_.begin(), this->receive_buffer_.begin() + total_packet_len);
+
+        // Attempt to decode the packet
+        if (LuxpowerPacket::decode_packet(complete_packet, this)) {
+            ESP_LOGD(TAG, "Successfully decoded a Luxpower packet.");
+            // Data has been parsed and stored in register_values_ map by decode_packet
+            // Now, update the ESPHome sensors
+            for (auto *sensor : this->sensors_) {
+                sensor->update_value(this->register_values_);
+            }
+        } else {
+            ESP_LOGW(TAG, "Failed to decode Luxpower packet.");
+        }
+
+        // Remove the processed packet from the buffer
+        this->receive_buffer_.erase(this->receive_buffer_.begin(), this->receive_buffer_.begin() + total_packet_len);
+    }
+}
+
+void LuxpowerInverterComponent::parse_modbus_response_(const std::vector<uint8_t>& data_payload, uint8_t function_code, uint16_t start_address) {
+    if (function_code == MODBUS_READ_HOLDING_REGISTERS || function_code == MODBUS_READ_INPUT_REGISTERS) {
+        if (data_payload.size() % 2 != 0) {
+            ESP_LOGW(TAG, "Modbus data payload has odd number of bytes. Expected even.");
+            return;
+        }
+
+        uint16_t num_registers = data_payload.size() / 2;
+        ESP_LOGD(TAG, "Parsing %u registers from Modbus response (Func: 0x%02X, Start: 0x%04X).", num_registers, function_code, start_address);
+
+        uint16_t actual_start_address = REG_BATTERY_VOLTAGE; // Use the known start of our requested block
+
+        for (uint16_t i = 0; i < num_registers; ++i) {
+            uint16_t register_value = (static_cast<uint16_t>(data_payload[i * 2]) << 8) | data_payload[(i * 2) + 1];
+            uint16_t current_register_address = actual_start_address + i;
+
+            this->register_values_[current_register_address] = register_value;
+            ESP_LOGV(TAG, "Register 0x%04X: Value = %u", current_register_address, register_value);
+        }
+    } else {
+        ESP_LOGW(TAG, "Unsupported Modbus function code for parsing: 0x%02X", function_code);
+    }
+}
+
+// --- AsyncClient Callbacks ---
+
+void LuxpowerInverterComponent::onConnect(void *arg, AsyncClient *client) {
+  LuxpowerInverterComponent *comp = static_cast<LuxpowerInverterComponent *>(arg);
+  ESP_LOGI(TAG, "Successfully connected to inverter!");
+  comp->connected_ = true;
+  comp->receive_buffer_.clear(); // Clear buffer on new connection
+}
+
+void LuxpowerInverterComponent::onDisconnect(void *arg, AsyncClient *client) {
+  LuxpowerInverterComponent *comp = static_cast<LuxpowerInverterComponent *>(arg);
+  ESP_LOGW(TAG, "Disconnected from inverter.");
+  comp->connected_ = false;
+  comp->receive_buffer_.clear(); // Clear buffer on disconnect
+}
+
+void LuxpowerInverterComponent::onData(void *arg, AsyncClient *client, void *data, size_t len) {
+  LuxpowerInverterComponent *comp = static_cast<LuxpowerInverterComponent *>(arg);
+  ESP_LOGD(TAG, "Received %u bytes from inverter.", len);
+
+  comp->log_buffer_hexdump_(TAG, static_cast<const uint8_t*>(data), len, esphome::LogLevel::LOG_LEVEL_VERBOSE); // Use custom hexdump
+
+  const uint8_t* byte_data = static_cast<const uint8_t*>(data);
+  comp->receive_buffer_.insert(comp->receive_buffer_.end(), byte_data, byte_data + len);
+
+  comp->process_received_data_();
+}
+
+void LuxpowerInverterComponent::onAck(void *arg, AsyncClient *client, size_t len, uint32_t time) {
+  ESP_LOGV(TAG, "Data acknowledged by inverter. Bytes: %u", len);
+}
+
+void LuxpowerInverterComponent::onError(void *arg, AsyncClient *client, int8_t error) {
+  LuxpowerInverterComponent *comp = static_cast<LuxpowerInverterComponent *>(arg);
+  ESP_LOGE(TAG, "AsyncClient error: %s", client->errorToString(error));
+  comp->connected_ = false; // Mark as disconnected on error
+  comp->receive_buffer_.clear(); // Clear buffer on error
+}
+
+// --- Custom Hexdump Logger Implementation ---
+void LuxpowerInverterComponent::log_buffer_hexdump_(const char* tag, const uint8_t* buffer, size_t len, esphome::LogLevel level) {
+    if (len == 0) {
+        ESP_LOG_LEVEL(level, tag, "Buffer is empty.");
+        return;
+    }
+
+    const int BYTES_PER_LINE = 16;
+    std::string hex_line;
+    std::string ascii_line;
+    char temp_str[4]; // Enough for "XX " or "."
+
+    for (size_t i = 0; i < len; ++i) {
+        sprintf(temp_str, "%02X ", buffer[i]);
+        hex_line += temp_str;
+
+        char c = (char)buffer[i];
+        if (c >= ' ' && c <= '~') { // Printable ASCII
+            sprintf(temp_str, "%c", c);
+        } else {
+            sprintf(temp_str, "."); // Non-printable
+        }
+        ascii_line += temp_str;
+
+        if ((i + 1) % BYTES_PER_LINE == 0 || (i + 1) == len) {
+            // End of line or end of buffer, print the accumulated line
+            // Pad hex_line if it's the last, incomplete line
+            if ((i + 1) == len && (i + 1) % BYTES_PER_LINE != 0) {
+                int remaining_bytes = BYTES_PER_LINE - ((i + 1) % BYTES_PER_LINE);
+                for (int j = 0; j < remaining_bytes; ++j) {
+                    hex_line += "   "; // 3 spaces for each missing hex byte
+                }
+            }
+            ESP_LOG_LEVEL(level, tag, "%s %s", hex_line.c_str(), ascii_line.c_str());
+            hex_line.clear();
+            ascii_line.clear();
+        }
+    }
+}
+
+} // namespace luxpower_sna
+} // namespace esphome
