@@ -41,6 +41,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   // --- Communication methods ---
   void request_data_();
   void handle_packet_(void *arg, AsyncClient *client, void *data, size_t len);
+  uint16_t calculate_crc_(const uint8_t *data, size_t len); // <-- THIS LINE IS ADDED
 
   // --- Member variables ---
   std::string host_;
