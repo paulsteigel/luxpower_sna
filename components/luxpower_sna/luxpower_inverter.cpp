@@ -9,13 +9,13 @@ namespace luxpower_sna {
 static const char *const TAG = "luxpower_sna.sensor"; // Tag for logging output from this file
 
 // Constructor implementation for LuxpowerSnaSensor
-// IMPORTANT: Ensure your initializer list does NOT call sensor::Sensor(name).
+// IMPORTANT: The initializer list below DOES NOT call sensor::Sensor(name).
 // The base sensor::Sensor class is default-constructed implicitly here.
 LuxpowerSnaSensor::LuxpowerSnaSensor(const std::string &name, uint16_t register_address, LuxpowerRegType reg_type, uint8_t bank)
     : register_address_(register_address), reg_type_(reg_type), bank_(bank) {
     // Set the name using the base Sensor's inherited method.
-    // Convert std::string 'name' to const char* using .c_str()
-    this->set_name(name.c_str()); // <--- **CRITICAL CHANGE HERE**
+    // We convert std::string 'name' to const char* using .c_str() because set_name expects const char*.
+    this->set_name(name.c_str()); // <--- **THIS LINE IS CRITICAL**
 
     ESP_LOGD(TAG, "LuxPower SNA Sensor '%s' created for Reg: 0x%04X, Type: %u, Bank: %u",
              name.c_str(), register_address, reg_type, bank);
