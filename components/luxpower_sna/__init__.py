@@ -1,31 +1,36 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_UPDATE_INTERVAL
+from esphome.const import CONF_ID
 
-# This component requires WiFi to be configured.
+# This component requires WiFi and will auto-load the sensor platform.
 DEPENDENCIES = ["wifi"]
 AUTO_LOAD = ["sensor"]
 MULTI_CONF = True
 
-# --- Local constants for config keys (for backward compatibility) ---
-CONF_HOST = "host"
-CONF_PORT = "port"
-CONF_DONGLE_SERIAL = "dongle_serial"
-CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
-
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
 LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.PollingComponent)
 
-# --- Schema for the top-level 'luxpower_sna:' hub component ---
+# --- Define the ID that sub-components (like sensor) will use to find the hub ---
+CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
+
+# --- This is the reusable "linking" schema, as seen in jk_bms ---
+# Sub-components will import and extend this.
+LUXPOWER_SNA_COMPONENT_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
+    }
+)
+
+# --- This is the schema for the main 'luxpower_sna:' hub component ---
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
-            cv.Required(CONF_HOST): cv.string,
-            cv.Required(CONF_PORT): cv.port,
-            cv.Required(CONF_DONGLE_SERIAL): cv.string,
-            cv.Required(CONF_INVERTER_SERIAL_NUMBER): cv.string,
+            cv.Required("host"): cv.string,
+            cv.Required("port"): cv.port,
+            cv.Required("dongle_serial"): cv.string,
+            cv.Required("inverter_serial_number"): cv.string,
         }
     )
     .extend(cv.polling_component_schema("20s"))
@@ -35,15 +40,15 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cg.add(var.set_host(config[CONF_HOST]))
-    cg.add(var.set_port(config[CONF_PORT]))
+    cg.add(var.set_host(config["host"]))
+    cg.add(var.set_port(config["port"]))
 
-    dongle_serial = config[CONF_DONGLE_SERIAL].encode('ascii')
+    dongle_serial = config["dongle_serial"].encode('ascii')
     if len(dongle_serial) != 10:
         raise cv.Invalid("dongle_serial must be 10 characters long")
     cg.add(var.set_dongle_serial(list(dongle_serial)))
 
-    inverter_serial = config[CONF_INVERTER_SERIAL_NUMBER].encode('ascii')
+    inverter_serial = config["inverter_serial_number"].encode('ascii')
     if len(inverter_serial) != 10:
         raise cv.Invalid("inverter_serial_number must be 10 characters long")
     cg.add(var.set_inverter_serial_number(list(inverter_serial)))
