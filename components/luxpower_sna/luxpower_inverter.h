@@ -1,10 +1,10 @@
-// src/esphome/components/luxpower_sna/luxpower_inverter.h
-
-#pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/core/defines.h" // Might be needed for some ESPHome macros
-#include "esphome/core/log.h"     // For ESP_LOGx macros if used in header
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/switch/switch.h"
+#pragma once
 #include <vector>
 #include <map>
 
