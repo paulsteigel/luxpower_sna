@@ -3,7 +3,7 @@
 
 #include "esphome/core/component.h" // <--- ADD THIS INCLUDE for Component base class
 #include "esphome/components/sensor/sensor.h"
-#include "consts.h" // For LuxpowerRegType enum
+#include "luxpower_sna_constants.h" // For LuxpowerRegType enum
 
 namespace esphome {
 namespace luxpower_sna {
