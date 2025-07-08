@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-#include "sensor/sensor.h" // CORRECT: Now points to the renamed file in the subfolder
+//#include "sensor/sensor.h" // CORRECT: Now points to the renamed file in the subfolder
 #include <vector>
 #include <string>
 #include <chrono> // For std::chrono::steady_clock
