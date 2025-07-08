@@ -10,7 +10,7 @@
 #include <deque>
 #include <map>
 
-//#include <AsyncTCP.h>
+#include <AsyncTCP.h>
 
 namespace esphome {
 namespace luxpower_sna {
