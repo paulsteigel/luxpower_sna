@@ -5,6 +5,7 @@
 #include "esphome/core/helpers.h" // For format_hex_pretty and other utilities
 #include "esphome/components/sensor/sensor.h" // Needed for sensor-related functions like publish_state
 #include "luxpower_sna_constants.h" // <--- UNCOMMENTED: Needed for constants like LUXPOWER_END_BYTE_LENGTH and LuxpowerRegType definition
+#include "luxpower_sna_sensor.h"
 
 #include <functional> // For std::bind and std::placeholders
 #include <algorithm> // For std::min, std::max (if used in your logic)
