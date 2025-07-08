@@ -3,10 +3,8 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
-    # --- CORRECTED IMPORTS ---
     CONF_VOLTAGE,
     CONF_CURRENT,
-    # --- Standard constants that were already correct ---
     DEVICE_CLASS_VOLTAGE,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_POWER,
@@ -20,14 +18,11 @@ from esphome.const import (
 
 from . import luxpower_sna_ns, LuxpowerSNAComponent
 
-# --- Local constants for our custom sensor types ---
 CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
 CONF_BATTERY_CAPACITY_AH = "battery_capacity_ah"
 CONF_POWER_FROM_GRID = "power_from_grid"
 CONF_DAILY_SOLAR_GENERATION = "daily_solar_generation"
 
-# --- A dictionary that defines all possible sensors ---
-# We now use the standard CONF_VOLTAGE and CONF_CURRENT as keys
 SENSOR_TYPES = {
     CONF_VOLTAGE: sensor.sensor_schema(
         unit_of_measurement=UNIT_VOLT,
@@ -61,9 +56,15 @@ SENSOR_TYPES = {
     ),
 }
 
-# --- Schema for the 'sensor:' platform (No changes needed here) ---
+# =========================================================================
+# ======================== THE CORRECTED PART =============================
+# =========================================================================
+#
+# We now call sensor.sensor_schema() as a function to get the base,
+# then extend it. This is the modern method used by jk_bms.
+#
 PLATFORM_SCHEMA = cv.All(
-    sensor.PLATFORM_SCHEMA.extend(
+    sensor.sensor_schema().extend(
         {
             cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
@@ -71,11 +72,14 @@ PLATFORM_SCHEMA = cv.All(
     ),
     cv.has_at_least_one_key(*SENSOR_TYPES),
 )
+# =========================================================================
+# =========================================================================
+
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     for key, conf in config.items():
         if key in SENSOR_TYPES:
             sens = await sensor.new_sensor(conf)
-            # The key will now be "voltage" or "current", which is what we want
             cg.add(hub.add_sensor(key, sens))
+
