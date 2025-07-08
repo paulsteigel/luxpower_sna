@@ -1,14 +1,14 @@
-// components/luxpower_sna/luxpower_sna.cpp
-#include "luxpower_sna.h"
+// components/luxpower_sna/luxpower_hub.cpp
+#include "luxpower_hub.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace luxpower_sna {
 
-static const char *const TAG = "luxpower_sna";
+static const char *const TAG = "luxpower_sna.hub";
 
 // Standard Modbus CRC-16 calculation
-uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
+uint16_t LuxpowerSNAHub::calculate_crc_(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; i++) {
     crc ^= data[i];
@@ -24,33 +24,25 @@ uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   return crc;
 }
 
-void LuxpowerSNAComponent::setup() {
+void LuxpowerSNAHub::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA Hub...");
 }
 
-void LuxpowerSNAComponent::dump_config() {
+void LuxpowerSNAHub::dump_config() {
   ESP_LOGCONFIG(TAG, "LuxpowerSNA Hub:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%d", this->host_.c_str(), this->port_);
   LOG_UPDATE_INTERVAL(this);
-  // Log sensors
-  LOG_SENSOR("  ", "Battery Voltage", this->battery_voltage_sensor_);
-  LOG_SENSOR("  ", "Battery Current", this->battery_current_sensor_);
-  LOG_SENSOR("  ", "Battery Capacity AH", this->battery_capacity_ah_sensor_);
-  LOG_SENSOR("  ", "Power from Grid", this->power_from_grid_sensor_);
-  LOG_SENSOR("  ", "Daily Solar Generation", this->daily_solar_generation_sensor_);
 }
 
-void LuxpowerSNAComponent::update() {
+void LuxpowerSNAHub::update() {
   this->request_data_();
 }
 
-template<typename T> void LuxpowerSNAComponent::publish_state(sensor::Sensor *sensor, T value) {
-  if (sensor != nullptr) {
-    sensor->publish_state(value);
-  }
+void LuxpowerSNAHub::register_sensor(const std::string &type, sensor::Sensor *sensor_obj) {
+    this->registered_sensors_[type] = sensor_obj;
 }
 
-void LuxpowerSNAComponent::request_data_() {
+void LuxpowerSNAHub::request_data_() {
   if (this->tcp_client_ != nullptr && (this->tcp_client_->connected() || this->tcp_client_->connecting())) {
     ESP_LOGD(TAG, "Connection in progress, skipping new request.");
     return;
@@ -85,31 +77,20 @@ void LuxpowerSNAComponent::request_data_() {
     return;
   }
 
-  // --- THE FIX: Build the correct 29-byte packet ---
   uint8_t request[29];
-  request[0] = 0xAA; // Header
-  request[1] = 0x55; // Header
-  request[2] = 0x01; // Address
-  request[3] = 0x1A; // Address
-  request[4] = 0x01; // Inverter ID
-  request[5] = 0x02; // Function Code
-  request[6] = 20;   // Data Length (10 bytes dongle + 10 bytes inverter)
-
-  // Copy serial numbers into the correct positions
+  request[0] = 0xAA; request[1] = 0x55; request[2] = 0x01; request[3] = 0x1A;
+  request[4] = 0x01; request[5] = 0x02; request[6] = 20;
   memcpy(request + 7, this->dongle_serial_.data(), 10);
   memcpy(request + 17, this->inverter_serial_.data(), 10);
-
-  // Calculate CRC on the packet from Address to the end of data (25 bytes)
   uint16_t crc = this->calculate_crc_(request + 2, 25);
-  request[27] = crc & 0xFF;          // CRC Low Byte
-  request[28] = (crc >> 8) & 0xFF;   // CRC High Byte
+  request[27] = crc & 0xFF;
+  request[28] = (crc >> 8) & 0xFF;
   
-  // Send the full 29-byte packet
   this->tcp_client_->write((char*)request, 29);
   ESP_LOGD(TAG, "Data request (29 bytes) sent.");
 }
 
-void LuxpowerSNAComponent::handle_packet_(void *arg, AsyncClient *client, void *data, size_t len) {
+void LuxpowerSNAHub::handle_packet_(void *arg, AsyncClient *client, void *data, size_t len) {
   if (len < 61) {
     ESP_LOGW(TAG, "Received packet too short: %d bytes", len);
     return;
@@ -118,22 +99,29 @@ void LuxpowerSNAComponent::handle_packet_(void *arg, AsyncClient *client, void *
   uint8_t *raw = (uint8_t *) data;
   ESP_LOGD(TAG, "Received %d bytes of data.", len);
 
-  // --- Parse data from packet ---
+  // Parse all possible values
   float battery_voltage = (raw[11] << 8 | raw[12]) / 10.0f;
   float battery_current = (raw[13] << 8 | raw[14]) / 10.0f;
   float battery_capacity_ah = raw[19];
   float power_from_grid = (raw[43] << 8 | raw[44]);
   float daily_solar_gen = (raw[59] << 8 | raw[60]) / 10.0f;
 
-  ESP_LOGD(TAG, "Parsed Data: V=%.1fV, I=%.1fA, Cap=%.0fAh, Grid=%.0fW, Solar=%.1fkWh", 
-           battery_voltage, battery_current, battery_capacity_ah, power_from_grid, daily_solar_gen);
-
-  // --- Publish to registered sensors using the safe helper ---
-  this->publish_state(this->battery_voltage_sensor_, battery_voltage);
-  this->publish_state(this->battery_current_sensor_, battery_current);
-  this->publish_state(this->battery_capacity_ah_sensor_, battery_capacity_ah);
-  this->publish_state(this->power_from_grid_sensor_, power_from_grid);
-  this->publish_state(this->daily_solar_generation_sensor_, daily_solar_gen);
+  // Publish to registered sensors if they exist
+  if (this->registered_sensors_.count("battery_voltage")) {
+    this->registered_sensors_["battery_voltage"]->publish_state(battery_voltage);
+  }
+  if (this->registered_sensors_.count("battery_current")) {
+    this->registered_sensors_["battery_current"]->publish_state(battery_current);
+  }
+  if (this->registered_sensors_.count("battery_capacity_ah")) {
+    this->registered_sensors_["battery_capacity_ah"]->publish_state(battery_capacity_ah);
+  }
+  if (this->registered_sensors_.count("power_from_grid")) {
+    this->registered_sensors_["power_from_grid"]->publish_state(power_from_grid);
+  }
+  if (this->registered_sensors_.count("daily_solar_generation")) {
+    this->registered_sensors_["daily_solar_generation"]->publish_state(daily_solar_gen);
+  }
 }
 
 }  // namespace luxpower_sna
