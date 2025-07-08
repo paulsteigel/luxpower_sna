@@ -9,8 +9,8 @@
 #include <string>
 #include <map> // For storing register values
 
-#include "luxpower_sna_constants.h" // Include the new constants file
-#include "luxpower_sna_sensor.h"    // Include the new sensor header
+#include "consts.h" // Include the new constants file
+#include "sensors.h"    // Include the new sensor header
 
 namespace esphome {
 namespace luxpower_sna {
