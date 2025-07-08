@@ -23,14 +23,14 @@ uint16_t calculate_crc16(const uint8_t *data, size_t length);
 
 // Define the LuxpowerInverterComponent class, inheriting from PollingComponent
 // PollingComponent provides the update() method that will be called periodically
-class LuxpowerInverterComponent : public PollingComponent { // Class name changed
+class LuxpowerInverterComponent : public PollingComponent {
   // Grant LuxpowerPacket access to protected/private members of this class
-  friend class LuxpowerPacket; // Added friend declaration
+  friend class LuxpowerPacket;
 
  public:
   // Constructor: Initializes the component with a default update interval.
   // The update interval can be overridden by the YAML configuration.
-  LuxpowerInverterComponent(); // Constructor name changed
+  LuxpowerInverterComponent();
 
   // Setters for the configuration parameters from YAML
   void set_host(const std::string &host) { this->host_ = host; }
