@@ -6,6 +6,22 @@
 namespace esphome {
 namespace luxpower_sna {
 
+// In luxpower_sna_constants.h
+
+// Define the prefix for A1 packets
+#define LUXPOWER_A1_PREFIX 0x1AA1 // This is 0xA1 0x1A as a 16-bit little-endian value
+
+// Minimum length of an A1 packet (prefix + protocol + frame_length + tcp_function + dongle_serial + data_length + address_action + device_function + inverter_serial + start_register + num_registers + CRC)
+// 2 + 2 + 2 + 1 + 10 + 2 + 1 + 1 + 10 + 2 + 2 + 2 = 37 bytes
+#define LUXPOWER_A1_MIN_LENGTH 37
+
+// TCP Function Codes (from LXPPacket.py)
+#define LUXPOWER_TCP_TRANSLATED_DATA 0xC2 // 194
+
+// Modbus Function Codes (from LXPPacket.py)
+#define MODBUS_CMD_READ_HOLDING_REGISTER 0x03
+#define MODBUS_CMD_READ_INPUT_REGISTER 0x04
+
 // Luxpower Protocol Constants
 const uint8_t LUXPOWER_START_BYTE = 0xA1; // Start of Luxpower frame
 const uint8_t LUXPOWER_END_BYTE = 0x16;   // End of Luxpower frame
