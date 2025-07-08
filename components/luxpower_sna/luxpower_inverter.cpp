@@ -247,7 +247,6 @@ LuxpowerInverterComponent::LuxpowerInverterComponent() : PollingComponent(20000)
   this->client_.onDisconnect(LuxpowerInverterComponent::onDisconnect, this); // Type changed
   this->client_.onData(LuxpowerInverterComponent::onData, this); // Type changed
   this->client_.onAck(LuxpowerInverterComponent::onAck, this); // Type changed
-  this->client_.onWriteBufferFull(LuxpowerInverterComponent::onWriteBufferFull, this); // Type changed
   this->client_.onError(LuxpowerInverterComponent::onError, this); // Type changed
 }
 
@@ -422,10 +421,6 @@ void LuxpowerInverterComponent::onData(void *arg, AsyncClient *client, void *dat
 
 void LuxpowerInverterComponent::onAck(void *arg, AsyncClient *client, size_t len, uint32_t time) { // Type changed
   ESP_LOGV(TAG, "Data acknowledged by inverter. Bytes: %u", len);
-}
-
-void LuxpowerInverterComponent::onWriteBufferFull(void *arg, AsyncClient *client, size_t len) { // Type changed
-  ESP_LOGW(TAG, "Write buffer full. Cannot send %u bytes.", len);
 }
 
 void LuxpowerInverterComponent::onError(void *arg, AsyncClient *client, int8_t error) { // Type changed
