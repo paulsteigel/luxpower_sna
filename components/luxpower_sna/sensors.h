@@ -1,37 +1,41 @@
-// components/luxpower_sna/sensors.h
+// src/esphome/components/luxpower_sna/luxpower_sna_sensor.h
 #pragma once
 
+#include "esphome/core/component.h" // <--- ADD THIS INCLUDE for Component base class
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/core/component.h"
-#include "esphome/core/log.h"
-#include <map> // For std::map<uint16_t, uint16_t>
-#include <string>
+#include "consts.h" // For LuxpowerRegType enum
 
 namespace esphome {
 namespace luxpower_sna {
 
-// Forward declaration of the main component
-class LuxpowerSnaComponent;
+// Forward declaration of the main LuxPowerInverterComponent
+class LuxPowerInverterComponent;
 
-class LuxpowerSnaSensor : public sensor::Sensor {
- public:
-  // Set the parent component (LuxpowerSnaComponent)
-  void set_parent(LuxpowerSnaComponent *parent) { this->parent_ = parent; }
-  // Set the register address this sensor will read from
-  void set_register_address(uint16_t address) { this->register_address_ = address; }
-  // Set the factor to divide the raw register value by (e.g., 10 for 0.1 precision)
-  void set_divisor(float divisor) { this->divisor_ = divisor; }
-  // Set whether the value is signed
-  void set_is_signed(bool is_signed) { this->is_signed_ = is_signed; }
+class LuxpowerSnaSensor : public sensor::Sensor, public Component { // <--- ADD Component INHERITANCE HERE
+public:
+  // Setters for the sensor's specific configuration
+  void set_parent(LuxPowerInverterComponent *parent) { this->parent_ = parent; }
+  // --- ADD THESE SETTERS (and their backing members if not already present) ---
+  void set_register_address(uint16_t reg_addr) { this->register_address_ = reg_addr; }
+  void set_reg_type(LuxpowerRegType reg_type) { this->reg_type_ = reg_type; }
+  void set_bank(uint8_t bank) { this->bank_ = bank; }
+  // --- END ADD ---
 
-  // This method will be called by the main component when new data is available.
-  void update_value(const std::map<uint16_t, uint16_t>& register_values);
+  // Getters for properties, used by the main component to interpret values
+  uint16_t get_register_address() const { return this->register_address_; }
+  LuxpowerRegType get_reg_type() const { return this->reg_type_; }
+  uint8_t get_bank() const { return this->bank_; }
 
- protected:
-  LuxpowerSnaComponent *parent_{nullptr};
-  uint16_t register_address_{0};
-  float divisor_{1.0f}; // Default to no division
-  bool is_signed_{false}; // Default to unsigned
+  // Overrides for Component lifecycle (optional, if this sensor needs its own setup/loop)
+  // void setup() override {}
+  // void loop() override {}
+  // float get_setup_priority() const override { return esphome::setup_priority::DATA; }
+
+protected:
+  LuxPowerInverterComponent *parent_;
+  uint16_t register_address_; // The Modbus register address this sensor corresponds to
+  LuxpowerRegType reg_type_;  // How to interpret the raw register value
+  uint8_t bank_;              // Which bank this register belongs to (e.g., 0, 1, 2)
 };
 
 } // namespace luxpower_sna
