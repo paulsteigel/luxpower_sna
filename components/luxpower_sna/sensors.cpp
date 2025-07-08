@@ -1,6 +1,6 @@
 // components/luxpower_sna/luxpower_sna_sensor.cpp
 #include "luxpower_sna_sensor.h"
-#include "luxpower_sna_inverter.h" // Include the main component header
+#include "luxpower_inverter.h" // Include the main component header
 #include "esphome/core/log.h"
 
 namespace esphome {
