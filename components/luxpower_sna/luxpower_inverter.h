@@ -12,7 +12,7 @@
 #include <functional> // For std::bind if used directly in header
 
 #include <ESPAsyncTCP.h> // Correct header for AsyncClient on ESP8266
-#include "luxpower_sna_sensor.h"
+#include "sensor/luxpower_sna_sensor.h"
 #include "luxpower_sna_constants.h" // <--- ADDED: Include this if constants like LUX_REG_TYPE_FIRMWARE or LUXPOWER_END_BYTE_LENGTH are used in this header
 
 
