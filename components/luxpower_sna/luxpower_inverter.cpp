@@ -5,7 +5,7 @@
 #include <deque>
 #include <functional>
 #include <map>
-#include <AsyncTCP.h> // Ensure this is included
+//#include <AsyncTCP.h> // Ensure this is included
 
 namespace esphome {
 namespace luxpower_sna {
