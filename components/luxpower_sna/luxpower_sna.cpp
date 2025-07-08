@@ -108,13 +108,15 @@ void LuxpowerSNAComponent::handle_packet_(void *arg, AsyncClient *client, void *
   float power_from_grid = (raw[43] << 8 | raw[44]);
   float daily_solar_gen = (raw[59] << 8 | raw[60]) / 10.0f;
 
+  // --- UPDATED to use standard keys ---
   // Publish to a sensor ONLY if it has been registered
-  if (this->sensors_.count("battery_voltage")) {
-    this->sensors_["battery_voltage"]->publish_state(battery_voltage);
+  if (this->sensors_.count("voltage")) {
+    this->sensors_["voltage"]->publish_state(battery_voltage);
   }
-  if (this->sensors_.count("battery_current")) {
-    this->sensors_["battery_current"]->publish_state(battery_current);
+  if (this->sensors_.count("current")) {
+    this->sensors_["current"]->publish_state(battery_current);
   }
+  // These custom ones were already correct
   if (this->sensors_.count("battery_capacity_ah")) {
     this->sensors_["battery_capacity_ah"]->publish_state(battery_capacity_ah);
   }
