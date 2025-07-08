@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-#include "esphome/components/uart/uart.h" // Required for UARTDevice
+//#include "esphome/components/uart/uart.h" // Required for UARTDevice
 
 // Include your constants file
 #include "luxpower_sna_constants.h"
