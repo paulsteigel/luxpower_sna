@@ -1,7 +1,17 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_HOST, CONF_PORT, CONF_UPDATE_INTERVAL
+from esphome.const import CONF_ID # Keep CONF_ID, as it seems to import correctly
+
+# Define these constants locally if they cannot be imported from esphome.const
+# This is a workaround for the ImportError you are experiencing.
+CONF_HOST = "host"
+CONF_PORT = "port"
+CONF_UPDATE_INTERVAL = "update_interval"
+CONF_UNIT_OF_MEASUREMENT = "unit_of_measurement"
+CONF_ICON = "icon"
+CONF_DEVICE_CLASS = "device_class"
+CONF_STATE_CLASS = "state_class"
 
 # Import sensor component (will be used by sensor.py, but needed for schema definition here)
 from esphome.components import sensor
@@ -21,6 +31,9 @@ LuxpowerSnaSensor = luxpower_sna_ns.class_('LuxpowerSnaSensor', sensor.Sensor)
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
 CONF_SENSORS = "sensors" # Key for defining multiple sensors
+CONF_REGISTER_ADDRESS = "register_address"
+CONF_DIVISOR = "divisor"
+CONF_IS_SIGNED = "is_signed"
 
 # Schema for an individual Luxpower SNA sensor (moved here for main component to reference)
 SENSOR_SCHEMA = sensor.SENSOR_SCHEMA.extend({
