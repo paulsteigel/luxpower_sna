@@ -411,7 +411,7 @@ bool LuxPowerInverterComponent::parse_luxpower_response_packet(const std::vector
     // 4. Extract Payload for CRC (from Inverter Serial to CRC, excluding Start Byte, Length, and End Byte)
     size_t data_for_crc_len = reported_length - LUXPOWER_END_BYTE_LENGTH; // Reported length includes CRC and End Byte
 
-    if (data_for_crc_len < (LUXPOWER_FIXED_PAYLOAD_LEN - 2)) { // -2 for CRC itself
+    if (data_for_crc_len < (LUXPOWER_MIN_PAYLOAD_FOR_CRC_LENGTH  - 2)) { // -2 for CRC itself
         ESP_LOGW(TAG, "LuxPower payload for CRC is too short after length check.");
         return false;
     }
