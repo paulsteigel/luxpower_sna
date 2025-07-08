@@ -56,122 +56,50 @@ void LuxPowerInverterComponent::setup() {
   this->connect_to_inverter();
 }
 
-// loop() implementation: Called repeatedly by ESPHome
-void LuxPowerInverterComponent::loop() {
-  // Connection management: Periodically attempt to reconnect if not currently connected
-  if (!this->is_connected()) {
-    if (millis() - this->last_connection_attempt_time_ > this->connect_retry_interval_) {
-      ESP_LOGD(TAG, "Client not connected, attempting reconnect to %s:%u", this->inverter_host_.c_str(), this->inverter_port_);
-      this->connect_to_inverter();
+// In luxpower_inverter.cpp
+
+void LuxPowerInverter::loop() {
+  const uint32_t now = millis();
+  if ((now - this->last_byte_received_) > this->read_timeout_) {
+    if (this->data_buffer_.size() > 0) {
+      ESP_LOGW(TAG, "Buffer timeout! Discarding %zu bytes.", this->data_buffer_.size());
+      this->data_buffer_.clear();
     }
-  } else {
-    // Data Request and Processing Loop (runs only if connected)
+  }
 
-    // 1. Send data request if update interval has passed
-    if (millis() - this->last_request_time_ > this->update_interval_.count()) {
-      ESP_LOGD(TAG, "Sending LuxPower Inverter data request (Bank 0, Regs 0-125).");
-      this->last_request_time_ = millis();
+  while (this->available()) {
+    uint8_t byte;
+    this->read_byte(&byte);
+    this->data_buffer_.push_back(byte);
+    this->last_byte_received_ = now;
 
-      // Use the custom LuxPower packet builder for FC 0x03 (Read Holding Registers)
-      // Read 126 registers starting from address 0 (adjust as per your inverter's bank 0 map)
-      std::vector<uint8_t> request_packet = build_luxpower_request_packet(0x03, 0, 126);
-      if (!this->send_data(request_packet)) {
-        ESP_LOGE(TAG, "Failed to send LuxPower read request.");
-        this->disconnect_from_inverter(); // Disconnect to trigger a reconnect attempt
-        return;
-      }
-    }
+    // Check for A1 1A prefix
+    if (this->data_buffer_.size() >= 2) {
+      if (this->data_buffer_[0] == 0xA1 && this->data_buffer_[1] == 0x1A) {
+        // It's a potential A1 packet
+        // Minimum A1 packet length is 37 bytes
+        if (this->data_buffer_.size() >= LUXPOWER_A1_MIN_LENGTH) {
+          // Frame Length is at bytes 4 and 5 (little-endian)
+          uint16_t frame_length = (this->data_buffer_[5] << 8) | this->data_buffer_[4];
+          uint16_t calculated_packet_length = frame_length + 6; // 6 bytes for prefix (2), protocol (2), frame_length (2)
 
-    // 2. Process received data from rx_buffer_
-    while (this->rx_buffer_.size() >= LUXPOWER_PACKET_MIN_TOTAL_LENGTH) {
-      // Check for start byte 0x68 (or whatever LUXPOWER_START_BYTE is defined as)
-      if (this->rx_buffer_.front() != LUXPOWER_START_BYTE) {
-        ESP_LOGW(TAG, "Received malformed LuxPower packet: missing start byte 0x%02X. Flushing one byte.", LUXPOWER_START_BYTE);
-        this->rx_buffer_.pop_front(); // Discard malformed byte
-        continue;
-      }
+          if (this->data_buffer_.size() >= calculated_packet_length) {
+            // We have a full A1 packet
+            std::vector<uint8_t> packet(this->data_buffer_.begin(), this->data_buffer_.begin() + calculated_packet_length);
+            this->parse_luxpower_response_packet(packet);
 
-      // Get expected total packet length from bytes 1 and 2 of the LuxPower frame
-      // The length field includes the payload, CRC, and excludes the start byte and the length field itself,
-      // but includes the end byte.
-      uint16_t reported_length = (this->rx_buffer_[1] << 8) | this->rx_buffer_[2];
-      size_t total_packet_length = 3 + reported_length; // 1 (Start Byte) + 2 (Length Field) + reported_length
-
-      if (this->rx_buffer_.size() < total_packet_length) {
-        // Not enough data for a complete packet yet, wait for more
-        break;
-      }
-
-      // We have a full packet, extract it
-      std::vector<uint8_t> packet_data(total_packet_length);
-      for (size_t i = 0; i < total_packet_length; ++i) {
-        packet_data[i] = this->rx_buffer_.front();
-        this->rx_buffer_.pop_front();
-      }
-
-      // Parse the LuxPower proprietary response packet
-      std::vector<uint8_t> luxpower_payload;
-      if (this->parse_luxpower_response_packet(packet_data, luxpower_payload)) {
-        // Now interpret the Modbus-like payload (which starts with Function Code)
-        if (luxpower_payload.empty() || luxpower_payload[0] != 0x03) {
-            ESP_LOGW(TAG, "LuxPower response payload does not contain expected function code 0x03. Got 0x%02X", luxpower_payload.empty() ? 0xFF : luxpower_payload[0]);
-            continue; // Skip to next packet if any
-        }
-
-        // Interpret the Modbus FC 0x03 payload
-        if (this->interpret_modbus_read_holding_registers_payload(luxpower_payload, 0, 126)) {
-          // Successfully parsed data, now update sensors
-          for (LuxpowerSnaSensor *s : this->luxpower_sensors_) {
-            // Only process sensors belonging to Bank 0 for this read cycle (assuming Bank 0 read)
-            if (s->get_bank() == 0) {
-              auto it = this->current_raw_registers_.find(s->get_register_address());
-              if (it != this->current_raw_registers_.end()) {
-                uint16_t raw_value = it->second;
-
-                // Handle special types like FIRMWARE and MODEL
-                if (s->get_reg_type() == LUX_REG_TYPE_FIRMWARE) {
-                  // Firmware is typically a range of registers (e.g., 114-118)
-                  // You need to ensure all required registers are present before decoding
-                  if (s->get_register_address() == 114 && this->current_raw_registers_.count(118)) {
-                    std::vector<uint16_t> firmware_regs;
-                    for (int i = 0; i < 5; ++i) firmware_regs.push_back(this->current_raw_registers_[114 + i]);
-                    std::string firmware_version = this->get_firmware_version_(firmware_regs);
-                    ESP_LOGD(TAG, "Firmware Version: %s", firmware_version.c_str());
-                    // If this is a TextSensor, you'd publish text_sensor->publish_state(firmware_version);
-                    // For a float sensor, you might publish a dummy value or NAN
-                    s->publish_state(0.0f); // Or NAN if you want to indicate it's not a numeric value
-                  } else {
-                    s->publish_state(NAN);
-                  }
-                } else if (s->get_reg_type() == LUX_REG_TYPE_MODEL) {
-                  // Model is typically a range of registers (e.g., 119-122)
-                  if (s->get_register_address() == 119 && this->current_raw_registers_.count(122)) {
-                    std::vector<uint16_t> model_regs;
-                    for (int i = 0; i < 4; ++i) model_regs.push_back(this->current_raw_registers_[119 + i]);
-                    std::string model_name = this->get_model_name_(model_regs);
-                    ESP_LOGD(TAG, "Model Name: %s", model_name.c_str());
-                    // If this is a TextSensor, you'd publish text_sensor->publish_state(model_name);
-                    s->publish_state(0.0f); // Or NAN
-                  } else {
-                    s->publish_state(NAN);
-                  }
-                } else {
-                  // For numeric sensors, convert and publish
-                  float value = this->get_sensor_value_(raw_value, s->get_reg_type());
-                  s->publish_state(value);
-                }
-              } else {
-                ESP_LOGW(TAG, "Sensor %s (reg 0x%04X, bank %u) not found in received data. Publishing NAN.",
-                         s->get_name().c_str(), s->get_register_address(), s->get_bank());
-                s->publish_state(NAN); // Sensor data not available in this response
-              }
-            }
+            // Remove the processed packet from the buffer
+            this->data_buffer_.erase(this->data_buffer_.begin(), this->data_buffer_.begin() + calculated_packet_length);
+            // Continue processing if there's more data in the buffer
+            continue;
           }
-        } else {
-          ESP_LOGW(TAG, "Failed to interpret Modbus FC 0x03 payload from LuxPower response.");
         }
       } else {
-        ESP_LOGW(TAG, "Failed to parse LuxPower proprietary packet. Likely corrupt or invalid.");
+        // Not an A1 1A prefix, discard the first byte and continue
+        ESP_LOGW(TAG, "Unknown prefix 0x%02X. Discarding byte.", this->data_buffer_[0]);
+        this->data_buffer_.erase(this->data_buffer_.begin());
+        // Continue from the new first byte in the next iteration of the while loop
+        continue;
       }
     }
   }
