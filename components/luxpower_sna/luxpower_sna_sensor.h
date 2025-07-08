@@ -1,41 +1,27 @@
 #pragma once
 
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/core/component.h"
-#include "esphome/core/helpers.h"
-#include "luxpower_sna_constants.h" // Include the constants file for LuxpowerRegType
+#include "luxpower_inverter.h" // Include this to get LuxpowerRegType definition
 
 namespace esphome {
 namespace luxpower_sna {
 
-// Forward declaration of LuxPowerInverter is typically needed if LuxpowerSnaSensor
-// holds a pointer to LuxPowerInverter (e.g., for communication).
-// class LuxPowerInverter;
-
-class LuxpowerSnaSensor : public sensor::Sensor, public Component {
- public:
-  // Constructor for the sensor, takes the register address from YAML
-  LuxpowerSnaSensor(uint16_t register_address) : register_address_(register_address) {}
-
-  // Setter for the register type from YAML config
+class LuxpowerSnaSensor : public sensor::Sensor {
+public:
+  // Setters for internal variables
+  void set_register_address(uint16_t reg_address) { this->register_address_ = reg_address; }
   void set_reg_type(LuxpowerRegType reg_type) { this->reg_type_ = reg_type; }
+  void set_bank(uint8_t bank) { this->bank_ = bank; }
 
-  // Getter for the register type
+  // Getters for internal variables
+  uint16_t get_register_address() const { return this->register_address_; }
   LuxpowerRegType get_reg_type() const { return this->reg_type_; }
+  uint8_t get_bank() const { return this->bank_; }
 
-  // Optional: Setter to link this sensor to its parent inverter component
-  // void set_parent(LuxPowerInverter *parent) { this->parent_ = parent; }
-
-  // ESPHome methods
-  void dump_config() override; // Required for dumping component configuration
-  float get_setup_priority() const override { return setup_priority::DATA; } // Standard priority
-
- protected:
+protected:
   uint16_t register_address_; // The Modbus register address this sensor reads from
-  LuxpowerRegType reg_type_;  // How to interpret the raw register value
-
-  // Optional: Pointer to the parent LuxPowerInverter component
-  // LuxPowerInverter *parent_{nullptr};
+  LuxpowerRegType reg_type_;  // The type of register (e.g., INT, FLOAT_DIV10)
+  uint8_t bank_;              // The data bank for the register (if applicable)
 };
 
 } // namespace luxpower_sna
