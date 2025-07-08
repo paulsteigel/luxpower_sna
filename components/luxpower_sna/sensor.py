@@ -56,15 +56,15 @@ SENSOR_TYPES = {
     ),
 }
 
+
 # =========================================================================
-# ======================== THE CORRECTED PART =============================
+# ======================== THE CORRECTED LINE =============================
 # =========================================================================
-#
-# We now call sensor.sensor_schema() as a function to get the base,
-# then extend it. This is the modern method used by jk_bms.
-#
-PLATFORM_SCHEMA = cv.All(
+# The variable MUST be named CONFIG_SCHEMA for the loader to find it.
+CONFIG_SCHEMA = cv.All(
     sensor.sensor_schema().extend(
+# =========================================================================
+# =========================================================================
         {
             cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
@@ -72,9 +72,6 @@ PLATFORM_SCHEMA = cv.All(
     ),
     cv.has_at_least_one_key(*SENSOR_TYPES),
 )
-# =========================================================================
-# =========================================================================
-
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
@@ -82,4 +79,3 @@ async def to_code(config):
         if key in SENSOR_TYPES:
             sens = await sensor.new_sensor(conf)
             cg.add(hub.add_sensor(key, sens))
-
