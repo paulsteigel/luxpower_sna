@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-#include "sensor/sensor.h" // MODIFIED LINE
+#include "luxpower_sna_sensor.h" // MODIFIED: Point to your renamed sensor header
 #include <vector>
 #include <string>
 #include <chrono>
@@ -21,7 +21,7 @@ enum LuxpowerRegType {
     LUX_REG_TYPE_TIME_MINUTES = 6,
 };
 
-class LuxpowerSensor; // Forward declaration
+class LuxpowerSnaSensor; // Forward declaration (RENAMED CLASS)
 
 class LuxPowerInverterComponent : public Component {
  public:
@@ -36,7 +36,7 @@ class LuxPowerInverterComponent : public Component {
   void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_number_ = serial; }
   void set_update_interval(uint32_t update_interval) { this->update_interval_ = update_interval; }
 
-  void add_luxpower_sensor(LuxpowerSensor *obj, const std::string &name, uint16_t register_address, LuxpowerRegType reg_type, uint8_t bank);
+  void add_luxpower_sensor(LuxpowerSnaSensor *obj, const std::string &name, uint16_t register_address, LuxpowerRegType reg_type, uint8_t bank); // RENAMED CLASS
 
  protected:
   std::string inverter_host_;
@@ -44,7 +44,7 @@ class LuxPowerInverterComponent : public Component {
   std::string dongle_serial_;
   std::string inverter_serial_number_;
   uint32_t update_interval_;
-  std::vector<LuxpowerSensor *> luxpower_sensors_;
+  std::vector<LuxpowerSnaSensor *> luxpower_sensors_; // RENAMED CLASS
 
   std::chrono::steady_clock::time_point last_update_time_;
 

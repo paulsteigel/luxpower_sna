@@ -11,7 +11,7 @@ from esphome.components import sensor
 # The base component namespace (this matches your C++ namespace)
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
 LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", cg.Component)
-LuxpowerSensor = luxpower_sna_ns.class_("LuxpowerSensor", sensor.Sensor)
+LuxpowerSnaSensor = luxpower_sna_ns.class_("LuxpowerSnaSensor", sensor.Sensor) # RENAMED CLASS
 
 # Enum for register types (must match C++ enum in luxpower_inverter.h)
 LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType")
@@ -30,7 +30,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_SENSORS = "sensors"
-CONF_UNIQUE_ID = "unique_id" # Keep defined locally for potential internal use or future compatibility
+CONF_UNIQUE_ID = "unique_id"
 
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
@@ -46,10 +46,9 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
     state_class=cv.Optional(CONF_STATE_CLASS),
     accuracy_decimals=cv.Optional(CONF_ACCURACY_DECIMALS),
     icon=cv.Optional(CONF_ICON),
-    # Removed unique_id=cv.Optional(CONF_UNIQUE_ID) from here as it's causing TypeError
 ).extend(
     {
-        cv.GenerateID(): cv.declare_id(LuxpowerSensor),
+        cv.GenerateID(): cv.declare_id(LuxpowerSnaSensor), # RENAMED CLASS
         cv.Required(CONF_REGISTER_ADDRESS): cv.hex_uint16_t,
         cv.Required(CONF_REG_TYPE): cv.enum(LUX_REG_TYPES, upper=True),
         cv.Optional(CONF_BANK, default=0): cv.uint8_t,
