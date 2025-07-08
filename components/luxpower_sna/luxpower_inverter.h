@@ -11,7 +11,7 @@
 #include "sensors.h" // For LuxpowerSnaSensor class definition
 #include "consts.h" // For constants like LUXPOWER_START_BYTE, etc.
 
-#include <AsyncTCP.h>      // For AsyncClient
+#include <ESPAsyncTCP.h>      // For AsyncClient
 #include <vector>          // For std::vector
 #include <string>          // For std::string
 #include <deque>           // For std::deque (rx_buffer_)
