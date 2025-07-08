@@ -276,11 +276,14 @@ void LuxPowerInverterComponent::on_disconnect_cb(void *arg, AsyncClient *client)
 
 void LuxPowerInverterComponent::on_data_cb(void *arg, AsyncClient *client, void *data, size_t len) {
   LuxPowerInverterComponent *comp = static_cast<LuxPowerInverterComponent*>(arg);
-  ESP_LOGV(TAG, "Received %u bytes: %s", len, format_hex_pretty(data, len).c_str());
+  uint8_t *byte_data = reinterpret_cast<uint8_t*>(data); // This line already exists and is correct!
 
-  uint8_t *byte_data = reinterpret_cast<uint8_t*>(data);
+  // --- START FIX: Use byte_data for format_hex_pretty ---
+  ESP_LOGV(TAG, "Received %u bytes: %s", len, format_hex_pretty(byte_data, len).c_str());
+  // --- END FIX ---
+
   for (size_t i = 0; i < len; ++i) {
-    comp->rx_buffer_.push_back(byte_data[i]); // Use comp-> here
+    comp->rx_buffer_.push_back(byte_data[i]); // This line already uses byte_data
   }
   // Data will be processed in loop()
 }
