@@ -7,7 +7,7 @@
 // For TCP/IP communication, we use WiFiClient from the Arduino framework
 #include <WiFiClient.h>
 // Optionally include network component for network status checks
-//#include "esphome/components/network/network.h"
+#include "esphome/components/network/network.h"
 
 // Include your constants file
 #include "luxpower_sna_constants.h"
