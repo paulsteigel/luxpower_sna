@@ -1,7 +1,7 @@
 #pragma once
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h" // The standard, expected path for built-in ESPHome sensor
-#include "../luxpower_inverter.h" // Now refers to luxpower_inverter.h (parent folder)
+#include "luxpower_inverter.h" // Now refers to luxpower_inverter.h (parent folder)
 
 namespace esphome {
 namespace luxpower_sna {
