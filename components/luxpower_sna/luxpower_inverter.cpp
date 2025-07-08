@@ -2,7 +2,7 @@
 #include "luxpower_inverter.h"
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h" // For format_hex_pretty
-#include "sensor/sensor.h" // NEW: Include the renamed sensor header
+//#include "sensor/sensor.h" // NEW: Include the renamed sensor header
 
 // For Modbus CRC calculation (standard library, not specific to ESPHome)
 #define CRC16_POLY 0xA001 // Modbus polynomial
