@@ -3,7 +3,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
-#include "esphome/core/log.h"
+#include "esphome/core/log.h" // This header defines esphome::log::LogLevel
 #include <ESPAsyncTCP.h> // Include the ESPAsyncTCP library
 #include <vector>
 #include <string>
@@ -88,7 +88,7 @@ class LuxpowerInverterComponent : public PollingComponent {
   void parse_modbus_response_(const std::vector<uint8_t>& data_payload, uint8_t function_code, uint16_t start_address);
 
   // Custom helper for logging byte buffers as hex dump
-  void log_buffer_hexdump_(const char* tag, const uint8_t* buffer, size_t len, esphome::LogLevel level = esphome::LogLevel::LOG_LEVEL_VERBOSE);
+  void log_buffer_hexdump_(const char* tag, const uint8_t* buffer, size_t len, esphome::log::LogLevel level = esphome::log::LOG_LEVEL_VERBOSE);
 };
 
 // --- LuxpowerPacket Helper Class ---
