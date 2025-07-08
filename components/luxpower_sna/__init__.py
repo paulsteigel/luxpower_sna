@@ -1,11 +1,14 @@
 # custom_components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_HOST, CONF_PORT, CONF_UPDATE_INTERVAL, CONF_SENSORS, CONF_NAME, CONF_UNIT_OF_MEASUREMENT, CONF_DEVICE_CLASS, CONF_STATE_CLASS, CONF_ACCURACY_DECIMALS, CONF_ICON, CONF_UNIQUE_ID
+# Import only core constants that should be available from esphome.const
+from esphome.const import (
+    CONF_ID, CONF_NAME, CONF_UNIT_OF_MEASUREMENT, CONF_DEVICE_CLASS,
+    CONF_STATE_CLASS, CONF_ACCURACY_DECIMALS, CONF_ICON, CONF_UNIQUE_ID
+)
 from esphome.components import sensor
 
-# The base component namespace (e.g., luxpower_sna)
-# This maps directly to your custom_components/luxpower_sna folder
+# The base component namespace (this matches your C++ namespace)
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
 LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", cg.Component)
 LuxpowerSensor = luxpower_sna_ns.class_("LuxpowerSensor", sensor.Sensor)
@@ -20,17 +23,20 @@ LUX_REG_TYPES = {
     "MODEL": LuxpowerRegType.LUX_REG_TYPE_MODEL,
     "BITMASK": LuxpowerRegType.LUX_REG_TYPE_BITMASK,
     "TIME_MINUTES": LuxpowerRegType.LUX_REG_TYPE_TIME_MINUTES,
-    # Add other types as needed from your const.py or C++ enum
 }
 
-# Configuration keys for the main component
-CONF_INVERTER_HOST = "host"
-CONF_INVERTER_PORT = "port"
+# Configuration keys specific to the luxpower_sna component (defined locally)
+CONF_LUXPOWER_HOST = "host"
+CONF_LUXPOWER_PORT = "port"
+CONF_LUXPOWER_UPDATE_INTERVAL = "update_interval"
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
 CONF_REGISTER_ADDRESS = "register"
 CONF_REG_TYPE = "reg_type"
 CONF_BANK = "bank"
+
+# Key for the 'sensors' list in the YAML
+CONF_SENSORS_KEY = "sensors"
 
 # Schema for a Luxpower sensor
 LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
@@ -45,7 +51,7 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
         cv.GenerateID(): cv.declare_id(LuxpowerSensor),
         cv.Required(CONF_REGISTER_ADDRESS): cv.hex_uint16_t,
         cv.Required(CONF_REG_TYPE): cv.enum(LUX_REG_TYPES, upper=True),
-        cv.Optional(CONF_BANK, default=0): cv.uint8_t, # Default to bank 0 if not specified
+        cv.Optional(CONF_BANK, default=0): cv.uint8_t,
     }
 )
 
@@ -53,12 +59,12 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(LuxPowerInverterComponent),
-        cv.Required(CONF_INVERTER_HOST): cv.string,
-        cv.Required(CONF_INVERTER_PORT): cv.port,
+        cv.Required(CONF_LUXPOWER_HOST): cv.string,
+        cv.Required(CONF_LUXPOWER_PORT): cv.port,
         cv.Required(CONF_DONGLE_SERIAL): cv.string,
         cv.Required(CONF_INVERTER_SERIAL_NUMBER): cv.string,
-        cv.Optional(CONF_UPDATE_INTERVAL, default="60s"): cv.update_interval,
-        cv.Optional(CONF_SENSORS): cv.All(
+        cv.Optional(CONF_LUXPOWER_UPDATE_INTERVAL, default="60s"): cv.update_interval,
+        cv.Optional(CONF_SENSORS_KEY): cv.All(
             cv.ensure_list(LUXPOWER_SENSOR_SCHEMA),
             cv.Length(min=1)
         ),
@@ -71,15 +77,14 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cg.add(var.set_inverter_host(config[CONF_INVERTER_HOST]))
-    cg.add(var.set_inverter_port(config[CONF_INVERTER_PORT]))
+    cg.add(var.set_inverter_host(config[CONF_LUXPOWER_HOST]))
+    cg.add(var.set_inverter_port(config[CONF_LUXPOWER_PORT]))
     cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
     cg.add(var.set_inverter_serial_number(config[CONF_INVERTER_SERIAL_NUMBER]))
-    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
+    cg.add(var.set_update_interval(config[CONF_LUXPOWER_UPDATE_INTERVAL]))
 
-    if CONF_SENSORS in config:
-        for sens_config in config[CONF_SENSORS]:
-            # This is where the sensor is generated and registered with the main component
+    if CONF_SENSORS_KEY in config:
+        for sens_config in config[CONF_SENSORS_KEY]:
             sens = cg.new_Pvariable(sens_config[CONF_ID])
             await sensor.register_sensor(sens, sens_config)
             cg.add(var.add_luxpower_sensor(sens,
