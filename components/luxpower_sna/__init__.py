@@ -14,7 +14,6 @@ LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", 
 LuxpowerSensor = luxpower_sna_ns.class_("LuxpowerSensor", sensor.Sensor)
 
 # Enum for register types (must match C++ enum in luxpower_inverter.h)
-# REMOVED 'is_declaration=True' as it's no longer supported
 LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType")
 LUX_REG_TYPES = {
     "INT": LuxpowerRegType.LUX_REG_TYPE_INT,
@@ -31,7 +30,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_SENSORS = "sensors"
-CONF_UNIQUE_ID = "unique_id"
+CONF_UNIQUE_ID = "unique_id" # Keep defined locally for potential internal use or future compatibility
 
 CONF_DONGLE_SERIAL = "dongle_serial"
 CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
@@ -47,7 +46,7 @@ LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
     state_class=cv.Optional(CONF_STATE_CLASS),
     accuracy_decimals=cv.Optional(CONF_ACCURACY_DECIMALS),
     icon=cv.Optional(CONF_ICON),
-    unique_id=cv.Optional(CONF_UNIQUE_ID),
+    # Removed unique_id=cv.Optional(CONF_UNIQUE_ID) from here as it's causing TypeError
 ).extend(
     {
         cv.GenerateID(): cv.declare_id(LuxpowerSensor),
