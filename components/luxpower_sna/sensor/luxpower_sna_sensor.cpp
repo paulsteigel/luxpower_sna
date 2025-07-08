@@ -1,4 +1,4 @@
-#include "sensor.h" // MODIFIED include (to its new name, relative within the subfolder)
+#include "luxpower_sna_sensor.h" // MODIFIED include (to its new name, relative within the subfolder)
 #include "esphome/core/log.h"
 
 namespace esphome {
