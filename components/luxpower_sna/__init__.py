@@ -1,54 +1,89 @@
-# custom_components/luxpower_inverter/__init__.py
+# custom_components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_PORT, CONF_HOST
+from esphome.const import CONF_ID, CONF_HOST, CONF_PORT, CONF_UPDATE_INTERVAL, CONF_SENSORS, CONF_NAME, CONF_UNIT_OF_MEASUREMENT, CONF_DEVICE_CLASS, CONF_STATE_CLASS, CONF_ACCURACY_DECIMALS, CONF_ICON, CONF_UNIQUE_ID
+from esphome.components import sensor
 
-# Define the C++ namespace and the main component class.
-# This 'luxpower_inverter' namespace will be used in your C++ files.
-luxpower_ns = cg.esphome_ns.namespace('luxpower_inverter')
-LuxPowerInverterComponent = luxpower_ns.class_('LuxPowerInverterComponent', cg.Component)
+# The base component namespace (e.g., luxpower_sna)
+# This maps directly to your custom_components/luxpower_sna folder
+luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
+LuxPowerInverterComponent = luxpower_sna_ns.class_("LuxPowerInverterComponent", cg.Component)
+LuxpowerSensor = luxpower_sna_ns.class_("LuxpowerSensor", sensor.Sensor)
 
-# Define the configuration schema for your custom component.
-# This dictates what parameters users can specify in their ESPHome YAML file.
-CONFIG_SCHEMA = cv.Schema({
-    # Generate a unique ID for this component instance in the C++ code.
-    cv.GenerateID(): cv.declare_id(LuxPowerInverterComponent),
+# Enum for register types (must match C++ enum in luxpower_inverter.h)
+LuxpowerRegType = luxpower_sna_ns.enum("LuxpowerRegType", is_declaration=True)
+LUX_REG_TYPES = {
+    "INT": LuxpowerRegType.LUX_REG_TYPE_INT,
+    "FLOAT_DIV10": LuxpowerRegType.LUX_REG_TYPE_FLOAT_DIV10,
+    "SIGNED_INT": LuxpowerRegType.LUX_REG_TYPE_SIGNED_INT,
+    "FIRMWARE": LuxpowerRegType.LUX_REG_TYPE_FIRMWARE,
+    "MODEL": LuxpowerRegType.LUX_REG_TYPE_MODEL,
+    "BITMASK": LuxpowerRegType.LUX_REG_TYPE_BITMASK,
+    "TIME_MINUTES": LuxpowerRegType.LUX_REG_TYPE_TIME_MINUTES,
+    # Add other types as needed from your const.py or C++ enum
+}
 
-    # Required: The IP address or hostname of the Luxpower inverter dongle.
-    cv.Required(CONF_HOST): cv.string,
+# Configuration keys for the main component
+CONF_INVERTER_HOST = "host"
+CONF_INVERTER_PORT = "port"
+CONF_DONGLE_SERIAL = "dongle_serial"
+CONF_INVERTER_SERIAL_NUMBER = "inverter_serial_number"
+CONF_REGISTER_ADDRESS = "register"
+CONF_REG_TYPE = "reg_type"
+CONF_BANK = "bank"
 
-    # Optional: The TCP port for communication. Defaults to 8000.
-    cv.Optional(CONF_PORT, default=8000): cv.port,
+# Schema for a Luxpower sensor
+LUXPOWER_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=cv.Optional(CONF_UNIT_OF_MEASUREMENT),
+    device_class=cv.Optional(CONF_DEVICE_CLASS),
+    state_class=cv.Optional(CONF_STATE_CLASS),
+    accuracy_decimals=cv.Optional(CONF_ACCURACY_DECIMALS),
+    icon=cv.Optional(CONF_ICON),
+    unique_id=cv.Optional(CONF_UNIQUE_ID),
+).extend(
+    {
+        cv.GenerateID(): cv.declare_id(LuxpowerSensor),
+        cv.Required(CONF_REGISTER_ADDRESS): cv.hex_uint16_t,
+        cv.Required(CONF_REG_TYPE): cv.enum(LUX_REG_TYPES, upper=True),
+        cv.Optional(CONF_BANK, default=0): cv.uint8_t, # Default to bank 0 if not specified
+    }
+)
 
-    # Required: The serial number of the Wi-Fi dongle.
-    cv.Required("dongle_serial"): cv.string,
+# Main component schema
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(LuxPowerInverterComponent),
+        cv.Required(CONF_INVERTER_HOST): cv.string,
+        cv.Required(CONF_INVERTER_PORT): cv.port,
+        cv.Required(CONF_DONGLE_SERIAL): cv.string,
+        cv.Required(CONF_INVERTER_SERIAL_NUMBER): cv.string,
+        cv.Optional(CONF_UPDATE_INTERVAL, default="60s"): cv.update_interval,
+        cv.Optional(CONF_SENSORS): cv.All(
+            cv.ensure_list(LUXPOWER_SENSOR_SCHEMA),
+            cv.Length(min=1)
+        ),
+    }
+).extend(cv.COMPONENT_SCHEMA)
 
-    # Required: The serial number of the inverter itself.
-    cv.Required("serial_number"): cv.string,
 
-    # Optional: The interval for reading/writing data to the inverter.
-    # Defaults to 20 seconds. Ensures a minimum interval of 20 seconds.
-    cv.Optional("update_interval", default="20s"): cv.All(
-        cv.time_period, cv.Range(min=cv.TimePeriod(seconds=20))
-    ),
-
-}).extend(cv.COMPONENT_SCHEMA) # Extend with standard ESPHome component options
-
-# This function generates the C++ code based on the YAML configuration.
-def to_code(config):
-    # Create a new C++ variable for our main component.
+# Code generation for the main component
+async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
 
-    # Register the component with ESPHome.
-    yield cg.register_component(var, config)
+    cg.add(var.set_inverter_host(config[CONF_INVERTER_HOST]))
+    cg.add(var.set_inverter_port(config[CONF_INVERTER_PORT]))
+    cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
+    cg.add(var.set_inverter_serial_number(config[CONF_INVERTER_SERIAL_NUMBER]))
+    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
 
-    # Pass the configured host and port to the C++ component.
-    cg.add(var.set_inverter_host(config[CONF_HOST]))
-    cg.add(var.set_inverter_port(config[CONF_PORT]))
-
-    # Pass the dongle and inverter serial numbers to the C++ component.
-    cg.add(var.set_dongle_serial(config["dongle_serial"]))
-    cg.add(var.set_inverter_serial_number(config["serial_number"]))
-
-    # Pass the update interval to the C++ component.
-    cg.add(var.set_update_interval(config["update_interval"]))
+    if CONF_SENSORS in config:
+        for sens_config in config[CONF_SENSORS]:
+            # This is where the sensor is generated and registered with the main component
+            sens = cg.new_Pvariable(sens_config[CONF_ID])
+            await sensor.register_sensor(sens, sens_config)
+            cg.add(var.add_luxpower_sensor(sens,
+                                            sens_config[CONF_NAME],
+                                            sens_config[CONF_REGISTER_ADDRESS],
+                                            sens_config[CONF_REG_TYPE],
+                                            sens_config[CONF_BANK]))
