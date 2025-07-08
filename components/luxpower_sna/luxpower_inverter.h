@@ -1,4 +1,4 @@
-// components/luxpower_sna/luxpower_sna_component.h
+// components/luxpower_sna/luxpower_sna.h
 #pragma once
 
 #include "esphome/core/component.h"
