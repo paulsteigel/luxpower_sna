@@ -36,7 +36,6 @@ void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Banks to request: %d", this->num_banks_to_request_);
 }
 
-// REFACTORED UPDATE FUNCTION
 void LuxpowerSNAComponent::update() {
   if (this->is_updating_) {
     ESP_LOGW(TAG, "Update already in progress. Skipping.");
@@ -44,17 +43,16 @@ void LuxpowerSNAComponent::update() {
   }
   this->is_updating_ = true;
 
-  // FIX 1: create_tcp is a free function in the socket namespace, not a static method.
-  this->socket_ = socket::create_tcp(this->host_.c_str(), this->port_);
+  // *** THE FIX IS HERE ***
+  // The correct function is socket::Socket::create()
+  this->socket_ = socket::Socket::create(this->host_.c_str(), this->port_);
+  
   if (!this->socket_) {
     ESP_LOGE(TAG, "Could not create socket. Aborting update.");
     this->is_updating_ = false;
     if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: No Socket");
     return;
   }
-
-  // NOTE: Timeout is not set directly on the socket object in this API.
-  // We rely on the blocking read with its internal timeout.
 
   for (int bank = 0; bank < this->num_banks_to_request_; bank++) {
     uint16_t start_reg = bank * 40;
@@ -65,12 +63,9 @@ void LuxpowerSNAComponent::update() {
     
     this->log_hex_buffer("--> SENT", request);
 
-    // FIX 2: The write method expects a pointer and a size.
     this->socket_->write(request.data(), request.size());
 
-    // FIX 3: There is no read_data_once. We use a blocking read().
-    // We create a temporary buffer to read the response into.
-    std::vector<uint8_t> response_buffer(256); // A buffer large enough for the response
+    std::vector<uint8_t> response_buffer(256);
     ssize_t len = this->socket_->read(response_buffer.data(), response_buffer.size());
 
     if (len <= 0) {
@@ -81,11 +76,9 @@ void LuxpowerSNAComponent::update() {
       return;
     }
 
-    // Resize vector to actual received length
     response_buffer.resize(len);
     this->log_hex_buffer("<-- RECV", response_buffer);
 
-    // Validation
     if (len < 115 || response_buffer[0] != 0xA1 || response_buffer[1] != 0x1A || response_buffer[7] != 194) {
       ESP_LOGW(TAG, "Received invalid packet for bank %d. Aborting update.", bank);
       this->socket_->close();
@@ -98,7 +91,6 @@ void LuxpowerSNAComponent::update() {
     memcpy(&this->data_buffer_[bank * 80], &response_buffer[35], 80);
   }
 
-  // If we get here, all banks were read successfully.
   this->socket_->close();
   ESP_LOGI(TAG, "Update cycle successful. Parsing and publishing data.");
   if (this->status_text_sensor_) this->status_text_sensor_->publish_state("OK");
@@ -107,7 +99,6 @@ void LuxpowerSNAComponent::update() {
   this->is_updating_ = false;
 }
 
-// build_request_packet_ function remains the same
 std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_register, uint16_t num_registers) {
     std::vector<uint8_t> modbus_cmd(18);
     modbus_cmd[0] = 0;
@@ -144,7 +135,6 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_
     return tcp_frame;
 }
 
-// log_hex_buffer, get_register_value_, and parse_and_publish_ remain the same
 void LuxpowerSNAComponent::log_hex_buffer(const std::string& prefix, const std::vector<uint8_t>& buffer) {
     char hex_buffer[buffer.size() * 3 + 1];
     for (size_t i = 0; i < buffer.size(); i++) {
