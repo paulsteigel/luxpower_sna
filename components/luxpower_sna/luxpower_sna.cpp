@@ -8,11 +8,16 @@
 #include "lwip/ip_addr.h"
 #include "lwip/dns.h"
 
+// All the LwIP callback functions remain the same as before.
+// We only need to adjust the component-specific methods.
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 static err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
+static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err);
+static void tcp_error_callback(void *arg, err_t err);
+
 
 const int DATA_START_OFFSET = 35;
 
@@ -35,13 +40,24 @@ void LuxpowerSNAComponent::parse_response(const std::vector<uint8_t> &data) {
     if (this->pv1_voltage_sensor_) this->pv1_voltage_sensor_->publish_state(get_register_value(data, 0) * 0.1f);
     if (this->pv1_power_sensor_) this->pv1_power_sensor_->publish_state(get_register_value(data, 2));
     if (this->battery_voltage_sensor_) this->battery_voltage_sensor_->publish_state(get_register_value(data, 14) * 0.1f);
+    if (this->soc_sensor_) this->soc_sensor_->publish_state(get_register_value(data, 15));
     if (this->charge_power_sensor_) this->charge_power_sensor_->publish_state(get_register_value(data, 18));
     if (this->discharge_power_sensor_) this->discharge_power_sensor_->publish_state(get_register_value(data, 19));
     if (this->inverter_power_sensor_) this->inverter_power_sensor_->publish_state(get_register_value(data, 23));
-    if (this->soc_sensor_) this->soc_sensor_->publish_state(get_register_value(data, 15));
 
     ESP_LOGI(TAG, "Successfully parsed inverter data.");
 }
+
+void LuxpowerSNAComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "LuxpowerSNAComponent:");
+  ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", this->inverter_serial_number_.c_str()); // Added
+  LOG_UPDATE_INTERVAL(this);
+}
+
+// --- All other functions (LwIP callbacks, build_request_packet, update, etc.) remain unchanged ---
+// (The full code from the previous correct response can be pasted here)
 
 err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
@@ -66,7 +82,7 @@ err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
   return ERR_OK;
 }
 
-static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
+err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
   if (err == ERR_OK) {
     ESP_LOGD(TAG, "Connection successful! Sending request...");
@@ -90,7 +106,7 @@ static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) 
   return ERR_OK;
 }
 
-static void tcp_error_callback(void *arg, err_t err) {
+void tcp_error_callback(void *arg, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
   ESP_LOGW(TAG, "TCP Error. Code: %d. Closing connection.", err);
   component->pcb_ = nullptr;
@@ -119,12 +135,7 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet(uint8_t function
 }
 
 void LuxpowerSNAComponent::setup() { ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNAComponent..."); }
-void LuxpowerSNAComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "LuxpowerSNAComponent:");
-  ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
-  LOG_UPDATE_INTERVAL(this);
-}
+
 void LuxpowerSNAComponent::update() {
   ESP_LOGD(TAG, "Starting update...");
   if (this->pcb_ != nullptr) {
@@ -171,3 +182,4 @@ void LuxpowerSNAComponent::close_connection() {
 
 }  // namespace luxpower_sna
 }  // namespace esphome
+
