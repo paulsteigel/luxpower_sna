@@ -47,8 +47,6 @@ CONFIG_SCHEMA = (
     )
     # Inherit the settings from PollingComponent (like update_interval).
     .extend(cv.polling_component_schema("20s"))
-    # Inherit the settings from the socket component to enable networking.
-    .extend(socket.socket_component_schema())
 )
 
 # This is the schema used by child components (like sensors) to find their parent hub.
