@@ -5,8 +5,7 @@ import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor, socket
 from esphome.const import (
     CONF_ID,
-    CONF_HOST,
-    CONF_PORT,
+    # CONF_HOST and CONF_PORT are not in esphome.const, so we remove them
     CONF_UPDATE_INTERVAL,
 )
 
@@ -34,9 +33,10 @@ CONFIG_SCHEMA = (
         {
             # Every component needs an ID.
             cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
-            # Define the required network settings.
-            cv.Required(CONF_HOST): cv.string,
-            cv.Required(CONF_PORT): cv.port,
+            # --- CORRECTED HERE ---
+            # Use literal strings for host and port as they don't have constants.
+            cv.Required("host"): cv.string,
+            cv.Required("port"): cv.port,
             # Define our custom required settings.
             # We use a validator to ensure the serial number is the correct length.
             cv.Required(CONF_DONGLE_SERIAL): cv.string_with_length(10, 10),
@@ -45,10 +45,8 @@ CONFIG_SCHEMA = (
         }
     )
     # Inherit the settings from PollingComponent (like update_interval).
-    .extend(cv.polling_component_schema("10s"))
-    # --- THIS IS THE CRITICAL FIX ---
-    # Inherit the settings from the socket component. This tells the build system
-    # to include the socket implementation and required compiler flags.
+    .extend(cv.polling_component_schema("20s"))
+    # Inherit the settings from the socket component to enable networking.
     .extend(socket.socket_component_schema())
 )
 
@@ -66,13 +64,13 @@ async def to_code(config):
     # Register this variable as a PollingComponent.
     await cg.register_component(var, config)
 
-    # --- THIS IS THE OTHER CRITICAL FIX ---
-    # Register this component as a user of the socket API. This generates
-    # the necessary setup code for the socket implementation.
+    # Register this component as a user of the socket API.
     await socket.register_socket(var, config)
 
-    # Add the C++ code to call the setter methods on our object.
-    cg.add(var.set_host(config[CONF_HOST]))
-    cg.add(var.set_port(config[CONF_PORT]))
+    # --- CORRECTED HERE ---
+    # Use literal strings to access the config values.
+    cg.add(var.set_host(config["host"]))
+    cg.add(var.set_port(config["port"]))
+
     cg.add(var.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
     cg.add(var.set_num_banks_to_request(config[CONF_NUM_BANKS]))
