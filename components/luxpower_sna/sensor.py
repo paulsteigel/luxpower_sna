@@ -1,6 +1,6 @@
 # components/luxpower_sna/sensor.py
 import esphome.codegen as cg
-import esphome.config_validation as cv  # We need cv for PLATFORM_SCHEMA
+import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
     DEVICE_CLASS_ENERGY,
@@ -69,24 +69,25 @@ SENSOR_TYPES = {
 }
 
 
-# The CONFIG_SCHEMA for the sensor platform
-# --- THE FIX IS HERE ---
+# --- THE CORRECTED SCHEMA DEFINITION ---
+# This defines the schema for the entire 'sensor:' platform block.
+PLATFORM_SCHEMA = sensor.PLATFORM_SCHEMA.extend(
+    {
+        # Add all the possible sensor keys as Optional
+        **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
+    }
+).extend(LUXPOWER_SNA_COMPONENT_SCHEMA) # Extend with the linking schema
+
+# We rename CONFIG_SCHEMA to PLATFORM_SCHEMA as it's more idiomatic for platforms.
+# But for validation, we need to ensure at least one key is present.
 CONFIG_SCHEMA = cv.All(
-    cv.PLATFORM_SCHEMA.extend(  # Changed from sensor.PLATFORM_SCHEMA
-        {
-            # Add all the possible sensor keys as Optional
-            **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-        }
-    ).extend(LUXPOWER_SNA_COMPONENT_SCHEMA), # Extend with the linking schema
-    # This validation ensures that the user provides at least one sensor key.
+    PLATFORM_SCHEMA,
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
 
+
 async def to_code(config):
-    # Get the hub object using the ID from the linking schema
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    
-    # Loop through our defined sensor types and create the ones the user configured
     for yaml_key, c_name in YAML_TO_C_NAMES.items():
         if yaml_key in config:
             conf = config[yaml_key]
