@@ -1,5 +1,6 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
+#include "esphome/components/socket/socket.h" // Ensure socket headers are included
 #include <cstring> // For memcpy
 
 namespace esphome {
@@ -43,17 +44,33 @@ void LuxpowerSNAComponent::update() {
   }
   this->is_updating_ = true;
 
-  // *** THE FIX IS HERE ***
-  // The correct function is socket::Socket::create()
-  this->socket_ = socket::Socket::create(this->host_.c_str(), this->port_);
-  
-  if (!this->socket_) {
-    ESP_LOGE(TAG, "Could not create socket. Aborting update.");
+  // ====================================================================
+  // *** THE REAL FIX IS HERE ***
+  // Correct two-step socket creation and connection process
+  // ====================================================================
+
+  // Step 1: Create the socket object.
+  this->socket_ = socket::socket(AF_INET, SOCK_STREAM, 0);
+  if (this->socket_ == nullptr) {
+    ESP_LOGE(TAG, "Could not create socket object. Aborting update.");
     this->is_updating_ = false;
-    if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: No Socket");
+    if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: Create Socket");
     return;
   }
 
+  // Step 2: Connect the socket to the host.
+  if (this->socket_->connect(this->host_.c_str(), this->port_) != 0) {
+    ESP_LOGW(TAG, "Could not connect to %s:%d. Aborting update.", this->host_.c_str(), this->port_);
+    this->socket_->close();
+    this->socket_ = nullptr;
+    this->is_updating_ = false;
+    if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: Connection Failed");
+    return;
+  }
+
+  ESP_LOGD(TAG, "Successfully connected to %s:%d", this->host_.c_str(), this->port_);
+
+  // The rest of the logic remains the same
   for (int bank = 0; bank < this->num_banks_to_request_; bank++) {
     uint16_t start_reg = bank * 40;
     uint16_t num_regs = 40;
@@ -71,6 +88,7 @@ void LuxpowerSNAComponent::update() {
     if (len <= 0) {
       ESP_LOGW(TAG, "Read failed for bank %d. Error: %s", bank, strerror(errno));
       this->socket_->close();
+      this->socket_ = nullptr;
       this->is_updating_ = false;
       if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: Read Failed");
       return;
@@ -82,6 +100,7 @@ void LuxpowerSNAComponent::update() {
     if (len < 115 || response_buffer[0] != 0xA1 || response_buffer[1] != 0x1A || response_buffer[7] != 194) {
       ESP_LOGW(TAG, "Received invalid packet for bank %d. Aborting update.", bank);
       this->socket_->close();
+      this->socket_ = nullptr;
       this->is_updating_ = false;
       if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: Invalid Packet");
       return;
@@ -92,6 +111,7 @@ void LuxpowerSNAComponent::update() {
   }
 
   this->socket_->close();
+  this->socket_ = nullptr;
   ESP_LOGI(TAG, "Update cycle successful. Parsing and publishing data.");
   if (this->status_text_sensor_) this->status_text_sensor_->publish_state("OK");
   
@@ -99,6 +119,8 @@ void LuxpowerSNAComponent::update() {
   this->is_updating_ = false;
 }
 
+// build_request_packet_, log_hex_buffer, get_register_value_, and parse_and_publish_ remain the same
+// ... (rest of the file is unchanged) ...
 std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_register, uint16_t num_registers) {
     std::vector<uint8_t> modbus_cmd(18);
     modbus_cmd[0] = 0;
