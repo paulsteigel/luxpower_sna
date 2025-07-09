@@ -64,7 +64,7 @@ async def to_code(config):
     await cg.register_component(var, config)
 
     # Register this component as a user of the socket API.
-    await socket.register_socket(var, config)
+    #await socket.register_socket(var, config)
 
     # Use literal strings to access the config values.
     cg.add(var.set_host(config["host"]))
