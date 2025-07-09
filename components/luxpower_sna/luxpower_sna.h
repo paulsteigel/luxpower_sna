@@ -3,12 +3,11 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/components/text_sensor/text_sensor.h" // Add this include
+#include "esphome/components/text_sensor/text_sensor.h"
 #include <vector>
 #include <map>
 #include <string>
 
-// --- Correct includes for AsyncTCP ---
 #ifdef USE_ESP32
 #include <AsyncTCP.h>
 #elif USE_ESP8266
@@ -23,11 +22,18 @@ class LuxpowerSNAComponent : public PollingComponent {
   // --- Setters for configuration from __init__.py ---
   void set_host(const std::string &host) { this->host_ = host; }
   void set_port(uint16_t port) { this->port_ = port; }
-  void set_dongle_serial(const std::vector<uint8_t> &serial) { this->dongle_serial_ = serial; }
-  void set_inverter_serial_number(const std::vector<uint8_t> &serial) { this->inverter_serial_ = serial; }
+
+  // --- CORRECTED SETTERS for serial numbers ---
+  // Accept a string from codegen and convert it to the internal vector format.
+  void set_dongle_serial(const std::string &serial_str) {
+    this->dongle_serial_.assign(serial_str.begin(), serial_str.end());
+  }
+  // This function name now matches the YAML key and python call.
+  void set_inverter_serial_number(const std::string &serial_str) {
+    this->inverter_serial_.assign(serial_str.begin(), serial_str.end());
+  }
 
   // --- Methods called by python to register sensors ---
-  // Using templates to avoid repeating code for each sensor type
   template<typename T> void set_sensor(const std::string &key, T *sensor) {
     this->sensors_[key] = (EntityBase *)sensor;
   }
@@ -84,11 +90,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::vector<uint8_t> dongle_serial_;
   std::vector<uint8_t> inverter_serial_;
   
-  // --- Use AsyncClient, not a synchronous socket ---
   AsyncClient *tcp_client_{nullptr};
 
-  // --- A map to store pointers to the registered sensors ---
-  // Using EntityBase to store both sensor and text_sensor
   std::map<std::string, EntityBase *> sensors_;
 };
 
