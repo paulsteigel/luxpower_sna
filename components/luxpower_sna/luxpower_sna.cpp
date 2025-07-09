@@ -10,9 +10,8 @@ using esphome::crc16;
 using esphome::format_hex_pretty;
 
 // ===================================================================================
-// CORRECTED: The hex_to_data function did not exist. We are implementing it here.
-// This function converts a string of hex characters (e.g., "1A2B3C") into a
-// vector of bytes ({0x1A, 0x2B, 0x3C}).
+// CORRECTED: Re-implemented hex_to_data to be exception-free, as required by ESPHome.
+// This version manually parses hex characters instead of using std::stoul.
 // ===================================================================================
 optional<std::vector<uint8_t>> hex_to_data(const std::string &hex_string) {
   if (hex_string.length() % 2 != 0) {
@@ -20,14 +19,24 @@ optional<std::vector<uint8_t>> hex_to_data(const std::string &hex_string) {
   }
   std::vector<uint8_t> data;
   data.reserve(hex_string.length() / 2);
+  
   for (size_t i = 0; i < hex_string.length(); i += 2) {
-    try {
-      std::string byte_string = hex_string.substr(i, 2);
-      uint8_t byte = static_cast<uint8_t>(std::stoul(byte_string, nullptr, 16));
-      data.push_back(byte);
-    } catch (const std::exception &e) {
-      return {};  // Invalid character in hex string
+    uint8_t byte = 0;
+    for (size_t j = 0; j < 2; ++j) {
+      char c = hex_string[i + j];
+      int value = 0;
+      if (c >= '0' && c <= '9') {
+        value = c - '0';
+      } else if (c >= 'a' && c <= 'f') {
+        value = c - 'a' + 10;
+      } else if (c >= 'A' && c <= 'F') {
+        value = c - 'A' + 10;
+      } else {
+        return {}; // Invalid character
+      }
+      byte = (byte << 4) | value;
     }
+    data.push_back(byte);
   }
   return data;
 }
@@ -50,18 +59,20 @@ enum LuxpowerRegister {
 #define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
-  // Now calling our own, local hex_to_data function
   auto data = hex_to_data(serial);
   if (data.has_value()) {
     this->dongle_serial_ = data.value();
+  } else {
+    ESP_LOGE(TAG, "Invalid dongle serial number provided: %s", serial.c_str());
   }
 }
 
 void LuxpowerSNAComponent::set_inverter_serial_number(const std::string &serial) {
-  // Now calling our own, local hex_to_data function
   auto data = hex_to_data(serial);
   if (data.has_value()) {
     this->inverter_serial_ = data.value();
+  } else {
+    ESP_LOGE(TAG, "Invalid inverter serial number provided: %s", serial.c_str());
   }
 }
 
