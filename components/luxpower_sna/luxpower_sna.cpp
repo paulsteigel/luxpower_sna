@@ -1,11 +1,135 @@
 // components/luxpower_sna/luxpower_sna.cpp
+#include "luxpower_sna.h"
+#include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
 
-// ... (keep all the other functions like setup, update, request_data_, etc. the same) ...
+namespace esphome {
+namespace luxpower_sna {
+
+static const char *const TAG = "luxpower_sna";
+
+// =================================================================================================
+// == REGISTER MAP for 117-byte data packet
+// =================================================================================================
+// This map defines the byte index for each value in the data packet received from the inverter.
+// For 16-bit values (U16/S16), the index points to the LOW byte (the second byte).
+// The high byte is automatically read from the preceding index (index - 1).
+//
+// To adjust an offset, just change the number here.
+enum LuxpowerRegister {
+  // System Status & Info
+  REG_STATUS_CODE = 45,
+  REG_POWER_FACTOR = 47,
+  REG_SOC = 46,
+
+  // Voltages & Frequencies
+  REG_BATTERY_VOLTAGE = 35,
+  REG_GRID_VOLTAGE = 39,
+  REG_GRID_FREQUENCY = 71,
+  REG_PV1_VOLTAGE = 53,
+  REG_PV2_VOLTAGE = 57,
+  // REG_EPS_VOLTAGE = ??, // Not found yet
+  // REG_EPS_FREQUENCY = ??, // Not found yet
+
+  // Power Readings (W)
+  REG_BATTERY_POWER = 37,    // S16: Signed value, positive=charge, negative=discharge
+  REG_PV1_POWER = 51,
+  REG_PV2_POWER = 55,
+  REG_GRID_POWER = 59,       // S16: Signed value, positive=import, negative=export
+  REG_INVERTER_POWER = 61,   // Often used for EPS power
+  REG_LOAD_POWER = 63,
+
+  // Temperatures (°C)
+  REG_RADIATOR_TEMP = 65,
+  REG_INVERTER_TEMP = 67,
+  // REG_BATTERY_TEMP = ??, // Not found yet
+
+  // Daily Energy Totals (kWh)
+  REG_PV_TODAY = 89,
+  REG_LOAD_TODAY = 91,
+  REG_CHARGE_TODAY = 95,
+  REG_GRID_EXPORT_TODAY = 99,
+  REG_GRID_IMPORT_TODAY = 101,
+  // REG_DISCHARGE_TODAY = ??, // Not found yet
+  // REG_EPS_TODAY = ??, // Not found yet
+};
+
+// Helper macros to make parsing cleaner
+#define U16(reg) (raw[(reg) - 1] << 8 | raw[reg])
+#define S16(reg) (int16_t)(raw[(reg) - 1] << 8 | raw[reg])
+#define U8(reg) raw[reg]
+
+// =================================================================================================
+
+
+void LuxpowerSNAComponent::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
+}
+
+void LuxpowerSNAComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
+  ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", format_hex_pretty(this->dongle_serial_).c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", format_hex_pretty(this->inverter_serial_).c_str());
+}
+
+void LuxpowerSNAComponent::update() {
+  this->request_data_();
+}
+
+void LuxpowerSNAComponent::request_data_() {
+  if (this->tcp_client_ != nullptr && this->tcp_client_->connected()) {
+    ESP_LOGD(TAG, "Skipping data request, TCP client is busy.");
+    return;
+  }
+  
+  ESP_LOGD(TAG, "Connecting to %s:%u", this->host_.c_str(), this->port_);
+  this->tcp_client_ = new AsyncClient();
+
+  this->tcp_client_->onData([this](void *data, size_t len) {
+    this->handle_packet_(data, len);
+    this->tcp_client_->close();
+  });
+
+  this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
+    ESP_LOGD(TAG, "TCP connected, sending heartbeat frame.");
+    // Heartbeat Frame: 0xA1, 0x1A, 0x01, 0x02, 0x00, 0x0F, {dongle_serial}, 0x00, 0x00
+    std::vector<uint8_t> request;
+    request.insert(request.end(), {0xA1, 0x1A, 0x01, 0x02, 0x00, 0x0F});
+    request.insert(request.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
+    request.insert(request.end(), {0x00, 0x00});
+    client->write(reinterpret_cast<const char*>(request.data()), request.size());
+
+    // Data Frame: 0xA1, 0x1A, 0x01, 0x02, 0x00, 0x12, {dongle_serial}, {inverter_serial}, 0x00, 0x00
+    request.clear();
+    request.insert(request.end(), {0xA1, 0x1A, 0x01, 0x02, 0x00, 0x12});
+    request.insert(request.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
+    request.insert(request.end(), this->inverter_serial_.begin(), this->inverter_serial_.end());
+    request.insert(request.end(), {0x00, 0x00});
+    client->write(reinterpret_cast<const char*>(request.data()), request.size());
+  });
+
+  this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
+    ESP_LOGE(TAG, "TCP connection error: %s", client->errorToString(error));
+  });
+
+  this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
+    ESP_LOGW(TAG, "TCP connection timeout.");
+    client->close();
+  });
+
+  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) {
+    ESP_LOGD(TAG, "TCP disconnected.");
+    delete this->tcp_client_;
+    this->tcp_client_ = nullptr;
+  });
+
+  this->tcp_client_->connect(this->host_.c_str(), this->port_);
+}
 
 void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   uint8_t *raw = (uint8_t *) data;
 
-  // Your inverter sends a 117-byte packet. Let's adjust the check.
   if (len < 117) {
     ESP_LOGW(TAG, "Received packet too short: %d bytes. Expected 117 bytes.", len);
     return;
@@ -13,81 +137,49 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   
   ESP_LOGD(TAG, "Full packet received:\n%s", format_hex_pretty(raw, len).c_str());
 
-  // --- NEW PARSING LOGIC BASED ON YOUR 117-BYTE PACKET ---
-  // Note: Byte order is Big-Endian (first byte is MSB).
+  // --- PARSING LOGIC USING THE REGISTER MAP ---
   
-  // --- High-Confidence Mappings ---
-  float battery_voltage = (float)(raw[34] << 8 | raw[35]) / 100.0f; // e.g., 0x1450 -> 5200 -> 52.0V
-  this->publish_state_("battery_voltage", battery_voltage);
+  this->publish_state_("battery_voltage", (float)U16(REG_BATTERY_VOLTAGE) / 100.0f);
+  this->publish_state_("soc", (float)U8(REG_SOC));
+  this->publish_state_("grid_voltage", (float)U16(REG_GRID_VOLTAGE) / 10.0f);
+  this->publish_state_("grid_frequency", (float)U16(REG_GRID_FREQUENCY) / 100.0f);
+  this->publish_state_("power_factor", (float)U8(REG_POWER_FACTOR) / 100.0f);
 
-  float soc = (float)raw[46]; // e.g., 0x62 -> 98%
-  this->publish_state_("soc", soc);
-
-  float grid_voltage = (float)(raw[38] << 8 | raw[39]) / 10.0f; // e.g., 0x08BB -> 2235 -> 223.5V
-  this->publish_state_("grid_voltage", grid_voltage);
-  
-  float grid_frequency = (float)(raw[70] << 8 | raw[71]) / 100.0f; // e.g., 0x1371 -> 4977 -> 49.77Hz
-  this->publish_state_("grid_frequency", grid_frequency);
-
-  // --- Power Values (likely correct, need to verify charge/discharge direction) ---
-  int battery_power_raw = (int16_t)(raw[36] << 8 | raw[37]); // Signed value
+  int16_t battery_power_raw = S16(REG_BATTERY_POWER);
   this->publish_state_("battery_power", (float)battery_power_raw);
   this->publish_state_("charge_power", (float)(battery_power_raw > 0 ? battery_power_raw : 0));
   this->publish_state_("discharge_power", (float)(battery_power_raw < 0 ? -battery_power_raw : 0));
 
-  float pv1_power = (float)(raw[50] << 8 | raw[51]); // e.g., 0x05CC -> 1484W
+  float pv1_power = (float)U16(REG_PV1_POWER);
+  float pv2_power = (float)U16(REG_PV2_POWER);
   this->publish_state_("pv1_power", pv1_power);
-  float pv2_power = (float)(raw[54] << 8 | raw[55]); // e.g., 0x06C0 -> 1728W
   this->publish_state_("pv2_power", pv2_power);
   this->publish_state_("pv_power", pv1_power + pv2_power);
 
-  int grid_power_raw = (int16_t)(raw[58] << 8 | raw[59]); // Signed value
+  int16_t grid_power_raw = S16(REG_GRID_POWER);
   this->publish_state_("grid_power", (float)grid_power_raw);
-  // Assuming positive is import (buying), negative is export (selling)
-  // This might need to be swapped depending on your inverter's logic
-  this->publish_state_("grid_import_today", (float)(grid_power_raw > 0 ? grid_power_raw : 0));
-  this->publish_state_("grid_export_today", (float)(grid_power_raw < 0 ? -grid_power_raw : 0));
+  this->publish_state_("grid_import_power", (float)(grid_power_raw > 0 ? grid_power_raw : 0));
+  this->publish_state_("grid_export_power", (float)(grid_power_raw < 0 ? -grid_power_raw : 0));
+
+  this->publish_state_("load_power", (float)U16(REG_LOAD_POWER));
+  this->publish_state_("inverter_power", (float)U16(REG_INVERTER_POWER));
+  this->publish_state_("eps_power", (float)U16(REG_INVERTER_POWER));
+
+  this->publish_state_("pv1_voltage", (float)U16(REG_PV1_VOLTAGE) / 10.0f);
+  this->publish_state_("pv2_voltage", (float)U16(REG_PV2_VOLTAGE) / 10.0f);
   
-  float load_power = (float)(raw[62] << 8 | raw[63]); // e.g., 0x015C -> 348W
-  this->publish_state_("load_power", load_power);
+  this->publish_state_("radiator_temp", (float)U16(REG_RADIATOR_TEMP) / 10.0f);
+  this->publish_state_("inverter_temp", (float)U16(REG_INVERTER_TEMP) / 10.0f);
+  
+  this->publish_state_("pv_today", (float)U16(REG_PV_TODAY) / 10.0f);
+  this->publish_state_("load_today", (float)U16(REG_LOAD_TODAY) / 10.0f);
+  this->publish_state_("charge_today", (float)U16(REG_CHARGE_TODAY) / 10.0f);
+  this->publish_state_("grid_import_today", (float)U16(REG_GRID_IMPORT_TODAY) / 10.0f);
+  this->publish_state_("grid_export_today", (float)U16(REG_GRID_EXPORT_TODAY) / 10.0f);
 
-  // Inverter Power might be EPS power or total AC output. Let's assume it's EPS for now.
-  float inverter_power = (float)(raw[60] << 8 | raw[61]); // e.g., 0x0000 -> 0W
-  this->publish_state_("inverter_power", inverter_power);
-  this->publish_state_("eps_power", inverter_power);
-
-  // --- Other PV and EPS values ---
-  float pv1_voltage = (float)(raw[52] << 8 | raw[53]) / 10.0f; // e.g., 0x0700 -> 1792 -> 179.2V
-  this->publish_state_("pv1_voltage", pv1_voltage);
-  float pv2_voltage = (float)(raw[56] << 8 | raw[57]) / 10.0f; // e.g., 0x00BA -> 186 -> 18.6V (This seems low, is PV2 connected/in sun?)
-  this->publish_state_("pv2_voltage", pv2_voltage);
-
-  // These might not be available in this packet, using grid values as placeholders
-  this->publish_state_("eps_voltage", grid_voltage);
-  this->publish_state_("eps_frequency", grid_frequency);
-  this->publish_state_("power_factor", (float)(raw[47]) / 100.0f); // e.g., 0x61 -> 97 -> 0.97
-
-  // --- Temperatures (Best Guesses - Please Verify) ---
-  float radiator_temp = (float)(raw[64] << 8 | raw[65]) / 10.0f; // e.g., 0x9A13 -> ? Needs verification
-  this->publish_state_("radiator_temp", radiator_temp);
-  float inverter_temp = (float)(raw[66] << 8 | raw[67]) / 10.0f; // e.g., 0x1371 -> ? Needs verification
-  this->publish_state_("inverter_temp", inverter_temp);
-  this->publish_state_("battery_temp", 0.0f); // Cannot locate in this packet yet
-
-  // --- Daily Energy Totals (Best Guesses - Please Verify) ---
-  this->publish_state_("pv_today", (float)(raw[88] << 8 | raw[89]) / 10.0f);
-  this->publish_state_("load_today", (float)(raw[90] << 8 | raw[91]) / 10.0f);
-  this->publish_state_("charge_today", (float)(raw[94] << 8 | raw[95]) / 10.0f);
-  this->publish_state_("grid_import_today", (float)(raw[100] << 8 | raw[101]) / 10.0f);
-  this->publish_state_("grid_export_today", (float)(raw[98] << 8 | raw[99]) / 10.0f);
-  this->publish_state_("discharge_today", (float)(0)); // Can't locate yet
-  this->publish_state_("eps_today", (float)(0)); // Can't locate yet
-  this->publish_state_("inverter_today", (float)(0)); // Can't locate yet
-
-  // --- Status Code ---
-  int status_code = raw[45]; // e.g., 0x02
+  int status_code = U8(REG_STATUS_CODE);
   this->publish_state_("status_code", (float)status_code);
-  std::string status_text = "Unknown";
+  std::string status_text;
   switch(status_code) {
       case 0: status_text = "Standby"; break;
       case 1: status_text = "Self Test"; break;
@@ -98,3 +190,24 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   }
   this->publish_state_("status_text", status_text);
 }
+
+void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
+    auto it = this->sensors_.find(key);
+    if (it != this->sensors_.end()) {
+        ((sensor::Sensor *)it->second)->publish_state(value);
+    } else {
+        ESP_LOGV(TAG, "Sensor key %s not found in map", key.c_str());
+    }
+}
+
+void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
+    auto it = this->sensors_.find(key);
+    if (it != this->sensors_.end()) {
+        ((text_sensor::TextSensor *)it->second)->publish_state(value);
+    } else {
+        ESP_LOGV(TAG, "Text sensor key %s not found in map", key.c_str());
+    }
+}
+
+}  // namespace luxpower_sna
+}  // namespace esphome
