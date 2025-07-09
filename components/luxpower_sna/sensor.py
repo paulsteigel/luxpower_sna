@@ -70,18 +70,15 @@ SENSOR_TYPES = {
 
 
 # --- THE CORRECTED SCHEMA DEFINITION ---
-# This defines the schema for the entire 'sensor:' platform block.
-PLATFORM_SCHEMA = sensor.PLATFORM_SCHEMA.extend(
-    {
-        # Add all the possible sensor keys as Optional
-        **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-    }
-).extend(LUXPOWER_SNA_COMPONENT_SCHEMA) # Extend with the linking schema
-
-# We rename CONFIG_SCHEMA to PLATFORM_SCHEMA as it's more idiomatic for platforms.
-# But for validation, we need to ensure at least one key is present.
 CONFIG_SCHEMA = cv.All(
-    PLATFORM_SCHEMA,
+    # The base schema for a sensor platform is sensor.SENSOR_PLATFORM_SCHEMA
+    sensor.SENSOR_PLATFORM_SCHEMA.extend(
+        {
+            # Add all the possible sensor keys as Optional
+            **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
+        }
+    ).extend(LUXPOWER_SNA_COMPONENT_SCHEMA), # Extend with the linking schema
+    # This validation ensures that the user provides at least one sensor key.
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
 
@@ -93,3 +90,4 @@ async def to_code(config):
             conf = config[yaml_key]
             sens = await sensor.new_sensor(conf)
             cg.add(getattr(hub, f"set_{c_name}_sensor")(sens))
+
