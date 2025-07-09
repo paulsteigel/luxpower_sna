@@ -1,6 +1,6 @@
 # components/luxpower_sna/sensor.py
 import esphome.codegen as cg
-import esphome.config_validation as cv
+import esphome.config_validation as cv  # We need cv for PLATFORM_SCHEMA
 from esphome.components import sensor
 from esphome.const import (
     DEVICE_CLASS_ENERGY,
@@ -18,10 +18,9 @@ from esphome.const import (
     UNIT_WATT,
 )
 
-# --- Import the linking schema and ID from __init__.py ---
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-# This maps user-friendly YAML keys to the internal C++ names
+# ... (YAML_TO_C_NAMES and SENSOR_TYPES dictionaries remain unchanged) ...
 YAML_TO_C_NAMES = {
     "voltage": "battery_voltage", "soc": "soc", "battery_power": "battery_power",
     "charge_power": "charge_power", "discharge_power": "discharge_power", "pv_power": "pv_power",
@@ -35,8 +34,6 @@ YAML_TO_C_NAMES = {
     "load_today": "load_today", "eps_today": "eps_today", "inverter_temp": "inverter_temp",
     "radiator_temp": "radiator_temp", "battery_temp": "battery_temp", "status_code": "status_code",
 }
-
-# Defines the schema for each sensor type
 SENSOR_TYPES = {
     "voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "soc": sensor.sensor_schema(unit_of_measurement=UNIT_PERCENT, icon="mdi:battery-high", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
@@ -71,9 +68,11 @@ SENSOR_TYPES = {
     "status_code": sensor.sensor_schema(icon="mdi:information-outline", accuracy_decimals=0),
 }
 
+
 # The CONFIG_SCHEMA for the sensor platform
+# --- THE FIX IS HERE ---
 CONFIG_SCHEMA = cv.All(
-    sensor.PLATFORM_SCHEMA.extend(
+    cv.PLATFORM_SCHEMA.extend(  # Changed from sensor.PLATFORM_SCHEMA
         {
             # Add all the possible sensor keys as Optional
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
@@ -92,5 +91,4 @@ async def to_code(config):
         if yaml_key in config:
             conf = config[yaml_key]
             sens = await sensor.new_sensor(conf)
-            # This generates the C++ call to the setter, e.g., `hub->set_battery_voltage_sensor(sens);`
             cg.add(getattr(hub, f"set_{c_name}_sensor")(sens))
