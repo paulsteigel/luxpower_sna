@@ -11,52 +11,45 @@ static const char *const TAG = "luxpower_sna";
 
 // =================================================================================================
 // == DEFINITIVE REGISTER MAP for 117-byte data packet (SNA models)
-// == v6 - This map uses absolute byte offsets and has been meticulously corrected based on
-// ==      user feedback, hex dumps, and by cross-referencing scaling from LXPPacket.py.
-// ==      This should be the final, working version.
+// == v7 - This map uses absolute byte offsets and has been meticulously corrected based on a
+// ==      final analysis of the Python script's live data parsing logic (`READ_INPUT`).
+// ==      The list [68, 69,...] is for settings (`READ_HOLD`) and is not used here.
 // =================================================================================================
 enum LuxpowerRegister {
   // Note: Offsets are 1-based for readability, matching byte numbers in a hex editor.
-  // The U16/S16 macros handle the 0-based array access internally.
+  // The U16/S16/U8 macros handle the 0-based array access internally.
 
-  // --- Voltages & Frequencies ---
-  REG_V_BATTERY     = 35,  // U16 / 100.0f (NOTE: Special scaling for this model)
-  REG_V_GRID        = 39,  // U16 / 10.0f
-  REG_V_PV1         = 53,  // U16 / 10.0f
-  REG_V_PV2         = 57,  // U16 / 10.0f
-  REG_F_GRID        = 71,  // U16 / 100.0f
+  // --- Mapped from LXPPacket.py get_device_values_bank0() ---
+  REG_STATUS_CODE   = 45,  // U16, from get(0)
+  REG_V_PV1         = 35,  // U16 / 10.0f, from get(1)
+  REG_V_PV2         = 37,  // U16 / 10.0f, from get(2)
+  REG_V_BATTERY     = 41,  // U16 / 10.0f, from get(4)
+  REG_SOC           = 43,  // U8, from get(5)[0] - Note: this is a single byte
+  REG_P_PV1         = 47,  // U16, from get(7)
+  REG_P_PV2         = 49,  // U16, from get(8)
+  REG_P_CHARGE      = 53,  // U16, from get(10)
+  REG_P_DISCHARGE   = 55,  // U16, from get(11)
+  REG_V_GRID        = 57,  // U16 / 10.0f, from get(12)
+  REG_F_GRID        = 63,  // U16 / 100.0f, from get(15)
+  REG_P_INVERTER    = 65,  // U16, from get(16) (Inverter power)
+  REG_P_TO_GRID     = 85,  // S16, from get(26) (Export power)
+  REG_P_LOAD        = 87,  // U16, from get(27) (Load power, "p_to_user")
+  REG_E_PV1_DAY     = 89,  // U16 / 10.0f, from get(28)
+  REG_E_PV2_DAY     = 91,  // U16 / 10.0f, from get(29)
+  REG_E_CHARGE_DAY  = 99,  // U16 / 10.0f, from get(33)
+  REG_E_DISCHARGE_DAY = 101, // U16 / 10.0f, from get(34)
+  REG_E_EXPORT_DAY  = 105, // U16 / 10.0f, from get(36)
+  REG_E_IMPORT_DAY  = 107, // U16 / 10.0f, from get(37)
 
-  // --- Power Readings (W) ---
-  REG_P_BATTERY     = 37,  // S16 (Positive=Charge, Negative=Discharge)
-  REG_P_PV1         = 51,  // U16
-  REG_P_PV2         = 55,  // U16
-  REG_P_INVERTER    = 59,  // U16 (AC Output Power)
-  REG_P_LOAD        = 63,  // U16 (Total Load Power)
-  REG_P_TO_GRID     = 79,  // S16 (Positive=Export, Negative=Import)
-
-  // --- Status & State ---
-  REG_STATUS_CODE   = 45,  // U8
-  REG_SOC           = 46,  // U8
-
-  // --- Temperatures (°C) ---
-  REG_T_RADIATOR    = 65,  // S16 / 10.0f
-  REG_T_INVERTER    = 67,  // S16 / 10.0f
-
-  // --- Daily Energy Totals (kWh) ---
-  REG_E_PV1_DAY       = 83,  // U16 / 100.0f (NOTE: Special scaling)
-  REG_E_PV2_DAY       = 85,  // U16 / 100.0f (NOTE: Special scaling)
-  REG_E_INVERTER_DAY  = 87,  // U16 / 100.0f (Yield Today)
-  REG_E_DISCHARGE_DAY = 93,  // U16 / 10.0f
-  REG_E_CHARGE_DAY    = 95,  // U16 / 10.0f
-  REG_E_EXPORT_DAY    = 99,  // U16 / 100.0f (NOTE: Special scaling)
-  REG_E_IMPORT_DAY    = 101, // U16 / 100.0f (NOTE: Special scaling)
-  REG_E_LOAD_DAY      = 103, // U16 / 100.0f (NOTE: Special scaling)
+  // --- Mapped from LXPPacket.py get_device_values_bank1() ---
+  REG_T_INVERTER    = 73,  // S16 / 10.0f, from get(64)
+  REG_T_RADIATOR    = 75,  // S16 / 10.0f, from get(65)
 };
 
 // Helper macros to make parsing cleaner and handle 1-based offsets
 #define U16(reg) (raw[(reg) - 1] << 8 | raw[reg])
 #define S16(reg) (int16_t)(raw[(reg) - 1] << 8 | raw[reg])
-#define U8(reg) raw[reg]
+#define U8(reg) raw[(reg) - 1] // Use -1 to keep consistency with 1-based enum
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
@@ -131,10 +124,10 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   
   ESP_LOGD(TAG, "Full packet received:\n%s", format_hex_pretty(raw, len).c_str());
 
-  // --- PARSING LOGIC USING THE DEFINITIVE REGISTER MAP (v6) ---
+  // --- PARSING LOGIC USING THE DEFINITIVE REGISTER MAP (v7) ---
   
   // Status & SOC
-  int status_code = U8(REG_STATUS_CODE);
+  int status_code = U16(REG_STATUS_CODE); // Status is a 16-bit value
   this->publish_state_("status_code", (float)status_code);
   std::string status_text;
   switch(status_code) {
@@ -146,7 +139,7 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   this->publish_state_("soc", (float)U8(REG_SOC));
 
   // Voltages and Frequencies
-  this->publish_state_("battery_voltage", (float)U16(REG_V_BATTERY) / 100.0f);
+  this->publish_state_("battery_voltage", (float)U16(REG_V_BATTERY) / 10.0f);
   this->publish_state_("grid_voltage", (float)U16(REG_V_GRID) / 10.0f);
   this->publish_state_("pv1_voltage", (float)U16(REG_V_PV1) / 10.0f);
   this->publish_state_("pv2_voltage", (float)U16(REG_V_PV2) / 10.0f);
@@ -159,10 +152,11 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   this->publish_state_("pv2_power", p_pv2);
   this->publish_state_("pv_power", p_pv1 + p_pv2);
 
-  float p_battery = (float)S16(REG_P_BATTERY);
-  this->publish_state_("battery_power", p_battery);
-  this->publish_state_("charge_power", (p_battery > 0 ? p_battery : 0));
-  this->publish_state_("discharge_power", (p_battery < 0 ? -p_battery : 0));
+  float p_charge = (float)U16(REG_P_CHARGE);
+  float p_discharge = (float)U16(REG_P_DISCHARGE);
+  this->publish_state_("charge_power", p_charge);
+  this->publish_state_("discharge_power", p_discharge);
+  this->publish_state_("battery_power", p_charge - p_discharge);
   
   this->publish_state_("inverter_power", (float)U16(REG_P_INVERTER));
   this->publish_state_("load_power", (float)U16(REG_P_LOAD));
@@ -177,18 +171,16 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   this->publish_state_("inverter_temp", (float)S16(REG_T_INVERTER) / 10.0f);
 
   // Daily Energy Totals
-  float e_pv1_day = (float)U16(REG_E_PV1_DAY) / 100.0f;
-  float e_pv2_day = (float)U16(REG_E_PV2_DAY) / 100.0f;
+  float e_pv1_day = (float)U16(REG_E_PV1_DAY) / 10.0f;
+  float e_pv2_day = (float)U16(REG_E_PV2_DAY) / 10.0f;
   this->publish_state_("pv1_today", e_pv1_day);
   this->publish_state_("pv2_today", e_pv2_day);
   this->publish_state_("pv_today", e_pv1_day + e_pv2_day);
   
-  this->publish_state_("inverter_today", (float)U16(REG_E_INVERTER_DAY) / 100.0f);
   this->publish_state_("charge_today", (float)U16(REG_E_CHARGE_DAY) / 10.0f);
   this->publish_state_("discharge_today", (float)U16(REG_E_DISCHARGE_DAY) / 10.0f);
-  this->publish_state_("grid_export_today", (float)U16(REG_E_EXPORT_DAY) / 100.0f);
-  this->publish_state_("grid_import_today", (float)U16(REG_E_IMPORT_DAY) / 100.0f);
-  this->publish_state_("load_today", (float)U16(REG_E_LOAD_DAY) / 100.0f);
+  this->publish_state_("grid_export_today", (float)U16(REG_E_EXPORT_DAY) / 10.0f);
+  this->publish_state_("grid_import_today", (float)U16(REG_E_IMPORT_DAY) / 10.0f);
 }
 
 void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
