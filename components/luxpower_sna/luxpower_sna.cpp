@@ -6,11 +6,10 @@
 
 #include "esphome/components/socket/socket.h"
 
-// --- THIS IS THE FIX ---
-// The error "'::connect' has not been declared" means the low-level socket
-// function prototypes are not visible. We include the LwIP sockets header
-// directly to make them available. This is the standard header for the
-// underlying socket API on ESP platforms.
+// --- FIX PART 1 ---
+// We explicitly include the low-level LwIP sockets header. This file
+// contains the declarations for the raw LwIP functions like `lwip_connect`
+// and the `LWIP_SO_` constants.
 #include <lwip/sockets.h>
 
 namespace esphome {
@@ -45,13 +44,16 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
+  // --- FIX PART 2 ---
+  // The compiler hints tell us to use the LWIP_ prefixed constants.
+  // We will obey the compiler.
   struct timeval tv;
   tv.tv_sec = 5;  // 5 seconds
   tv.tv_usec = 0;
-  if (this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+  if (this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
     ESP_LOGW(TAG, "Failed to set socket recv timeout");
   }
-  if (this->socket_->setsockopt(SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+  if (this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
     ESP_LOGW(TAG, "Failed to set socket send timeout");
   }
 
@@ -76,8 +78,10 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // Use the global namespace `::connect` which is now available from <lwip/sockets.h>
-  if (::connect(fd, reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
+  // --- FIX PART 3 ---
+  // Since `::connect` is not declared, we call the raw LwIP function `lwip_connect`.
+  // This bypasses any POSIX compatibility layer issues in the build environment.
+  if (lwip_connect(fd, reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
     ESP_LOGW(TAG, "Could not connect to %s:%u. Error: %s", this->host_.c_str(), this->port_, strerror(errno));
     this->socket_->close();
     this->socket_ = nullptr;
