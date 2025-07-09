@@ -5,6 +5,8 @@
 #include "esphome/core/helpers.h"
 
 #include "esphome/components/socket/socket.h"
+// We need the low-level socket headers for the constants and global connect function
+#include "esphome/components/socket/headers.h" 
 
 namespace esphome {
 namespace luxpower_sna {
@@ -31,7 +33,6 @@ void LuxpowerSNAComponent::dump_config() {
 void LuxpowerSNAComponent::update() {
   ESP_LOGD(TAG, "Starting update...");
 
-  // Create a new socket for this update cycle
   this->socket_ = socket::socket(AF_INET, SOCK_STREAM, 0);
   if (this->socket_ == nullptr) {
     ESP_LOGW(TAG, "Could not create socket");
@@ -39,21 +40,18 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // --- FIX #1: Use setsockopt for timeouts ---
-  // The 'set_timeout' function does not exist. We must use the low-level setsockopt.
+  // --- FIX #1: Use platform-specific timeout constants ---
+  // The compiler confirms these are prefixed with LWIP_ on this platform.
   struct timeval tv;
   tv.tv_sec = 5;  // 5 seconds
-  tv.tv_usec = 0; // 0 microseconds
-  if (this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+  tv.tv_usec = 0;
+  if (this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
     ESP_LOGW(TAG, "Failed to set socket recv timeout");
-    // Continue anyway, but log the warning
   }
-  if (this->socket_->setsockopt(SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+  if (this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
     ESP_LOGW(TAG, "Failed to set socket send timeout");
-    // Continue anyway, but log the warning
   }
 
-  // Set up the address structure
   sockaddr_storage address;
   socklen_t address_len = sizeof(address);
   address_len = socket::set_sockaddr(reinterpret_cast<sockaddr *>(&address), sizeof(address), this->host_, this->port_);
@@ -66,9 +64,20 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // --- FIX #2: 'connect' is a member function of the Socket class ---
-  // The compiler confirms that connect() must be called on the socket object itself.
-  if (this->socket_->connect(reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
+  // --- FIX #2: Use the low-level global connect function ---
+  // The high-level `Socket::connect` method is not available in all ESPHome socket
+  // implementations. We get the raw file descriptor and use the C-style global connect.
+  int fd = this->socket_->get_fd();
+  if (fd < 0) {
+    ESP_LOGW(TAG, "Could not get socket file descriptor");
+    this->socket_->close();
+    this->socket_ = nullptr;
+    this->status_set_warning();
+    return;
+  }
+
+  // Use the global namespace `::connect`
+  if (::connect(fd, reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
     ESP_LOGW(TAG, "Could not connect to %s:%u. Error: %s", this->host_.c_str(), this->port_, strerror(errno));
     this->socket_->close();
     this->socket_ = nullptr;
@@ -80,7 +89,6 @@ void LuxpowerSNAComponent::update() {
 
   // TODO: Implement packet creation, sending, and response reading here.
 
-  // Clean up the socket for this update cycle
   this->socket_->close();
   this->socket_ = nullptr;
   ESP_LOGD(TAG, "Socket closed, update finished.");
