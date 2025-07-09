@@ -5,12 +5,7 @@
 #include "esphome/core/helpers.h"
 
 #include "esphome/components/socket/socket.h"
-
-// --- FIX PART 1 ---
-// We explicitly include the low-level LwIP sockets header. This file
-// contains the declarations for the raw LwIP functions like `lwip_connect`
-// and the `LWIP_SO_` constants.
-#include <lwip/sockets.h>
+#include "esphome/components/socket/headers.h" // For LWIP_SO_ constants
 
 namespace esphome {
 namespace luxpower_sna {
@@ -44,9 +39,8 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // --- FIX PART 2 ---
-  // The compiler hints tell us to use the LWIP_ prefixed constants.
-  // We will obey the compiler.
+  // Use the LWIP_ prefixed constants as hinted by the compiler.
+  // The lwip_sockets implementation supports this.
   struct timeval tv;
   tv.tv_sec = 5;  // 5 seconds
   tv.tv_usec = 0;
@@ -69,19 +63,9 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  int fd = this->socket_->get_fd();
-  if (fd < 0) {
-    ESP_LOGW(TAG, "Could not get socket file descriptor");
-    this->socket_->close();
-    this->socket_ = nullptr;
-    this->status_set_warning();
-    return;
-  }
-
-  // --- FIX PART 3 ---
-  // Since `::connect` is not declared, we call the raw LwIP function `lwip_connect`.
-  // This bypasses any POSIX compatibility layer issues in the build environment.
-  if (lwip_connect(fd, reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
+  // With the `lwip_sockets` implementation forced in YAML, the `connect`
+  // member function now exists and is the correct way to connect.
+  if (this->socket_->connect(reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
     ESP_LOGW(TAG, "Could not connect to %s:%u. Error: %s", this->host_.c_str(), this->port_, strerror(errno));
     this->socket_->close();
     this->socket_ = nullptr;
