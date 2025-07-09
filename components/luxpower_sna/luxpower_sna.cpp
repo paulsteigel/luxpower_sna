@@ -20,37 +20,32 @@ void LuxpowerSNAComponent::setup() {
 void LuxpowerSNAComponent::on_shutdown() {
   if (this->socket_ != nullptr) {
     this->socket_->close();
-    this->socket_ = nullptr;
   }
 }
 
 float LuxpowerSNAComponent::get_setup_priority() const { return setup_priority::AFTER_WIFI; }
 
 void LuxpowerSNAComponent::update() {
-  // Check connection and poll interval
   if (this->socket_ != nullptr && !this->socket_->is_connected()) {
     ESP_LOGW(TAG, "Connection lost. Closing socket.");
     this->socket_->close();
-    this->socket_ = nullptr;
+    this->socket_.reset();
   }
 
   if (this->socket_ == nullptr) {
     ESP_LOGI(TAG, "Connecting to %s:%d", this->address_.c_str(), this->port_);
-    this->socket_ = socket::Socket::create_tcp(this->address_, this->port_);
+    this->socket_ = socket::Socket::create_unique(this->address_, this->port_);
     if (this->socket_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create socket.");
         return;
     }
   }
 
-  if (millis() - this->last_poll_ > this->get_update_interval()) {
-    this->last_poll_ = millis();
-    this->request_data_();
-  }
+  this->request_data_();
 
   // Read data if available
   if (this->socket_->is_connected() && this->socket_->available() > 0) {
-    uint8_t raw[256];
+    uint8_t raw[512]; // Increased buffer size just in case
     int len = this->socket_->read(raw, sizeof(raw));
     if (len > 0) {
       this->parse_lux_packet_(raw, len);
@@ -82,17 +77,19 @@ void LuxpowerSNAComponent::request_data_() {
 
 void LuxpowerSNAComponent::parse_lux_packet_(const uint8_t *raw, uint32_t len) {
   ESP_LOGD(TAG, "Received %d bytes", len);
-  // The SNA response packet is a direct dump of the input registers.
-  // The data payload starts after a 20-byte header.
-  if (len < 175) { // Need at least enough data for Pload (reg 170)
-    ESP_LOGW(TAG, "Packet too short to parse: %d bytes", len);
+  if (len < 20) { // Basic header check
+    ESP_LOGW(TAG, "Packet too short for header: %d bytes", len);
     return;
   }
-
+  
   const uint8_t *payload = raw + 20; // Start of the register data
   uint16_t data_len = (raw[18] | (raw[19] << 8));
   
-  // Validate CRC on the data payload
+  if (len < 20 + data_len + 2) { // Header + payload + CRC
+    ESP_LOGW(TAG, "Packet shorter than expected payload length. Len: %d, Expected: %d", len, 20 + data_len + 2);
+    return;
+  }
+  
   uint16_t received_crc = (raw[20 + data_len + 1] << 8) | raw[20 + data_len];
   uint16_t calculated_crc = this->calculate_crc_(payload, data_len);
 
@@ -106,7 +103,7 @@ void LuxpowerSNAComponent::parse_lux_packet_(const uint8_t *raw, uint32_t len) {
 
   // Reg 0: Status
   uint16_t status_code = get_u16(payload + 0);
-  this->publish_state_if_changed_(this->status_code_sensor_, status_code);
+  this->publish_state_if_changed_(this->status_code_sensor_, (float)status_code);
   this->publish_state_if_changed_(this->status_text_sensor_, this->get_status_text_(status_code));
 
   // Reg 1 & 2: PV Voltages
@@ -115,8 +112,7 @@ void LuxpowerSNAComponent::parse_lux_packet_(const uint8_t *raw, uint32_t len) {
 
   // Reg 4 & 5: Battery
   this->publish_state_if_changed_(this->battery_voltage_sensor_, get_u16(payload + 8) / 10.0f);
-  // SOC is the low byte of register 5
-  this->publish_state_if_changed_(this->soc_sensor_, (payload[11] & 0xFF)); 
+  this->publish_state_if_changed_(this->soc_sensor_, (float)(payload[11] & 0xFF)); 
 
   // Reg 7 & 8: PV Powers
   float p_pv1 = get_u16(payload + 14);
@@ -130,7 +126,6 @@ void LuxpowerSNAComponent::parse_lux_packet_(const uint8_t *raw, uint32_t len) {
   float p_discharge = get_u16(payload + 22);
   this->publish_state_if_changed_(this->charge_power_sensor_, p_charge);
   this->publish_state_if_changed_(this->discharge_power_sensor_, p_discharge);
-  // Battery power: positive is discharge, negative is charge
   this->publish_state_if_changed_(this->battery_power_sensor_, p_discharge - p_charge);
 
   // Reg 12 & 15: Grid Voltage and Frequency
@@ -138,7 +133,7 @@ void LuxpowerSNAComponent::parse_lux_packet_(const uint8_t *raw, uint32_t len) {
   this->publish_state_if_changed_(this->grid_frequency_sensor_, get_u16(payload + 30) / 100.0f);
 
   // Reg 16: Inverter Power (On-grid)
-  this->publish_state_if_changed_(this->inverter_power_sensor_, get_s16(payload + 32));
+  this->publish_state_if_changed_(this->inverter_power_sensor_, (float)get_s16(payload + 32));
 
   // Reg 19: Power Factor
   float pf_raw = get_u16(payload + 38);
@@ -153,42 +148,31 @@ void LuxpowerSNAComponent::parse_lux_packet_(const uint8_t *raw, uint32_t len) {
   // Reg 20, 23, 24: EPS Voltage, Frequency, Power
   this->publish_state_if_changed_(this->eps_voltage_sensor_, get_u16(payload + 40) / 10.0f);
   this->publish_state_if_changed_(this->eps_frequency_sensor_, get_u16(payload + 46) / 100.0f);
-  this->publish_state_if_changed_(this->eps_power_sensor_, get_u16(payload + 48));
+  this->publish_state_if_changed_(this->eps_power_sensor_, (float)get_u16(payload + 48));
 
   // Reg 26 & 27: Grid Power (Export/Import)
-  // Ptogrid is signed, positive is export. Ptouser is import.
-  // We define Grid Power as positive for import, negative for export.
   float p_to_grid = get_s16(payload + 52);
   float p_to_user = get_u16(payload + 54);
   this->publish_state_if_changed_(this->grid_power_sensor_, p_to_user - p_to_grid);
 
   // --- Daily Energy ---
-  // Reg 28 & 29: PV Energy Today
   float e_pv1_day = get_u16(payload + 56) / 10.0f;
   float e_pv2_day = get_u16(payload + 58) / 10.0f;
   this->publish_state_if_changed_(this->pv_today_sensor_, e_pv1_day + e_pv2_day);
-
-  // Reg 31: Inverter Energy Today
   this->publish_state_if_changed_(this->inverter_today_sensor_, get_u16(payload + 62) / 10.0f);
-  // Reg 33 & 34: Battery Energy Today
   this->publish_state_if_changed_(this->charge_today_sensor_, get_u16(payload + 66) / 10.0f);
   this->publish_state_if_changed_(this->discharge_today_sensor_, get_u16(payload + 68) / 10.0f);
-  // Reg 35: EPS Energy Today
   this->publish_state_if_changed_(this->eps_today_sensor_, get_u16(payload + 70) / 10.0f);
-  // Reg 36 & 37: Grid Energy Today
   this->publish_state_if_changed_(this->grid_export_today_sensor_, get_u16(payload + 72) / 10.0f);
   this->publish_state_if_changed_(this->grid_import_today_sensor_, get_u16(payload + 74) / 10.0f);
 
   // --- Temperatures ---
-  // Reg 64, 65, 67
-  this->publish_state_if_changed_(this->inverter_temp_sensor_, get_s16(payload + 128));
-  this->publish_state_if_changed_(this->radiator_temp_sensor_, get_s16(payload + 130));
-  this->publish_state_if_changed_(this->battery_temp_sensor_, get_s16(payload + 134));
+  this->publish_state_if_changed_(this->inverter_temp_sensor_, (float)get_s16(payload + 128));
+  this->publish_state_if_changed_(this->radiator_temp_sensor_, (float)get_s16(payload + 130));
+  this->publish_state_if_changed_(this->battery_temp_sensor_, (float)get_s16(payload + 134));
 
   // --- ACCURATE LOAD POWER ---
-  // Reg 170: Pload
-  this->publish_state_if_changed_(this->load_power_sensor_, get_u16(payload + 340));
-  // Reg 171: Eload_day
+  this->publish_state_if_changed_(this->load_power_sensor_, (float)get_u16(payload + 340));
   this->publish_state_if_changed_(this->load_today_sensor_, get_u16(payload + 342) / 10.0f);
 }
 
