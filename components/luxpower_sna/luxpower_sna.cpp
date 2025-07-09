@@ -1,7 +1,9 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
-#include "esphome/components/socket/socket.h" // Ensure socket headers are included
 #include <cstring> // For memcpy
+
+// Include the specific socket implementation header we need to cast to
+#include "esphome/components/socket/lwip_tcp.h"
 
 namespace esphome {
 namespace luxpower_sna {
@@ -44,12 +46,7 @@ void LuxpowerSNAComponent::update() {
   }
   this->is_updating_ = true;
 
-  // ====================================================================
-  // *** THE REAL FIX IS HERE ***
-  // Correct two-step socket creation and connection process
-  // ====================================================================
-
-  // Step 1: Create the socket object.
+  // Step 1: Create the socket object. This returns a generic Socket pointer.
   this->socket_ = socket::socket(AF_INET, SOCK_STREAM, 0);
   if (this->socket_ == nullptr) {
     ESP_LOGE(TAG, "Could not create socket object. Aborting update.");
@@ -58,8 +55,13 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // Step 2: Connect the socket to the host.
-  if (this->socket_->connect(this->host_.c_str(), this->port_) != 0) {
+  // ====================================================================
+  // *** THE DEFINITIVE FIX IS HERE ***
+  // Step 2: Cast the generic Socket to the specific LwipTCPSocket type
+  //         and call its specific connect() method.
+  // ====================================================================
+  auto *tcp_socket = static_cast<socket::LwipTCPSocket *>(this->socket_.get());
+  if (tcp_socket->connect(this->host_.c_str(), this->port_) != 0) {
     ESP_LOGW(TAG, "Could not connect to %s:%d. Aborting update.", this->host_.c_str(), this->port_);
     this->socket_->close();
     this->socket_ = nullptr;
@@ -70,7 +72,7 @@ void LuxpowerSNAComponent::update() {
 
   ESP_LOGD(TAG, "Successfully connected to %s:%d", this->host_.c_str(), this->port_);
 
-  // The rest of the logic remains the same
+  // The rest of the logic uses the base Socket interface (read, write, close), which is fine.
   for (int bank = 0; bank < this->num_banks_to_request_; bank++) {
     uint16_t start_reg = bank * 40;
     uint16_t num_regs = 40;
@@ -120,7 +122,6 @@ void LuxpowerSNAComponent::update() {
 }
 
 // build_request_packet_, log_hex_buffer, get_register_value_, and parse_and_publish_ remain the same
-// ... (rest of the file is unchanged) ...
 std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_register, uint16_t num_registers) {
     std::vector<uint8_t> modbus_cmd(18);
     modbus_cmd[0] = 0;
