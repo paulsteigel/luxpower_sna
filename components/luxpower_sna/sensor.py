@@ -29,13 +29,15 @@ SENSOR_TYPES = {
 
 # --- The CONFIG_SCHEMA for the sensor platform ---
 # THIS IS THE CORRECTED LINE: Use sensor.PLATFORM_SCHEMA
-CONFIG_SCHEMA = sensor.PLATFORM_SCHEMA.extend(
-    {
-        cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-        **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-    }
-).extend(cv.COMPONENT_SCHEMA)
-
+# --- The CONFIG_SCHEMA for the sensor platform, following your working sample ---
+CONFIG_SCHEMA = cv.All(
+    LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
+        {
+            **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
+        }
+    ),
+    cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
+)
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
