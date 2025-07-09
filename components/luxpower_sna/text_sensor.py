@@ -12,14 +12,13 @@ TEXT_SENSOR_TYPES = {
 }
 
 # --- THE CORRECTED SCHEMA DEFINITION ---
-PLATFORM_SCHEMA = text_sensor.PLATFORM_SCHEMA.extend(
-    {
-        **{cv.Optional(key): schema for key, schema in TEXT_SENSOR_TYPES.items()},
-    }
-).extend(LUXPOWER_SNA_COMPONENT_SCHEMA)
-
 CONFIG_SCHEMA = cv.All(
-    PLATFORM_SCHEMA,
+    # The base schema for a text_sensor platform is text_sensor.TEXT_SENSOR_PLATFORM_SCHEMA
+    text_sensor.TEXT_SENSOR_PLATFORM_SCHEMA.extend(
+        {
+            **{cv.Optional(key): schema for key, schema in TEXT_SENSOR_TYPES.items()},
+        }
+    ).extend(LUXPOWER_SNA_COMPONENT_SCHEMA), # Extend with the linking schema
     cv.has_at_least_one_key(*TEXT_SENSOR_TYPES.keys()),
 )
 
