@@ -28,7 +28,7 @@ CONFIG_SCHEMA = (
             cv.Required("dongle_serial"): cv.string,
         }
     )
-    .extend(cv.polling_component_schema("20s"))
+    .extend(cv.polling_component_schema("20s")),
     .extend(socket.socket_component_schema()) # <--- ADD THIS LINE
 )
 
