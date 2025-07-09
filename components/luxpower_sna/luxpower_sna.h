@@ -5,6 +5,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include <vector>
+#include <string>
 
 #include "lwip/err.h"
 
@@ -20,11 +21,13 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
 
+  // Setters from __init__.py
   void set_host(const std::string &host) { this->host_ = host; }
   void set_port(uint16_t port) { this->port_ = port; }
   void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
+  void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_number_ = serial; }
 
-  // --- Setters for our sensors (names must match sensor.py) ---
+  // Setters for our sensors (names must match sensor.py)
   void set_pv1_voltage_sensor(sensor::Sensor *s) { this->pv1_voltage_sensor_ = s; }
   void set_pv1_power_sensor(sensor::Sensor *s) { this->pv1_power_sensor_ = s; }
   void set_battery_voltage_sensor(sensor::Sensor *s) { this->battery_voltage_sensor_ = s; }
@@ -45,11 +48,13 @@ class LuxpowerSNAComponent : public PollingComponent {
  private:
   uint16_t get_register_value(const std::vector<uint8_t> &data, int offset);
 
+  // Configuration variables
   std::string host_;
   uint16_t port_;
   std::string dongle_serial_;
+  std::string inverter_serial_number_; // Added
   
-  // --- Pointers to our sensor objects (names must match) ---
+  // Pointers to our sensor objects
   sensor::Sensor *pv1_voltage_sensor_{nullptr};
   sensor::Sensor *pv1_power_sensor_{nullptr};
   sensor::Sensor *battery_voltage_sensor_{nullptr};
