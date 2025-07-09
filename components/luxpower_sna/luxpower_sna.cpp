@@ -10,47 +10,24 @@ namespace luxpower_sna {
 static const char *const TAG = "luxpower_sna";
 
 // =================================================================================================
-// == DEFINITIVE REGISTER MAP for 117-byte data packet (SNA models)
-// == v4 - This map is a direct translation of LXPPacket.py logic to the absolute byte
-// ==      offsets of the user's specific 117-byte packet. This should be the final version.
+// == v5 - Correct implementation based on a full analysis of the LXPPacket.py structure.
+// == This version correctly identifies the data payload within the full communication frame.
 // =================================================================================================
-enum LuxpowerRegister {
-  // Note: Offsets are 1-based for readability, matching byte numbers in a hex editor.
-  // The U16/S16 macros handle the 0-based array access internally.
 
-  // --- Mapped from LXPPacket.py get_device_values_bank0() ---
-  REG_STATUS        = 33,  // U16, from get(0)
-  REG_V_PV1         = 35,  // U16 / 10.0f, from get(1)
-  REG_V_PV2         = 37,  // U16 / 10.0f, from get(2)
-  REG_V_BATTERY     = 41,  // U16 / 10.0f, from get(4)
-  REG_SOC           = 43,  // U8, from get(5) - Note: this is a single byte
-  REG_P_PV1         = 47,  // U16, from get(7)
-  REG_P_PV2         = 49,  // U16, from get(8)
-  REG_P_CHARGE      = 53,  // U16, from get(10)
-  REG_P_DISCHARGE   = 55,  // U16, from get(11)
-  REG_V_GRID        = 57,  // U16 / 10.0f, from get(12)
-  REG_F_GRID        = 63,  // U16 / 100.0f, from get(15)
-  REG_P_INVERTER    = 65,  // U16, from get(16) (Inverter power)
-  REG_P_TO_GRID     = 85,  // S16, from get(26) (Export power)
-  REG_P_LOAD        = 87,  // U16, from get(27) (Load power, "p_to_user")
-  REG_E_PV1_DAY     = 89,  // U16 / 10.0f, from get(28)
-  REG_E_PV2_DAY     = 91,  // U16 / 10.0f, from get(29)
-  REG_E_CHARGE_DAY  = 99,  // U16 / 10.0f, from get(33)
-  REG_E_DISCHARGE_DAY = 101, // U16 / 10.0f, from get(34)
-  REG_E_EXPORT_DAY  = 105, // U16 / 10.0f, from get(36)
-  REG_E_IMPORT_DAY  = 107, // U16 / 10.0f, from get(37)
+// The absolute byte offset where the sensor data payload begins in the 117-byte packet.
+// This is derived from the Python parser: data_frame starts at 20, value starts at 15 within it.
+// 20 + 15 = 35. Our array is 0-indexed, so we use 34.
+static const int DATA_PAYLOAD_OFFSET = 34; 
 
-  // --- Mapped from LXPPacket.py get_device_values_bank1() ---
-  // Temperatures are often signed values.
-  REG_T_INNER       = 73,  // S16, from get(64)
-  REG_T_RADIATOR    = 75,  // S16, from get(65)
-};
+// Helper macros to read from the DATA PAYLOAD, not the whole packet.
+// 'reg' is the relative register number (0, 1, 2...) used in the Python 'get(reg)' calls.
+#define PAYLOAD_U16(payload_ptr, reg) (payload_ptr[(reg) * 2] << 8 | payload_ptr[(reg) * 2 + 1])
+#define PAYLOAD_S16(payload_ptr, reg) (int16_t)(PAYLOAD_U16(payload_ptr, reg))
 
-// Helper macros to make parsing cleaner and handle 1-based offsets
-#define U16(reg) (raw[(reg) - 1] << 8 | raw[reg])
-#define S16(reg) (int16_t)(raw[(reg) - 1] << 8 | raw[reg])
-#define U8(reg) raw[reg]
+// Forward declaration of the parsing function
+void parse_inverter_data_packet(LuxpowerSNAComponent *component, uint8_t *raw, size_t len);
 
+// ... (Component setup and other functions remain the same) ...
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
 }
@@ -124,65 +101,8 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   
   ESP_LOGD(TAG, "Full packet received:\n%s", format_hex_pretty(raw, len).c_str());
 
-  // --- PARSING LOGIC USING THE DEFINITIVE REGISTER MAP ---
-  
-  // Status & SOC
-  int status_code = U16(REG_STATUS); // Status is a 16-bit value
-  this->publish_state_("status_code", (float)status_code);
-  std::string status_text;
-  switch(status_code) {
-      case 0: status_text = "Standby"; break; case 1: status_text = "Self Test"; break;
-      case 2: status_text = "Normal"; break;  case 3: status_text = "Alarm"; break;
-      case 4: status_text = "Fault"; break;   default: status_text = "Checking"; break;
-  }
-  this->publish_state_("status_text", status_text);
-  this->publish_state_("soc", (float)U8(REG_SOC));
-
-  // Voltages and Frequencies
-  this->publish_state_("battery_voltage", (float)U16(REG_V_BATTERY) / 10.0f);
-  this->publish_state_("grid_voltage", (float)U16(REG_V_GRID) / 10.0f);
-  this->publish_state_("pv1_voltage", (float)U16(REG_V_PV1) / 10.0f);
-  this->publish_state_("pv2_voltage", (float)U16(REG_V_PV2) / 10.0f);
-  this->publish_state_("grid_frequency", (float)U16(REG_F_GRID) / 100.0f);
-
-  // Power Values
-  float p_pv1 = (float)U16(REG_P_PV1);
-  float p_pv2 = (float)U16(REG_P_PV2);
-  this->publish_state_("pv1_power", p_pv1);
-  this->publish_state_("pv2_power", p_pv2);
-  this->publish_state_("pv_power", p_pv1 + p_pv2);
-
-  float p_charge = (float)U16(REG_P_CHARGE);
-  float p_discharge = (float)U16(REG_P_DISCHARGE);
-  this->publish_state_("charge_power", p_charge);
-  this->publish_state_("discharge_power", p_discharge);
-  // Create a combined battery power sensor (+charge, -discharge)
-  this->publish_state_("battery_power", p_charge - p_discharge);
-  
-  this->publish_state_("inverter_power", (float)U16(REG_P_INVERTER));
-  this->publish_state_("load_power", (float)U16(REG_P_LOAD));
-  
-  // Grid power is often signed. p_to_grid should be export.
-  float p_to_grid = (float)S16(REG_P_TO_GRID);
-  this->publish_state_("grid_export_power", (p_to_grid > 0 ? p_to_grid : 0));
-  this->publish_state_("grid_import_power", (p_to_grid < 0 ? -p_to_grid : 0));
-  this->publish_state_("grid_power", -p_to_grid); // Follows HA convention: +import, -export
-
-  // Temperatures
-  this->publish_state_("radiator_temp", (float)S16(REG_T_RADIATOR) / 10.0f);
-  this->publish_state_("inverter_temp", (float)S16(REG_T_INNER) / 10.0f);
-
-  // Daily Energy Totals
-  float e_pv1_day = (float)U16(REG_E_PV1_DAY) / 10.0f;
-  float e_pv2_day = (float)U16(REG_E_PV2_DAY) / 10.0f;
-  this->publish_state_("pv1_today", e_pv1_day);
-  this->publish_state_("pv2_today", e_pv2_day);
-  this->publish_state_("pv_today", e_pv1_day + e_pv2_day);
-  
-  this->publish_state_("charge_today", (float)U16(REG_E_CHARGE_DAY) / 10.0f);
-  this->publish_state_("discharge_today", (float)U16(REG_E_DISCHARGE_DAY) / 10.0f);
-  this->publish_state_("grid_export_today", (float)U16(REG_E_EXPORT_DAY) / 10.0f);
-  this->publish_state_("grid_import_today", (float)U16(REG_E_IMPORT_DAY) / 10.0f);
+  // Call the dedicated parsing function
+  parse_inverter_data_packet(this, raw, len);
 }
 
 void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
@@ -201,6 +121,104 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::str
     } else {
         ESP_LOGV(TAG, "Text sensor key %s not found in map", key.c_str());
     }
+}
+
+// ===============================================================================================
+// == THE PARSING FUNCTION - A direct C++ port of the LXPPacket.py logic
+// ===============================================================================================
+void parse_inverter_data_packet(LuxpowerSNAComponent *component, uint8_t *raw, size_t len) {
+  // 1. Verify packet identifiers to ensure we are parsing the correct data frame
+  //    TCP Function: 0xC2 (194) -> TRANSLATED_DATA
+  //    Device Function: 0x04 -> READ_INPUT
+  if (raw[7] != 0xC2 || raw[21] != 0x04) {
+    ESP_LOGW(TAG, "Packet is not a READ_INPUT data frame. Skipping parse.");
+    return;
+  }
+
+  // 2. Create a pointer to the start of the actual sensor data payload
+  uint8_t *payload = &raw[DATA_PAYLOAD_OFFSET];
+
+  // 3. Parse and publish each sensor value, using the RELATIVE register number from python
+  //    and applying the correct scaling factor. This is a port of get_device_values_bank0().
+
+  // status = self.readValuesInt.get(0)
+  int status_code = PAYLOAD_U16(payload, 0);
+  component->publish_state_("status_code", (float)status_code);
+  std::string status_text;
+  switch(status_code) {
+      case 0: status_text = "Standby"; break; case 1: status_text = "Self Test"; break;
+      case 2: status_text = "Normal"; break;  case 3: status_text = "Alarm"; break;
+      case 4: status_text = "Fault"; break;   default: status_text = "Checking"; break;
+  }
+  component->publish_state_("status_text", status_text);
+
+  // v_pv_1 = self.readValuesInt.get(1, 0) / 10
+  component->publish_state_("pv1_voltage", (float)PAYLOAD_U16(payload, 1) / 10.0f);
+  // v_pv_2 = self.readValuesInt.get(2, 0) / 10
+  component->publish_state_("pv2_voltage", (float)PAYLOAD_U16(payload, 2) / 10.0f);
+
+  // v_bat = self.readValuesInt.get(4, 0) / 10
+  component->publish_state_("battery_voltage", (float)PAYLOAD_U16(payload, 4) / 10.0f);
+  
+  // soc = self.readValues.get(5)[0]  <- This takes the FIRST BYTE of the 16-bit register
+  component->publish_state_("soc", (float)payload[5 * 2]);
+  
+  // p_pv_1 = self.readValuesInt.get(7, 0)
+  float p_pv1 = (float)PAYLOAD_U16(payload, 7);
+  // p_pv_2 = self.readValuesInt.get(8, 0)
+  float p_pv2 = (float)PAYLOAD_U16(payload, 8);
+  component->publish_state_("pv1_power", p_pv1);
+  component->publish_state_("pv2_power", p_pv2);
+  component->publish_state_("pv_power", p_pv1 + p_pv2);
+
+  // p_charge = self.readValuesInt.get(10, 0)
+  float p_charge = (float)PAYLOAD_U16(payload, 10);
+  // p_discharge = self.readValuesInt.get(11, 0)
+  float p_discharge = (float)PAYLOAD_U16(payload, 11);
+  component->publish_state_("charge_power", p_charge);
+  component->publish_state_("discharge_power", p_discharge);
+  component->publish_state_("battery_power", p_charge - p_discharge);
+
+  // v_ac_r = self.readValuesInt.get(12, 0) / 10
+  component->publish_state_("grid_voltage", (float)PAYLOAD_U16(payload, 12) / 10.0f);
+  // f_ac = self.readValuesInt.get(15, 0) / 100
+  component->publish_state_("grid_frequency", (float)PAYLOAD_U16(payload, 15) / 100.0f);
+
+  // p_inv = self.readValuesInt.get(16, 0)
+  component->publish_state_("inverter_power", (float)PAYLOAD_U16(payload, 16));
+
+  // p_to_grid = self.readValuesInt.get(26, 0)
+  // p_to_user = self.readValuesInt.get(27, 0)
+  float p_to_grid = (float)PAYLOAD_S16(payload, 26); // This can be negative for import
+  component->publish_state_("grid_export_power", (p_to_grid > 0 ? p_to_grid : 0));
+  component->publish_state_("grid_import_power", (p_to_grid < 0 ? -p_to_grid : 0));
+  component->publish_state_("grid_power", -p_to_grid); // HA convention: +import, -export
+  component->publish_state_("load_power", (float)PAYLOAD_U16(payload, 27));
+
+  // e_pv_1_day = self.readValuesInt.get(28, 0) / 10
+  float e_pv1_day = (float)PAYLOAD_U16(payload, 28) / 10.0f;
+  // e_pv_2_day = self.readValuesInt.get(29, 0) / 10
+  float e_pv2_day = (float)PAYLOAD_U16(payload, 29) / 10.0f;
+  component->publish_state_("pv1_today", e_pv1_day);
+  component->publish_state_("pv2_today", e_pv2_day);
+  component->publish_state_("pv_today", e_pv1_day + e_pv2_day);
+
+  // e_chg_day = self.readValuesInt.get(33, 0) / 10
+  component->publish_state_("charge_today", (float)PAYLOAD_U16(payload, 33) / 10.0f);
+  // e_dischg_day = self.readValuesInt.get(34, 0) / 10
+  component->publish_state_("discharge_today", (float)PAYLOAD_U16(payload, 34) / 10.0f);
+
+  // e_to_grid_day = self.readValuesInt.get(36, 0) / 10
+  component->publish_state_("grid_export_today", (float)PAYLOAD_U16(payload, 36) / 10.0f);
+  // e_to_user_day = self.readValuesInt.get(37, 0) / 10
+  component->publish_state_("grid_import_today", (float)PAYLOAD_U16(payload, 37) / 10.0f);
+
+  // Parse temperatures from get_device_values_bank1()
+  // t_inner = self.readValuesInt.get(64, 0)
+  // t_rad_1 = self.readValuesInt.get(65, 0)
+  // Temperatures are often signed and need scaling
+  component->publish_state_("inverter_temp", (float)PAYLOAD_S16(payload, 64) / 10.0f);
+  component->publish_state_("radiator_temp", (float)PAYLOAD_S16(payload, 65) / 10.0f);
 }
 
 }  // namespace luxpower_sna
