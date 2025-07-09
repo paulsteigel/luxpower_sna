@@ -1,69 +1,38 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
+#include "esphome/core/helpers.h" // <-- Added for hex_to_data
 
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// =================================================================================================
-// == REGISTER MAP - v11 (Bank-Based, Sequential Requests)
-// == This map uses ABSOLUTE REGISTER NUMBERS (0-119) as found in the Python code.
-// =================================================================================================
+// REGISTER MAP (remains the same)
 enum LuxpowerRegister {
-  // --- BANK 0 (Registers 0-39) ---
-  REG_STATUS_CODE = 0,
-  REG_V_PV1 = 1,
-  REG_V_PV2 = 2,
-  REG_V_BATTERY = 4,
-  REG_SOC = 5, // Special case: U8
-  REG_P_PV1 = 7,
-  REG_P_PV2 = 8,
-  REG_P_CHARGE = 10,
-  REG_P_DISCHARGE = 11,
-  REG_V_GRID = 12,
-  REG_F_GRID = 15,
-  REG_P_INVERTER = 16,
-  REG_P_TO_GRID = 26, // S16
-  REG_P_LOAD = 27,    // "p_to_user" in python
-  REG_E_PV1_DAY = 28,
-  REG_E_PV2_DAY = 29,
-  REG_E_CHARGE_DAY = 33,
-  REG_E_DISCHARGE_DAY = 34,
-  REG_E_EXPORT_DAY = 36,
-  REG_E_IMPORT_DAY = 37,
-
-  // --- BANK 1 (Registers 40-79) ---
-  REG_E_PV1_ALL_L = 40,
-  REG_E_PV1_ALL_H = 41,
-  REG_E_PV2_ALL_L = 42,
-  REG_E_PV2_ALL_H = 43,
-  REG_T_INNER = 64,
-  REG_T_RADIATOR = 65,
-  REG_T_BAT = 67,
-
-  // --- BANK 2 (Registers 80-119) ---
-  // Add registers here if needed in the future
+  REG_STATUS_CODE = 0, REG_V_PV1 = 1, REG_V_PV2 = 2, REG_V_BATTERY = 4, REG_SOC = 5,
+  REG_P_PV1 = 7, REG_P_PV2 = 8, REG_P_CHARGE = 10, REG_P_DISCHARGE = 11, REG_V_GRID = 12,
+  REG_F_GRID = 15, REG_P_INVERTER = 16, REG_P_TO_GRID = 26, REG_P_LOAD = 27, REG_E_PV1_DAY = 28,
+  REG_E_PV2_DAY = 29, REG_E_CHARGE_DAY = 33, REG_E_DISCHARGE_DAY = 34, REG_E_EXPORT_DAY = 36,
+  REG_E_IMPORT_DAY = 37, REG_E_PV1_ALL_L = 40, REG_E_PV1_ALL_H = 41, REG_E_PV2_ALL_L = 42,
+  REG_E_PV2_ALL_H = 43, REG_T_INNER = 64, REG_T_RADIATOR = 65, REG_T_BAT = 67,
 };
 
-// Helper macros to read from the combined data_buffer_ using ABSOLUTE register numbers
 #define U16_REG(reg) (this->data_buffer_[(reg) * 2] << 8 | this->data_buffer_[(reg) * 2 + 1])
 #define S16_REG(reg) (int16_t)(this->data_buffer_[(reg) * 2] << 8 | this->data_buffer_[(reg) * 2 + 1])
-#define U8_REG(reg) (this->data_buffer_[(reg) * 2]) // SOC is the first byte of its register
+#define U8_REG(reg) (this->data_buffer_[(reg) * 2])
 #define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
-  this->dongle_serial_ = hex_to_data(serial);
+  this->dongle_serial_ = hex_to_data(serial).value();
 }
 
-void LuxpowerSNAComponent::set_inverter_serial(const std::string &serial) {
-  this->inverter_serial_ = hex_to_data(serial);
+void LuxpowerSNAComponent::set_inverter_serial_number(const std::string &serial) {
+  this->inverter_serial_ = hex_to_data(serial).value();
 }
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
-  this->data_buffer_.resize(this->num_banks_to_request_ * 80, 0); // 40 registers * 2 bytes/reg
+  this->data_buffer_.resize(this->num_banks_to_request_ * 80, 0);
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -157,18 +126,16 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len, int bank_num) 
   }
   
   uint8_t *data_frame = &raw[20];
-  uint16_t start_reg = data_frame[12] | (data_frame[13] << 8);
   uint8_t value_len = data_frame[14];
-  uint8_t *values = &data_frame[15];
 
   if (value_len != 80) {
-      ESP_LOGW(TAG, "Received packet with unexpected data length (%d) for bank %d. Aborting.", value_len, bank_num);
+      ESP_LOGW(TAG, "Packet for bank %d has wrong data length (%d). Aborting.", bank_num, value_len);
       this->end_update_cycle_();
       return;
   }
 
   ESP_LOGD(TAG, "Received and stored data for Bank %d.", bank_num);
-  memcpy(&this->data_buffer_[bank_num * 80], values, 80);
+  memcpy(&this->data_buffer_[bank_num * 80], &data_frame[15], 80);
 
   this->current_bank_to_request_++;
   if (this->current_bank_to_request_ < this->num_banks_to_request_) {
@@ -181,80 +148,32 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len, int bank_num) 
 }
 
 void LuxpowerSNAComponent::parse_and_publish_() {
-  // Status & SOC
-  int status_code = U16_REG(REG_STATUS_CODE);
-  this->publish_state_("status_code", (float)status_code);
-  std::string status_text;
-  switch(status_code) {
-      case 0: status_text = "Standby"; break; case 1: status_text = "Self Test"; break;
-      case 2: status_text = "Normal"; break;  case 3: status_text = "Alarm"; break;
-      case 4: status_text = "Fault"; break;   default: status_text = "Checking"; break;
+  // --- Status Text ---
+  if (this->status_text_sensor_) {
+    int status_code = U16_REG(REG_STATUS_CODE);
+    std::string status_text;
+    switch(status_code) {
+        case 0: status_text = "Standby"; break; case 1: status_text = "Self Test"; break;
+        case 2: status_text = "Normal"; break;  case 3: status_text = "Alarm"; break;
+        case 4: status_text = "Fault"; break;   default: status_text = "Checking"; break;
+    }
+    this->status_text_sensor_->publish_state(status_text);
   }
-  this->publish_state_("status_text", status_text);
-  this->publish_state_("soc", (float)U8_REG(REG_SOC));
 
-  // Voltages and Frequencies
-  this->publish_state_("battery_voltage", (float)U16_REG(REG_V_BATTERY) / 10.0f);
-  this->publish_state_("grid_voltage", (float)U16_REG(REG_V_GRID) / 10.0f);
-  this->publish_state_("pv1_voltage", (float)U16_REG(REG_V_PV1) / 10.0f);
-  this->publish_state_("pv2_voltage", (float)U16_REG(REG_V_PV2) / 10.0f);
-  this->publish_state_("grid_frequency", (float)U16_REG(REG_F_GRID) / 100.0f);
-
-  // Power Values
+  // --- Standard Sensors ---
+  if (this->soc_sensor_) this->soc_sensor_->publish_state((float)U8_REG(REG_SOC));
+  if (this->battery_voltage_sensor_) this->battery_voltage_sensor_->publish_state((float)U16_REG(REG_V_BATTERY) / 10.0f);
+  if (this->battery_temp_sensor_) this->battery_temp_sensor_->publish_state((float)S16_REG(REG_T_BAT) / 10.0f);
+  
   float p_pv1 = (float)U16_REG(REG_P_PV1);
   float p_pv2 = (float)U16_REG(REG_P_PV2);
-  this->publish_state_("pv1_power", p_pv1);
-  this->publish_state_("pv2_power", p_pv2);
-  this->publish_state_("pv_power", p_pv1 + p_pv2);
-
-  float p_charge = (float)U16_REG(REG_P_CHARGE);
-  float p_discharge = (float)U16_REG(REG_P_DISCHARGE);
-  this->publish_state_("charge_power", p_charge);
-  this->publish_state_("discharge_power", p_discharge);
-  this->publish_state_("battery_power", p_charge - p_discharge);
-  
-  this->publish_state_("inverter_power", (float)U16_REG(REG_P_INVERTER));
-  this->publish_state_("load_power", (float)U16_REG(REG_P_LOAD));
+  if (this->pv_power_sensor_) this->pv_power_sensor_->publish_state(p_pv1 + p_pv2);
   
   float p_to_grid = (float)S16_REG(REG_P_TO_GRID);
-  this->publish_state_("grid_export_power", (p_to_grid > 0 ? p_to_grid : 0));
-  this->publish_state_("grid_import_power", (p_to_grid < 0 ? -p_to_grid : 0));
-  this->publish_state_("grid_power", -p_to_grid);
+  if (this->grid_power_sensor_) this->grid_power_sensor_->publish_state(-p_to_grid);
 
-  // Temperatures
-  this->publish_state_("inverter_temp", (float)S16_REG(REG_T_INNER) / 10.0f);
-  this->publish_state_("radiator_temp", (float)S16_REG(REG_T_RADIATOR) / 10.0f);
-  this->publish_state_("battery_temp", (float)S16_REG(REG_T_BAT) / 10.0f);
-
-  // Daily Energy Totals
-  float e_pv1_day = (float)U16_REG(REG_E_PV1_DAY) / 10.0f;
-  float e_pv2_day = (float)U16_REG(REG_E_PV2_DAY) / 10.0f;
-  this->publish_state_("pv1_today", e_pv1_day);
-  this->publish_state_("pv2_today", e_pv2_day);
-  this->publish_state_("pv_today", e_pv1_day + e_pv2_day);
-  
-  this->publish_state_("charge_today", (float)U16_REG(REG_E_CHARGE_DAY) / 10.0f);
-  this->publish_state_("discharge_today", (float)U16_REG(REG_E_DISCHARGE_DAY) / 10.0f);
-  this->publish_state_("grid_export_today", (float)U16_REG(REG_E_EXPORT_DAY) / 10.0f);
-  this->publish_state_("grid_import_today", (float)U16_REG(REG_E_IMPORT_DAY) / 10.0f);
-  
-  // Total Energy
-  this->publish_state_("pv1_total", (float)U32_REG(REG_E_PV1_ALL_L, REG_E_PV1_ALL_H) / 10.0f);
-  this->publish_state_("pv2_total", (float)U32_REG(REG_E_PV2_ALL_L, REG_E_PV2_ALL_H) / 10.0f);
-}
-
-void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
-    auto it = this->sensors_.find(key);
-    if (it != this->sensors_.end()) {
-        ((sensor::Sensor *)it->second)->publish_state(value);
-    }
-}
-
-void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
-    auto it = this->sensors_.find(key);
-    if (it != this->sensors_.end()) {
-        ((text_sensor::TextSensor *)it->second)->publish_state(value);
-    }
+  if (this->load_power_sensor_) this->load_power_sensor_->publish_state((float)U16_REG(REG_P_LOAD));
+  if (this->load_today_sensor_) this->load_today_sensor_->publish_state((float)U16_REG(REG_E_IMPORT_DAY) / 10.0f);
 }
 
 }  // namespace luxpower_sna
