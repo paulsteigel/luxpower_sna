@@ -1,6 +1,6 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
-#include "esphome/core/helpers.h" // <-- Added for hex_to_data
+#include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace luxpower_sna {
@@ -23,11 +23,19 @@ enum LuxpowerRegister {
 #define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
-  this->dongle_serial_ = hex_to_data(serial).value();
+  // CORRECTED: Added esphome:: namespace prefix
+  auto data = esphome::hex_to_data(serial);
+  if (data.has_value()) {
+    this->dongle_serial_ = data.value();
+  }
 }
 
 void LuxpowerSNAComponent::set_inverter_serial_number(const std::string &serial) {
-  this->inverter_serial_ = hex_to_data(serial).value();
+  // CORRECTED: Added esphome:: namespace prefix
+  auto data = esphome::hex_to_data(serial);
+  if (data.has_value()) {
+    this->inverter_serial_ = data.value();
+  }
 }
 
 void LuxpowerSNAComponent::setup() {
@@ -38,8 +46,8 @@ void LuxpowerSNAComponent::setup() {
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", format_hex_pretty(this->dongle_serial_).c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", format_hex_pretty(this->inverter_serial_).c_str());
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", esphome::format_hex_pretty(this->dongle_serial_).c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", esphome::format_hex_pretty(this->inverter_serial_).c_str());
 }
 
 void LuxpowerSNAComponent::update() {
@@ -108,7 +116,8 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_
     data_frame.push_back(num_registers & 0xFF);
     data_frame.push_back(num_registers >> 8);
 
-    uint16_t crc = crc16(data_frame.data(), data_frame.size());
+    // CORRECTED: Added esphome:: namespace prefix
+    uint16_t crc = esphome::crc16(data_frame.data(), data_frame.size());
     
     packet.insert(packet.end(), data_frame.begin(), data_frame.end());
     packet.push_back(crc & 0xFF);
@@ -173,6 +182,9 @@ void LuxpowerSNAComponent::parse_and_publish_() {
   if (this->grid_power_sensor_) this->grid_power_sensor_->publish_state(-p_to_grid);
 
   if (this->load_power_sensor_) this->load_power_sensor_->publish_state((float)U16_REG(REG_P_LOAD));
+  
+  // Note: REG_E_IMPORT_DAY is Grid Import, not Load Today. A true "Load Today" would need calculation.
+  // Using Grid Import as a placeholder for the sensor defined in YAML.
   if (this->load_today_sensor_) this->load_today_sensor_->publish_state((float)U16_REG(REG_E_IMPORT_DAY) / 10.0f);
 }
 
