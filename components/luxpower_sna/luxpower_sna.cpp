@@ -1,9 +1,7 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
+#include "esphome/components/socket/socket.h" // The only socket header we need
 #include <cstring> // For memcpy
-
-// Include the specific socket implementation header we need to cast to
-#include "esphome/components/socket/lwip_tcp.h"
 
 namespace esphome {
 namespace luxpower_sna {
@@ -46,7 +44,7 @@ void LuxpowerSNAComponent::update() {
   }
   this->is_updating_ = true;
 
-  // Step 1: Create the socket object. This returns a generic Socket pointer.
+  // Step 1: Create the socket object.
   this->socket_ = socket::socket(AF_INET, SOCK_STREAM, 0);
   if (this->socket_ == nullptr) {
     ESP_LOGE(TAG, "Could not create socket object. Aborting update.");
@@ -56,12 +54,22 @@ void LuxpowerSNAComponent::update() {
   }
 
   // ====================================================================
-  // *** THE DEFINITIVE FIX IS HERE ***
-  // Step 2: Cast the generic Socket to the specific LwipTCPSocket type
-  //         and call its specific connect() method.
+  // *** THE FINAL, CORRECT CONNECTION LOGIC ***
+  // Step 2: Prepare the address structure.
+  // Step 3: Connect using the now-available virtual method.
   // ====================================================================
-  auto *tcp_socket = static_cast<socket::LwipTCPSocket *>(this->socket_.get());
-  if (tcp_socket->connect(this->host_.c_str(), this->port_) != 0) {
+  sockaddr_storage address;
+  socklen_t address_len = sizeof(address);
+  if (!socket::set_sockaddr(this->host_.c_str(), this->port_, reinterpret_cast<sockaddr *>(&address), &address_len)) {
+    ESP_LOGW(TAG, "Could not resolve IP address of '%s'", this->host_.c_str());
+    this->socket_->close();
+    this->socket_ = nullptr;
+    this->is_updating_ = false;
+    if (this->status_text_sensor_) this->status_text_sensor_->publish_state("Error: DNS Failed");
+    return;
+  }
+
+  if (this->socket_->connect(reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
     ESP_LOGW(TAG, "Could not connect to %s:%d. Aborting update.", this->host_.c_str(), this->port_);
     this->socket_->close();
     this->socket_ = nullptr;
@@ -72,7 +80,7 @@ void LuxpowerSNAComponent::update() {
 
   ESP_LOGD(TAG, "Successfully connected to %s:%d", this->host_.c_str(), this->port_);
 
-  // The rest of the logic uses the base Socket interface (read, write, close), which is fine.
+  // The rest of the logic remains the same
   for (int bank = 0; bank < this->num_banks_to_request_; bank++) {
     uint16_t start_reg = bank * 40;
     uint16_t num_regs = 40;
@@ -121,7 +129,7 @@ void LuxpowerSNAComponent::update() {
   this->is_updating_ = false;
 }
 
-// build_request_packet_, log_hex_buffer, get_register_value_, and parse_and_publish_ remain the same
+// ... The rest of the file (build_request_packet_, etc.) is unchanged ...
 std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_register, uint16_t num_registers) {
     std::vector<uint8_t> modbus_cmd(18);
     modbus_cmd[0] = 0;
