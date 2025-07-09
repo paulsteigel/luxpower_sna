@@ -1,56 +1,38 @@
-# components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID
+from esphome.const import (
+    CONF_ADDRESS,
+    CONF_ID,
+    CONF_PORT,
+    CONF_UPDATE_INTERVAL,
+)
 
-# This component requires WiFi and will auto-load the sensor platform.
-DEPENDENCIES = ["wifi"]
-AUTO_LOAD = ["sensor"]
-MULTI_CONF = True
+# Define custom configuration keys
+CONF_DONGLE_SERIAL = "dongle_serial"
+CONF_INVERTER_SERIAL = "inverter_serial"
 
-luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
+# Create a namespace for our C++ code
+luxpower_sna_ns = cg.esphome_ns.namespace("esphome::luxpower_sna")
 LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.PollingComponent)
 
-# --- Define the ID that sub-components (like sensor) will use to find the hub ---
-CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
-
-# --- This is the reusable "linking" schema, as seen in jk_bms ---
-# Sub-components will import and extend this.
-LUXPOWER_SNA_COMPONENT_SCHEMA = cv.Schema(
+# Define the configuration schema for the main component
+CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
+        cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
+        cv.Required(CONF_ADDRESS): cv.string,
+        cv.Required(CONF_PORT): cv.port,
+        cv.Required(CONF_DONGLE_SERIAL): cv.string,
+        cv.Required(CONF_INVERTER_SERIAL): cv.string,
+        cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): cv.update_interval,
     }
-)
+).extend(cv.polling_component_schema("10s"))
 
-# --- This is the schema for the main 'luxpower_sna:' hub component ---
-CONFIG_SCHEMA = (
-    cv.Schema(
-        {
-            cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
-            cv.Required("host"): cv.string,
-            cv.Required("port"): cv.port,
-            cv.Required("dongle_serial"): cv.string,
-            cv.Required("inverter_serial_number"): cv.string,
-        }
-    )
-    .extend(cv.polling_component_schema("20s"))
-)
-
+# The function that generates the C++ code
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-
-    cg.add(var.set_host(config["host"]))
-    cg.add(var.set_port(config["port"]))
-
-    dongle_serial = config["dongle_serial"].encode('ascii')
-    if len(dongle_serial) != 10:
-        raise cv.Invalid("dongle_serial must be 10 characters long")
-    cg.add(var.set_dongle_serial(list(dongle_serial)))
-
-    inverter_serial = config["inverter_serial_number"].encode('ascii')
-    if len(inverter_serial) != 10:
-        raise cv.Invalid("inverter_serial_number must be 10 characters long")
-    cg.add(var.set_inverter_serial_number(list(inverter_serial)))
-
-    cg.add_library("ESPAsyncTCP", None)
+    hub = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(hub, config)
+    
+    cg.add(hub.set_address(config[CONF_ADDRESS]))
+    cg.add(hub.set_port(config[CONF_PORT]))
+    cg.add(hub.set_dongle_serial(config[CONF_DONGLE_SERIAL]))
+    cg.add(hub.set_inverter_serial(config[CONF_INVERTER_SERIAL]))
