@@ -4,7 +4,6 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
-// The esphome::socket namespace is needed for socket operations
 #include "esphome/components/socket/socket.h"
 
 namespace esphome {
@@ -40,12 +39,21 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // Set a timeout for the socket operations
-  this->socket_->set_timeout(5000); // 5 seconds timeout
+  // --- FIX #1: Use setsockopt for timeouts ---
+  // The 'set_timeout' function does not exist. We must use the low-level setsockopt.
+  struct timeval tv;
+  tv.tv_sec = 5;  // 5 seconds
+  tv.tv_usec = 0; // 0 microseconds
+  if (this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+    ESP_LOGW(TAG, "Failed to set socket recv timeout");
+    // Continue anyway, but log the warning
+  }
+  if (this->socket_->setsockopt(SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+    ESP_LOGW(TAG, "Failed to set socket send timeout");
+    // Continue anyway, but log the warning
+  }
 
-  // --- FIX #1: Correct usage of set_sockaddr ---
-  // The function expects the sockaddr struct first, then size, then host, then port.
-  // It returns the new address length, or 0 on failure.
+  // Set up the address structure
   sockaddr_storage address;
   socklen_t address_len = sizeof(address);
   address_len = socket::set_sockaddr(reinterpret_cast<sockaddr *>(&address), sizeof(address), this->host_, this->port_);
@@ -58,11 +66,10 @@ void LuxpowerSNAComponent::update() {
     return;
   }
 
-  // --- FIX #2: Correct usage of connect ---
-  // 'connect' is a namespace function, not a member function of the socket object.
-  // We pass the socket object as the first argument.
-  if (socket::connect(this->socket_, reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
-    ESP_LOGW(TAG, "Could not connect to %s:%u", this->host_.c_str(), this->port_);
+  // --- FIX #2: 'connect' is a member function of the Socket class ---
+  // The compiler confirms that connect() must be called on the socket object itself.
+  if (this->socket_->connect(reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
+    ESP_LOGW(TAG, "Could not connect to %s:%u. Error: %s", this->host_.c_str(), this->port_, strerror(errno));
     this->socket_->close();
     this->socket_ = nullptr;
     this->status_set_warning();
@@ -71,14 +78,7 @@ void LuxpowerSNAComponent::update() {
 
   ESP_LOGD(TAG, "Connection successful to %s:%u", this->host_.c_str(), this->port_);
 
-  // At this point, you would send your request packet and read the response.
-  // For now, we'll just log success and close the connection.
-
   // TODO: Implement packet creation, sending, and response reading here.
-  // Example:
-  // std::vector<uint8_t> request_packet = this->build_request_packet(...);
-  // this->socket_->writev(request_packet.data(), request_packet.size());
-  // ... read response ...
 
   // Clean up the socket for this update cycle
   this->socket_->close();
