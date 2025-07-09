@@ -1,29 +1,29 @@
+# components/luxpower_sna/text_sensor.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import text_sensor
-from esphome.const import CONF_TYPE
 
-from . import LuxpowerSNAComponent
+# --- Import the linking schema and ID from __init__.py ---
+from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
-
-TEXT_SENSORS = {
+TEXT_SENSOR_TYPES = {
     "status_text": text_sensor.text_sensor_schema(
         icon="mdi:information-outline",
     ),
 }
 
 CONFIG_SCHEMA = cv.All(
-    text_sensor.text_sensor_schema()
-    .extend(
+    text_sensor.PLATFORM_SCHEMA.extend(
         {
-            cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-            cv.Required(CONF_TYPE): cv.enum(TEXT_SENSORS, lower=True),
+            **{cv.Optional(key): schema for key, schema in TEXT_SENSOR_TYPES.items()},
         }
-    )
+    ).extend(LUXPOWER_SNA_COMPONENT_SCHEMA), # Extend with the linking schema
+    cv.has_at_least_one_key(*TEXT_SENSOR_TYPES.keys()),
 )
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    sens = await text_sensor.new_text_sensor(config)
-    cg.add(getattr(hub, f"set_{config[CONF_TYPE]}_sensor")(sens))
+    for key, conf in config.items():
+        if key in TEXT_SENSOR_TYPES:
+            sens = await text_sensor.new_text_sensor(conf)
+            cg.add(getattr(hub, f"set_{key}_sensor")(sens))
