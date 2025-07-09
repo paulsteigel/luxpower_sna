@@ -5,98 +5,53 @@ import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
     CONF_ID,
-    DEVICE_CLASS_VOLTAGE,
+    DEVICE_CLASS_ENERGY,
+    DEVICE_CLASS_FREQUENCY,
     DEVICE_CLASS_POWER,
+    DEVICE_CLASS_TEMPERATURE,
+    DEVICE_CLASS_VOLTAGE,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
+    UNIT_CELSIUS,
+    UNIT_HERTZ,
+    UNIT_KILOWATT_HOURS,
+    UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_WATT,
 )
 
-# Pull in the namespace from our main component file (__init__.py)
-from . import luxpower_sna_ns, LuxpowerSNAComponent
+from . import luxpower_sna_ns, LuxpowerSNAComponent, LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-# Define a CONF key for linking to the main hub component
-CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
+# --- A dictionary that defines all possible sensors ---
+# The keys here are the keys you will use in your YAML
+SENSOR_TYPES = {
+    "pv1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
+    "pv1_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    "battery_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "charge_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-plus"),
+    "discharge_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-minus"),
+    "inverter_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug"),
+    "soc": sensor.sensor_schema(unit_of_measurement=UNIT_PERCENT, icon="mdi:battery-high", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+}
 
-# Define CONF keys for each sensor type
-CONF_V_PV1 = "v_pv1"
-CONF_P_PV1 = "p_pv1"
-CONF_V_BAT = "v_bat"
-CONF_P_CHARGE = "p_charge"
-CONF_P_DISCHARGE = "p_discharge"
-CONF_P_INV = "p_inv"
-
-# A list of all our sensor types for easier iteration
-SENSOR_TYPES = [
-    CONF_V_PV1,
-    CONF_P_PV1,
-    CONF_V_BAT,
-    CONF_P_CHARGE,
-    CONF_P_DISCHARGE,
-    CONF_P_INV,
-]
-
-# This is the schema that tells ESPHome what options are valid in the YAML
+# --- The CONFIG_SCHEMA for the sensor platform ---
 CONFIG_SCHEMA = cv.All(
-    sensor.SENSOR_SCHEMA.extend(
+    sensor.SENSOR_PLATFORM_SCHEMA.extend(
         {
-            # Link to the main hub component created in the YAML
             cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-            
-            # Define each sensor as an optional key.
-            # This allows users to only define the sensors they want.
-            cv.Optional(CONF_V_PV1): sensor.sensor_schema(
-                unit_of_measurement=UNIT_VOLT,
-                accuracy_decimals=1,
-                device_class=DEVICE_CLASS_VOLTAGE,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_P_PV1): sensor.sensor_schema(
-                unit_of_measurement=UNIT_WATT,
-                accuracy_decimals=0,
-                device_class=DEVICE_CLASS_POWER,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_V_BAT): sensor.sensor_schema(
-                unit_of_measurement=UNIT_VOLT,
-                accuracy_decimals=1,
-                device_class=DEVICE_CLASS_VOLTAGE,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_P_CHARGE): sensor.sensor_schema(
-                unit_of_measurement=UNIT_WATT,
-                accuracy_decimals=0,
-                device_class=DEVICE_CLASS_POWER,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_P_DISCHARGE): sensor.sensor_schema(
-                unit_of_measurement=UNIT_WATT,
-                accuracy_decimals=0,
-                device_class=DEVICE_CLASS_POWER,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_P_INV): sensor.sensor_schema(
-                unit_of_measurement=UNIT_WATT,
-                accuracy_decimals=0,
-                device_class=DEVICE_CLASS_POWER,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
+            **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
         }
-    ).extend(cv.COMPONENT_SCHEMA)
+    ).extend(cv.COMPONENT_SCHEMA),
+    cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
 
-# This function is called by ESPHome to generate the C++ code
 async def to_code(config):
-    # Get the parent hub component
-    parent = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
+    hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     
-    # Loop through all our defined sensor types
-    for sens_type in SENSOR_TYPES:
-        # If the user has defined this sensor in their YAML...
-        if sens_config := config.get(sens_type):
-            # ...create a new sensor object in C++...
-            sens = await sensor.new_sensor(sens_config)
-            # ...and call the corresponding C++ setter function on the parent hub.
-            # e.g., for CONF_V_PV1, this calls parent->set_v_pv1_sensor(sens);
-            setter_func = f"set_{sens_type}_sensor"
-            cg.add(getattr(parent, setter_func)(sens))
+    for yaml_key, schema in SENSOR_TYPES.items():
+        if yaml_key in config:
+            conf = config[yaml_key]
+            # e.g. for "pv1_voltage", the C++ setter will be "set_pv1_voltage_sensor"
+            setter = f"set_{yaml_key}_sensor" 
+            sens = await sensor.new_sensor(conf)
+            cg.add(getattr(hub, setter)(sens))
