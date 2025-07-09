@@ -18,9 +18,10 @@ from esphome.const import (
     UNIT_WATT,
 )
 
+# --- Import the linking schema and ID from __init__.py ---
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-# ... (YAML_TO_C_NAMES and SENSOR_TYPES dictionaries remain unchanged) ...
+# --- Map from YAML keys to C++ names ---
 YAML_TO_C_NAMES = {
     "voltage": "battery_voltage", "soc": "soc", "battery_power": "battery_power",
     "charge_power": "charge_power", "discharge_power": "discharge_power", "pv_power": "pv_power",
@@ -34,6 +35,8 @@ YAML_TO_C_NAMES = {
     "load_today": "load_today", "eps_today": "eps_today", "inverter_temp": "inverter_temp",
     "radiator_temp": "radiator_temp", "battery_temp": "battery_temp", "status_code": "status_code",
 }
+
+# --- A dictionary that defines all possible sensors ---
 SENSOR_TYPES = {
     "voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "soc": sensor.sensor_schema(unit_of_measurement=UNIT_PERCENT, icon="mdi:battery-high", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
@@ -68,26 +71,24 @@ SENSOR_TYPES = {
     "status_code": sensor.sensor_schema(icon="mdi:information-outline", accuracy_decimals=0),
 }
 
-
-# --- THE CORRECTED SCHEMA DEFINITION ---
+# --- The CONFIG_SCHEMA for the sensor platform, following your working sample ---
 CONFIG_SCHEMA = cv.All(
-    # The base schema for a sensor platform is sensor.SENSOR_PLATFORM_SCHEMA
-    sensor.SENSOR_PLATFORM_SCHEMA.extend(
+    LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
         {
-            # Add all the possible sensor keys as Optional
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
         }
-    ).extend(LUXPOWER_SNA_COMPONENT_SCHEMA), # Extend with the linking schema
-    # This validation ensures that the user provides at least one sensor key.
+    ),
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
 
-
 async def to_code(config):
+    # Get the hub object using the ID from the linking schema
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
+    
+    # Loop through our defined sensor types and create the ones the user configured
     for yaml_key, c_name in YAML_TO_C_NAMES.items():
         if yaml_key in config:
             conf = config[yaml_key]
             sens = await sensor.new_sensor(conf)
+            # Call the specific setter function in the C++ component
             cg.add(getattr(hub, f"set_{c_name}_sensor")(sens))
-
