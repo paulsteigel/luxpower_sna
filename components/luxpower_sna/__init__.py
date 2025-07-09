@@ -45,10 +45,5 @@ async def to_code(config):
         raise cv.Invalid("dongle_serial must be 10 characters long")
     cg.add(var.set_dongle_serial(dongle_serial))
 
-    inverter_serial = config["inverter_serial_number"]
-    if len(inverter_serial) != 10:
-        raise cv.Invalid("inverter_serial_number must be 10 characters long")
-    # This call must match the function name in the .h file exactly.
-    cg.add(var.set_inverter_serial_number(inverter_serial))
 
     cg.add_library("ESPAsyncTCP", None)
