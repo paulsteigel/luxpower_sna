@@ -1,94 +1,102 @@
-# components/luxpower_sna/sensor.py
+# esphome_config/custom_components/luxpower_sna/sensor.py
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
-    DEVICE_CLASS_ENERGY,
-    DEVICE_CLASS_FREQUENCY,
-    DEVICE_CLASS_POWER,
-    DEVICE_CLASS_TEMPERATURE,
+    CONF_ID,
     DEVICE_CLASS_VOLTAGE,
+    DEVICE_CLASS_POWER,
     STATE_CLASS_MEASUREMENT,
-    STATE_CLASS_TOTAL_INCREASING,
-    UNIT_CELSIUS,
-    UNIT_HERTZ,
-    UNIT_KILOWATT_HOURS,
-    UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_WATT,
 )
 
-# --- Import the linking schema and ID from __init__.py ---
-from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
+# Pull in the namespace from our main component file (__init__.py)
+from . import luxpower_sna_ns, LuxpowerSNAComponent
 
-# --- Map from YAML keys to C++ names ---
-YAML_TO_C_NAMES = {
-    "voltage": "battery_voltage", "soc": "soc", "battery_power": "battery_power",
-    "charge_power": "charge_power", "discharge_power": "discharge_power", "pv_power": "pv_power",
-    "inverter_power": "inverter_power", "grid_power": "grid_power", "load_power": "load_power",
-    "eps_power": "eps_power", "pv1_voltage": "pv1_voltage", "pv1_power": "pv1_power",
-    "pv2_voltage": "pv2_voltage", "pv2_power": "pv2_power", "grid_voltage": "grid_voltage",
-    "grid_frequency": "grid_frequency", "power_factor": "power_factor", "eps_voltage": "eps_voltage",
-    "eps_frequency": "eps_frequency", "pv_today": "pv_today", "inverter_today": "inverter_today",
-    "charge_today": "charge_today", "discharge_today": "discharge_today",
-    "grid_export_today": "grid_export_today", "grid_import_today": "grid_import_today",
-    "load_today": "load_today", "eps_today": "eps_today", "inverter_temp": "inverter_temp",
-    "radiator_temp": "radiator_temp", "battery_temp": "battery_temp", "status_code": "status_code",
-}
+# Define a CONF key for linking to the main hub component
+CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
 
-# --- A dictionary that defines all possible sensors ---
-SENSOR_TYPES = {
-    "voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
-    "soc": sensor.sensor_schema(unit_of_measurement=UNIT_PERCENT, icon="mdi:battery-high", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "battery_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "charge_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-plus"),
-    "discharge_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-minus"),
-    "pv_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
-    "inverter_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug"),
-    "grid_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:transmission-tower"),
-    "load_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:home-lightning-bolt"),
-    "eps_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
-    "pv1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
-    "pv1_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
-    "pv2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
-    "pv2_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
-    "grid_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
-    "grid_frequency": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
-    "power_factor": sensor.sensor_schema(icon="mdi:angle-acute", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
-    "eps_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
-    "eps_frequency": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
-    "pv_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "inverter_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "charge_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "discharge_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "grid_export_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "grid_import_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "load_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "eps_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
-    "inverter_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "radiator_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "battery_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "status_code": sensor.sensor_schema(icon="mdi:information-outline", accuracy_decimals=0),
-}
+# Define CONF keys for each sensor type
+CONF_V_PV1 = "v_pv1"
+CONF_P_PV1 = "p_pv1"
+CONF_V_BAT = "v_bat"
+CONF_P_CHARGE = "p_charge"
+CONF_P_DISCHARGE = "p_discharge"
+CONF_P_INV = "p_inv"
 
-# --- The CONFIG_SCHEMA for the sensor platform, following your working sample ---
+# A list of all our sensor types for easier iteration
+SENSOR_TYPES = [
+    CONF_V_PV1,
+    CONF_P_PV1,
+    CONF_V_BAT,
+    CONF_P_CHARGE,
+    CONF_P_DISCHARGE,
+    CONF_P_INV,
+]
+
+# This is the schema that tells ESPHome what options are valid in the YAML
 CONFIG_SCHEMA = cv.All(
-    LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
+    sensor.SENSOR_SCHEMA.extend(
         {
-            **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
+            # Link to the main hub component created in the YAML
+            cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
+            
+            # Define each sensor as an optional key.
+            # This allows users to only define the sensors they want.
+            cv.Optional(CONF_V_PV1): sensor.sensor_schema(
+                unit_of_measurement=UNIT_VOLT,
+                accuracy_decimals=1,
+                device_class=DEVICE_CLASS_VOLTAGE,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_P_PV1): sensor.sensor_schema(
+                unit_of_measurement=UNIT_WATT,
+                accuracy_decimals=0,
+                device_class=DEVICE_CLASS_POWER,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_V_BAT): sensor.sensor_schema(
+                unit_of_measurement=UNIT_VOLT,
+                accuracy_decimals=1,
+                device_class=DEVICE_CLASS_VOLTAGE,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_P_CHARGE): sensor.sensor_schema(
+                unit_of_measurement=UNIT_WATT,
+                accuracy_decimals=0,
+                device_class=DEVICE_CLASS_POWER,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_P_DISCHARGE): sensor.sensor_schema(
+                unit_of_measurement=UNIT_WATT,
+                accuracy_decimals=0,
+                device_class=DEVICE_CLASS_POWER,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_P_INV): sensor.sensor_schema(
+                unit_of_measurement=UNIT_WATT,
+                accuracy_decimals=0,
+                device_class=DEVICE_CLASS_POWER,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
         }
-    ),
-    cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
+    ).extend(cv.COMPONENT_SCHEMA)
 )
 
+# This function is called by ESPHome to generate the C++ code
 async def to_code(config):
-    # Get the hub object using the ID from the linking schema
-    hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
+    # Get the parent hub component
+    parent = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     
-    # Loop through our defined sensor types and create the ones the user configured
-    for yaml_key, c_name in YAML_TO_C_NAMES.items():
-        if yaml_key in config:
-            conf = config[yaml_key]
-            sens = await sensor.new_sensor(conf)
-            # Call the specific setter function in the C++ component
-            cg.add(getattr(hub, f"set_{c_name}_sensor")(sens))
+    # Loop through all our defined sensor types
+    for sens_type in SENSOR_TYPES:
+        # If the user has defined this sensor in their YAML...
+        if sens_config := config.get(sens_type):
+            # ...create a new sensor object in C++...
+            sens = await sensor.new_sensor(sens_config)
+            # ...and call the corresponding C++ setter function on the parent hub.
+            # e.g., for CONF_V_PV1, this calls parent->set_v_pv1_sensor(sens);
+            setter_func = f"set_{sens_type}_sensor"
+            cg.add(getattr(parent, setter_func)(sens))
