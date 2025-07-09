@@ -5,6 +5,11 @@
 namespace esphome {
 namespace luxpower_sna {
 
+// CORRECTED: Bring the required helper functions into this namespace's scope.
+using esphome::hex_to_data;
+using esphome::crc16;
+using esphome::format_hex_pretty;
+
 static const char *const TAG = "luxpower_sna";
 
 // REGISTER MAP (remains the same)
@@ -23,16 +28,16 @@ enum LuxpowerRegister {
 #define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
-  // CORRECTED: Using global scope resolution operator ::
-  auto data = ::esphome::hex_to_data(serial);
+  // CORRECTED: Call the function directly, it's now in scope.
+  auto data = hex_to_data(serial);
   if (data.has_value()) {
     this->dongle_serial_ = data.value();
   }
 }
 
 void LuxpowerSNAComponent::set_inverter_serial_number(const std::string &serial) {
-  // CORRECTED: Using global scope resolution operator ::
-  auto data = ::esphome::hex_to_data(serial);
+  // CORRECTED: Call the function directly.
+  auto data = hex_to_data(serial);
   if (data.has_value()) {
     this->inverter_serial_ = data.value();
   }
@@ -46,9 +51,9 @@ void LuxpowerSNAComponent::setup() {
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  // CORRECTED: Using global scope resolution operator ::
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", ::esphome::format_hex_pretty(this->dongle_serial_).c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", ::esphome::format_hex_pretty(this->inverter_serial_).c_str());
+  // CORRECTED: Call the function directly.
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", format_hex_pretty(this->dongle_serial_).c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", format_hex_pretty(this->inverter_serial_).c_str());
 }
 
 void LuxpowerSNAComponent::update() {
@@ -72,7 +77,7 @@ void LuxpowerSNAComponent::request_bank_(int bank_num) {
   uint16_t num_registers = 40;
 
   AsyncClient *client = new AsyncClient();
-  client->setRxTimeout(10); // Increased timeout slightly for stability
+  client->setRxTimeout(10);
 
   client->onData([this, client, bank_num](void *arg, AsyncClient *c, void *data, size_t len) {
     this->handle_packet_(data, len, bank_num);
@@ -117,8 +122,8 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_
     data_frame.push_back(num_registers & 0xFF);
     data_frame.push_back(num_registers >> 8);
 
-    // CORRECTED: Using global scope resolution operator ::
-    uint16_t crc = ::esphome::crc16(data_frame.data(), data_frame.size());
+    // CORRECTED: Call the function directly.
+    uint16_t crc = crc16(data_frame.data(), data_frame.size());
     
     packet.insert(packet.end(), data_frame.begin(), data_frame.end());
     packet.push_back(crc & 0xFF);
@@ -158,7 +163,6 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len, int bank_num) 
 }
 
 void LuxpowerSNAComponent::parse_and_publish_() {
-  // --- Status Text ---
   if (this->status_text_sensor_) {
     int status_code = U16_REG(REG_STATUS_CODE);
     std::string status_text;
@@ -170,7 +174,6 @@ void LuxpowerSNAComponent::parse_and_publish_() {
     this->status_text_sensor_->publish_state(status_text);
   }
 
-  // --- Standard Sensors ---
   if (this->soc_sensor_) this->soc_sensor_->publish_state((float)U8_REG(REG_SOC));
   if (this->battery_voltage_sensor_) this->battery_voltage_sensor_->publish_state((float)U16_REG(REG_V_BATTERY) / 10.0f);
   if (this->battery_temp_sensor_) this->battery_temp_sensor_->publish_state((float)S16_REG(REG_T_BAT) / 10.0f);
@@ -184,8 +187,6 @@ void LuxpowerSNAComponent::parse_and_publish_() {
 
   if (this->load_power_sensor_) this->load_power_sensor_->publish_state((float)U16_REG(REG_P_LOAD));
   
-  // Note: REG_E_IMPORT_DAY is Grid Import, not Load Today. A true "Load Today" would need calculation.
-  // Using Grid Import as a placeholder for the sensor defined in YAML.
   if (this->load_today_sensor_) this->load_today_sensor_->publish_state((float)U16_REG(REG_E_IMPORT_DAY) / 10.0f);
 }
 
