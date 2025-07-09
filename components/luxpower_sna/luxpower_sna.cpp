@@ -11,9 +11,8 @@ static const char *const TAG = "luxpower_sna";
 
 // =================================================================================================
 // == DEFINITIVE REGISTER MAP for 117-byte data packet (SNA models)
-// == v7 - This map uses absolute byte offsets and has been meticulously corrected based on a
-// ==      final analysis of the Python script's live data parsing logic (`READ_INPUT`).
-// ==      The list [68, 69,...] is for settings (`READ_HOLD`) and is not used here.
+// == v9 - This version is identical to v8 but adds logging to the request_data_() function
+// ==      to show the exact commands being sent to the inverter.
 // =================================================================================================
 enum LuxpowerRegister {
   // Note: Offsets are 1-based for readability, matching byte numbers in a hex editor.
@@ -66,6 +65,9 @@ void LuxpowerSNAComponent::update() {
   this->request_data_();
 }
 
+// ===============================================================================================
+// == THIS IS THE MODIFIED FUNCTION WITH ADDED LOGGING
+// ===============================================================================================
 void LuxpowerSNAComponent::request_data_() {
   if (this->tcp_client_ != nullptr && this->tcp_client_->connected()) {
     ESP_LOGD(TAG, "Skipping data request, TCP client is busy.");
@@ -81,18 +83,27 @@ void LuxpowerSNAComponent::request_data_() {
   });
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "TCP connected, sending heartbeat and data frames.");
+    ESP_LOGD(TAG, "TCP connected, preparing to send frames.");
+    
+    // --- First Frame (Heartbeat) ---
     std::vector<uint8_t> request;
     request.insert(request.end(), {0xA1, 0x1A, 0x01, 0x02, 0x00, 0x0F});
     request.insert(request.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
     request.insert(request.end(), {0x00, 0x00});
+    
+    // ** NEW LOGGING LINE **
+    ESP_LOGD(TAG, "Sending Heartbeat Frame: %s", format_hex_pretty(request.data(), request.size()).c_str());
     client->write(reinterpret_cast<const char*>(request.data()), request.size());
 
+    // --- Second Frame (Data Request) ---
     request.clear();
     request.insert(request.end(), {0xA1, 0x1A, 0x01, 0x02, 0x00, 0x12});
     request.insert(request.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
     request.insert(request.end(), this->inverter_serial_.begin(), this->inverter_serial_.end());
     request.insert(request.end(), {0x00, 0x00});
+
+    // ** NEW LOGGING LINE **
+    ESP_LOGD(TAG, "Sending Data Request Frame: %s", format_hex_pretty(request.data(), request.size()).c_str());
     client->write(reinterpret_cast<const char*>(request.data()), request.size());
   });
 
@@ -113,21 +124,44 @@ void LuxpowerSNAComponent::request_data_() {
 
   this->tcp_client_->connect(this->host_.c_str(), this->port_);
 }
+// ===============================================================================================
+// == END OF MODIFIED FUNCTION
+// ===============================================================================================
 
 void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   uint8_t *raw = (uint8_t *) data;
 
-  if (len < 117) {
-    ESP_LOGW(TAG, "Received packet too short: %d bytes. Expected 117 bytes.", len);
+  ESP_LOGD(TAG, "Packet received (len: %d): %s", len, format_hex_pretty(raw, len).c_str());
+
+  // === START OF ROBUSTNESS CHECKS ===
+  // 1. Check if it's the 117-byte data packet we are looking for.
+  if (len != 117) {
+    ESP_LOGD(TAG, "Ignoring packet: incorrect length.");
     return;
   }
-  
-  ESP_LOGD(TAG, "Full packet received:\n%s", format_hex_pretty(raw, len).c_str());
+  // 2. Check for the correct protocol number (0x0102).
+  if (raw[2] != 0x01 || raw[3] != 0x02) {
+    ESP_LOGD(TAG, "Ignoring packet: incorrect protocol number.");
+    return;
+  }
+  // 3. Check for the correct TCP function (0xC2) and Device function (0x04)
+  if (raw[7] != 0xC2 || raw[21] != 0x04) {
+    ESP_LOGD(TAG, "Ignoring packet: incorrect function code.");
+    return;
+  }
+  // 4. Check that the data payload starts at register 0.
+  if (raw[32] != 0x00 || raw[33] != 0x00) {
+    ESP_LOGD(TAG, "Ignoring packet: incorrect starting register.");
+    return;
+  }
+  // === END OF ROBUSTNESS CHECKS ===
 
-  // --- PARSING LOGIC USING THE DEFINITIVE REGISTER MAP (v7) ---
+  ESP_LOGI(TAG, "Parsing inverter data packet...");
+
+  // --- PARSING LOGIC USING THE DEFINITIVE REGISTER MAP ---
   
   // Status & SOC
-  int status_code = U16(REG_STATUS_CODE); // Status is a 16-bit value
+  int status_code = U16(REG_STATUS_CODE);
   this->publish_state_("status_code", (float)status_code);
   std::string status_text;
   switch(status_code) {
