@@ -1,6 +1,7 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
+.extend(socket.socket_component_schema()) # <--- ADD THIS LINE
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["wifi"]
@@ -28,12 +29,15 @@ CONFIG_SCHEMA = (
         }
     )
     .extend(cv.polling_component_schema("20s"))
+    .extend(socket.socket_component_schema()) # <--- ADD THIS LINE
 )
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-
+    # This registers the socket dependency for code generation
+    await socket.register_socket(var, config) # <--- ADD THIS LINE
+    
     cg.add(var.set_host(config["host"]))
     cg.add(var.set_port(config["port"]))
 
