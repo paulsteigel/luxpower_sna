@@ -5,10 +5,32 @@
 namespace esphome {
 namespace luxpower_sna {
 
-// CORRECTED: Bring the required helper functions into this namespace's scope.
-using esphome::hex_to_data;
+// Using declarations for the functions that DO exist in helpers.h
 using esphome::crc16;
 using esphome::format_hex_pretty;
+
+// ===================================================================================
+// CORRECTED: The hex_to_data function did not exist. We are implementing it here.
+// This function converts a string of hex characters (e.g., "1A2B3C") into a
+// vector of bytes ({0x1A, 0x2B, 0x3C}).
+// ===================================================================================
+optional<std::vector<uint8_t>> hex_to_data(const std::string &hex_string) {
+  if (hex_string.length() % 2 != 0) {
+    return {};  // Hex string must have an even number of characters
+  }
+  std::vector<uint8_t> data;
+  data.reserve(hex_string.length() / 2);
+  for (size_t i = 0; i < hex_string.length(); i += 2) {
+    try {
+      std::string byte_string = hex_string.substr(i, 2);
+      uint8_t byte = static_cast<uint8_t>(std::stoul(byte_string, nullptr, 16));
+      data.push_back(byte);
+    } catch (const std::exception &e) {
+      return {};  // Invalid character in hex string
+    }
+  }
+  return data;
+}
 
 static const char *const TAG = "luxpower_sna";
 
@@ -28,7 +50,7 @@ enum LuxpowerRegister {
 #define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
-  // CORRECTED: Call the function directly, it's now in scope.
+  // Now calling our own, local hex_to_data function
   auto data = hex_to_data(serial);
   if (data.has_value()) {
     this->dongle_serial_ = data.value();
@@ -36,7 +58,7 @@ void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
 }
 
 void LuxpowerSNAComponent::set_inverter_serial_number(const std::string &serial) {
-  // CORRECTED: Call the function directly.
+  // Now calling our own, local hex_to_data function
   auto data = hex_to_data(serial);
   if (data.has_value()) {
     this->inverter_serial_ = data.value();
@@ -51,7 +73,6 @@ void LuxpowerSNAComponent::setup() {
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  // CORRECTED: Call the function directly.
   ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", format_hex_pretty(this->dongle_serial_).c_str());
   ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", format_hex_pretty(this->inverter_serial_).c_str());
 }
@@ -122,7 +143,6 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_
     data_frame.push_back(num_registers & 0xFF);
     data_frame.push_back(num_registers >> 8);
 
-    // CORRECTED: Call the function directly.
     uint16_t crc = crc16(data_frame.data(), data_frame.size());
     
     packet.insert(packet.end(), data_frame.begin(), data_frame.end());
