@@ -1,9 +1,8 @@
 # components/luxpower_sna/text_sensor.py
 import esphome.codegen as cg
-import esphome.config_validation as cv
+import esphome.config_validation as cv # We need cv for PLATFORM_SCHEMA
 from esphome.components import text_sensor
 
-# --- Import the linking schema and ID from __init__.py ---
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
 TEXT_SENSOR_TYPES = {
@@ -12,8 +11,9 @@ TEXT_SENSOR_TYPES = {
     ),
 }
 
+# --- THE FIX IS HERE ---
 CONFIG_SCHEMA = cv.All(
-    text_sensor.PLATFORM_SCHEMA.extend(
+    cv.PLATFORM_SCHEMA.extend( # Changed from text_sensor.PLATFORM_SCHEMA
         {
             **{cv.Optional(key): schema for key, schema in TEXT_SENSOR_TYPES.items()},
         }
@@ -27,3 +27,4 @@ async def to_code(config):
         if key in TEXT_SENSOR_TYPES:
             sens = await text_sensor.new_text_sensor(conf)
             cg.add(getattr(hub, f"set_{key}_sensor")(sens))
+
