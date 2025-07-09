@@ -4,7 +4,6 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include <numeric>
-
 #include "lwip/tcp.h"
 #include "lwip/ip_addr.h"
 #include "lwip/dns.h"
@@ -13,13 +12,10 @@ namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
-
 static err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
 
-// --- PARSING LOGIC ---
-const int DATA_START_OFFSET = 35; // The actual register data starts at byte 35
+const int DATA_START_OFFSET = 35;
 
-// Helper function to extract a 16-bit little-endian value from the data buffer
 uint16_t LuxpowerSNAComponent::get_register_value(const std::vector<uint8_t> &data, int reg_index) {
     int byte_pos = DATA_START_OFFSET + (reg_index * 2);
     if (byte_pos + 1 >= data.size()) {
@@ -31,62 +27,32 @@ uint16_t LuxpowerSNAComponent::get_register_value(const std::vector<uint8_t> &da
 
 void LuxpowerSNAComponent::parse_response(const std::vector<uint8_t> &data) {
     ESP_LOGD(TAG, "Parsing response of size %d", data.size());
-    
-    // Basic validation: The response for 40 registers should be 117 bytes long
     if (data.size() < 117) {
         ESP_LOGW(TAG, "Response is too short to parse: %d bytes", data.size());
         return;
     }
 
-    // --- Register Mapping (based on common Luxpower SNA registers) ---
-    // Register 0: Vpv1 (0.1V)
-    if (this->v_pv1_sensor_) {
-        float value = get_register_value(data, 0) * 0.1f;
-        this->v_pv1_sensor_->publish_state(value);
-    }
-    // Register 2: Ppv1 (W)
-    if (this->p_pv1_sensor_) {
-        float value = get_register_value(data, 2);
-        this->p_pv1_sensor_->publish_state(value);
-    }
-    // Register 14: Vbat (0.1V)
-    if (this->v_bat_sensor_) {
-        float value = get_register_value(data, 14) * 0.1f;
-        this->v_bat_sensor_->publish_state(value);
-    }
-    // Register 18: Pcharge (W)
-    if (this->p_charge_sensor_) {
-        float value = get_register_value(data, 18);
-        this->p_charge_sensor_->publish_state(value);
-    }
-    // Register 19: Pdischarge (W)
-    if (this->p_discharge_sensor_) {
-        float value = get_register_value(data, 19);
-        this->p_discharge_sensor_->publish_state(value);
-    }
-    // Register 23: Pinv (W)
-    if (this->p_inv_sensor_) {
-        float value = get_register_value(data, 23);
-        this->p_inv_sensor_->publish_state(value);
-    }
+    if (this->pv1_voltage_sensor_) this->pv1_voltage_sensor_->publish_state(get_register_value(data, 0) * 0.1f);
+    if (this->pv1_power_sensor_) this->pv1_power_sensor_->publish_state(get_register_value(data, 2));
+    if (this->battery_voltage_sensor_) this->battery_voltage_sensor_->publish_state(get_register_value(data, 14) * 0.1f);
+    if (this->charge_power_sensor_) this->charge_power_sensor_->publish_state(get_register_value(data, 18));
+    if (this->discharge_power_sensor_) this->discharge_power_sensor_->publish_state(get_register_value(data, 19));
+    if (this->inverter_power_sensor_) this->inverter_power_sensor_->publish_state(get_register_value(data, 23));
+    if (this->soc_sensor_) this->soc_sensor_->publish_state(get_register_value(data, 15));
 
     ESP_LOGI(TAG, "Successfully parsed inverter data.");
 }
 
-// --- LwIP Callbacks ---
 err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
-
   if (p == nullptr) {
     ESP_LOGD(TAG, "Connection closed by remote host.");
-    // --- MODIFIED: Parse data before closing ---
     if (!component->rx_buffer_.empty()) {
         component->parse_response(component->rx_buffer_);
     }
     component->close_connection();
     return ERR_OK;
   }
-
   if (err == ERR_OK) {
     for (struct pbuf *q = p; q != nullptr; q = q->next) {
       component->rx_buffer_.insert(component->rx_buffer_.end(), (uint8_t *)q->payload, (uint8_t *)q->payload + q->len);
@@ -100,7 +66,6 @@ err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
   return ERR_OK;
 }
 
-// ... The rest of the file is mostly the same ...
 static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
   if (err == ERR_OK) {
@@ -153,17 +118,13 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet(uint8_t function
     return packet;
 }
 
-void LuxpowerSNAComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNAComponent...");
-}
-
+void LuxpowerSNAComponent::setup() { ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNAComponent..."); }
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "LuxpowerSNAComponent:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
   ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
   LOG_UPDATE_INTERVAL(this);
 }
-
 void LuxpowerSNAComponent::update() {
   ESP_LOGD(TAG, "Starting update...");
   if (this->pcb_ != nullptr) {
@@ -190,10 +151,8 @@ void LuxpowerSNAComponent::update() {
   if (err != ERR_OK) {
     ESP_LOGW(TAG, "Could not initiate TCP connection. Error: %d", err);
     this->close_connection();
-    return;
   }
 }
-
 void LuxpowerSNAComponent::close_connection() {
   if (this->pcb_ != nullptr) {
     tcp_err(this->pcb_, nullptr);
