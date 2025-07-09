@@ -1,4 +1,4 @@
-# esphome_config/custom_components/luxpower_sna/sensor.py
+    # esphome_config/custom_components/luxpower_sna/sensor.py
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -12,7 +12,8 @@ from esphome.const import (
     UNIT_WATT,
 )
 
-from . import LuxpowerSNAComponent, CONF_LUXPOWER_SNA_ID
+# --- Import the linking schema and ID from __init__.py ---
+from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
 # A dictionary that defines all possible sensors.
 # The keys here MUST match the keys in the YAML and will be used to generate C++ function names.
