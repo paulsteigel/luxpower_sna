@@ -4,19 +4,41 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
-#include "esphome/components/socket/socket.h"
-#include "esphome/components/socket/headers.h" // For LWIP_SO_ constants
+// We must use the low-level LwIP API directly.
+#include "lwip/tcp.h"
+#include "lwip/ip_addr.h"
 
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// Define constants for the protocol
-static const uint8_t FRAME_START[2] = {0xAA, 0x55};
-static const uint8_t PROTOCOL_VERSION = 0x10;
-static const uint8_t READ_HOLDING_REGISTERS = 0x03;
-static const uint8_t WRITE_HOLDING_REGISTERS = 0x10;
+// --- LwIP Callback Functions ---
+// These functions are called by the LwIP stack when network events occur.
+// They must be static or global. We pass 'this' as an argument to get back to our object.
+
+// Called when the connection is successfully established.
+static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
+  LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
+  if (err == ERR_OK) {
+    ESP_LOGD(TAG, "Connection successful!");
+    // TODO: Now that we are connected, set up receive callbacks and send the first packet.
+    // For now, we just close the connection to prove it works.
+    component->close_connection();
+  } else {
+    ESP_LOGW(TAG, "Connection failed. Error: %d", err);
+    component->close_connection();
+  }
+  return ERR_OK;
+}
+
+// Called when an error occurs on the connection.
+static void tcp_error_callback(void *arg, err_t err) {
+  LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
+  ESP_LOGW(TAG, "TCP Error. Code: %d. Closing connection.", err);
+  component->pcb_ = nullptr; // PCB is already freed by LwIP
+  component->status_set_warning();
+}
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNAComponent...");
@@ -32,55 +54,67 @@ void LuxpowerSNAComponent::dump_config() {
 void LuxpowerSNAComponent::update() {
   ESP_LOGD(TAG, "Starting update...");
 
-  this->socket_ = socket::socket(AF_INET, SOCK_STREAM, 0);
-  if (this->socket_ == nullptr) {
-    ESP_LOGW(TAG, "Could not create socket");
+  // If a connection is already in progress, don't start another.
+  if (this->pcb_ != nullptr) {
+    ESP_LOGD(TAG, "Update called but a connection is already active. Aborting old one.");
+    this->close_connection();
+  }
+
+  // 1. Create a new TCP Protocol Control Block (PCB)
+  this->pcb_ = tcp_new();
+  if (this->pcb_ == nullptr) {
+    ESP_LOGW(TAG, "Could not create TCP PCB");
     this->status_set_warning();
     return;
   }
 
-  // Use the LWIP_ prefixed constants as hinted by the compiler.
-  // The lwip_sockets implementation supports this.
-  struct timeval tv;
-  tv.tv_sec = 5;  // 5 seconds
-  tv.tv_usec = 0;
-  if (this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
-    ESP_LOGW(TAG, "Failed to set socket recv timeout");
-  }
-  if (this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
-    ESP_LOGW(TAG, "Failed to set socket send timeout");
-  }
+  // 2. Set up the argument that will be passed to our callbacks
+  tcp_arg(this->pcb_, this);
 
-  sockaddr_storage address;
-  socklen_t address_len = sizeof(address);
-  address_len = socket::set_sockaddr(reinterpret_cast<sockaddr *>(&address), sizeof(address), this->host_, this->port_);
-  
-  if (address_len == 0) {
-    ESP_LOGW(TAG, "Could not resolve host %s", this->host_.c_str());
-    this->socket_->close();
-    this->socket_ = nullptr;
-    this->status_set_warning();
+  // 3. Set up the error callback
+  tcp_err(this->pcb_, tcp_error_callback);
+
+  // 4. Resolve the IP address
+  ip_addr_t remote_ip;
+  err_t err = dns_gethostbyname(this->host_.c_str(), &remote_ip, nullptr, nullptr);
+  if (err != ERR_OK && err != ERR_INPROGRESS) {
+      ESP_LOGW(TAG, "Could not resolve host %s. Error: %d", this->host_.c_str(), err);
+      this->close_connection();
+      return;
+  }
+  // For now, we assume immediate resolution. A more robust solution would handle ERR_INPROGRESS.
+
+  // 5. Initiate the connection
+  ESP_LOGD(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
+  err = tcp_connect(this->pcb_, &remote_ip, this->port_, tcp_connected_callback);
+
+  if (err != ERR_OK) {
+    ESP_LOGW(TAG, "Could not initiate TCP connection. Error: %d", err);
+    this->close_connection();
     return;
   }
 
-  // With the `lwip_sockets` implementation forced in YAML, the `connect`
-  // member function now exists and is the correct way to connect.
-  if (this->socket_->connect(reinterpret_cast<sockaddr *>(&address), address_len) != 0) {
-    ESP_LOGW(TAG, "Could not connect to %s:%u. Error: %s", this->host_.c_str(), this->port_, strerror(errno));
-    this->socket_->close();
-    this->socket_ = nullptr;
-    this->status_set_warning();
-    return;
-  }
-
-  ESP_LOGD(TAG, "Connection successful to %s:%u", this->host_.c_str(), this->port_);
-
-  // TODO: Implement packet creation, sending, and response reading here.
-
-  this->socket_->close();
-  this->socket_ = nullptr;
-  ESP_LOGD(TAG, "Socket closed, update finished.");
+  // The connection is now happening asynchronously. The result will be delivered
+  // to our `tcp_connected_callback` or `tcp_error_callback`.
+  // We clear the warning for now, it will be set again on error.
   this->status_clear_warning();
+}
+
+void LuxpowerSNAComponent::close_connection() {
+  if (this->pcb_ != nullptr) {
+    // Unset callbacks to prevent them from firing during/after close
+    tcp_err(this->pcb_, nullptr);
+    tcp_sent(this->pcb_, nullptr);
+    tcp_recv(this->pcb_, nullptr);
+    
+    err_t err = tcp_close(this->pcb_);
+    if (err != ERR_OK) {
+        ESP_LOGW(TAG, "Error closing TCP connection: %d. Aborting.", err);
+        tcp_abort(this->pcb_);
+    }
+    this->pcb_ = nullptr;
+    ESP_LOGD(TAG, "Connection closed.");
+  }
 }
 
 }  // namespace luxpower_sna
