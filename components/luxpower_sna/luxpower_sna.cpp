@@ -23,16 +23,16 @@ enum LuxpowerRegister {
 #define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::set_dongle_serial(const std::string &serial) {
-  // CORRECTED: Added esphome:: namespace prefix
-  auto data = esphome::hex_to_data(serial);
+  // CORRECTED: Using global scope resolution operator ::
+  auto data = ::esphome::hex_to_data(serial);
   if (data.has_value()) {
     this->dongle_serial_ = data.value();
   }
 }
 
 void LuxpowerSNAComponent::set_inverter_serial_number(const std::string &serial) {
-  // CORRECTED: Added esphome:: namespace prefix
-  auto data = esphome::hex_to_data(serial);
+  // CORRECTED: Using global scope resolution operator ::
+  auto data = ::esphome::hex_to_data(serial);
   if (data.has_value()) {
     this->inverter_serial_ = data.value();
   }
@@ -46,8 +46,9 @@ void LuxpowerSNAComponent::setup() {
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", esphome::format_hex_pretty(this->dongle_serial_).c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", esphome::format_hex_pretty(this->inverter_serial_).c_str());
+  // CORRECTED: Using global scope resolution operator ::
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", ::esphome::format_hex_pretty(this->dongle_serial_).c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", ::esphome::format_hex_pretty(this->inverter_serial_).c_str());
 }
 
 void LuxpowerSNAComponent::update() {
@@ -71,7 +72,7 @@ void LuxpowerSNAComponent::request_bank_(int bank_num) {
   uint16_t num_registers = 40;
 
   AsyncClient *client = new AsyncClient();
-  client->setRxTimeout(5);
+  client->setRxTimeout(10); // Increased timeout slightly for stability
 
   client->onData([this, client, bank_num](void *arg, AsyncClient *c, void *data, size_t len) {
     this->handle_packet_(data, len, bank_num);
@@ -116,8 +117,8 @@ std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_
     data_frame.push_back(num_registers & 0xFF);
     data_frame.push_back(num_registers >> 8);
 
-    // CORRECTED: Added esphome:: namespace prefix
-    uint16_t crc = esphome::crc16(data_frame.data(), data_frame.size());
+    // CORRECTED: Using global scope resolution operator ::
+    uint16_t crc = ::esphome::crc16(data_frame.data(), data_frame.size());
     
     packet.insert(packet.end(), data_frame.begin(), data_frame.end());
     packet.push_back(crc & 0xFF);
