@@ -3,9 +3,14 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "esphome/components/network/async_tcp.h"
 #include <vector>
 #include <map>
+
+#ifdef USE_ESP32
+#include <AsyncTCP.h>
+#elif USE_ESP8266
+#include <ESPAsyncTCP.h>
+#endif
 
 namespace esphome {
 namespace luxpower_sna {
