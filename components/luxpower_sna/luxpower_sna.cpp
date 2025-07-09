@@ -7,6 +7,7 @@
 // We must use the low-level LwIP API directly.
 #include "lwip/tcp.h"
 #include "lwip/ip_addr.h"
+#include "lwip/dns.h"  // --- FIX 3: Include for dns_gethostbyname ---
 
 namespace esphome {
 namespace luxpower_sna {
@@ -25,6 +26,7 @@ static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) 
     // TODO: Now that we are connected, set up receive callbacks and send the first packet.
     // For now, we just close the connection to prove it works.
     component->close_connection();
+    component->status_clear_warning();
   } else {
     ESP_LOGW(TAG, "Connection failed. Error: %d", err);
     component->close_connection();
@@ -78,7 +80,7 @@ void LuxpowerSNAComponent::update() {
   ip_addr_t remote_ip;
   err_t err = dns_gethostbyname(this->host_.c_str(), &remote_ip, nullptr, nullptr);
   if (err != ERR_OK && err != ERR_INPROGRESS) {
-      ESP_LOGW(TAG, "Could not resolve host %s. Error: %d", this->host_.c_str(), err);
+      ESP_LOGW(TAG, "Could not resolve host %s. Error: %d", this->host_.c_c_str(), err);
       this->close_connection();
       return;
   }
@@ -93,11 +95,9 @@ void LuxpowerSNAComponent::update() {
     this->close_connection();
     return;
   }
-
+  
   // The connection is now happening asynchronously. The result will be delivered
   // to our `tcp_connected_callback` or `tcp_error_callback`.
-  // We clear the warning for now, it will be set again on error.
-  this->status_clear_warning();
 }
 
 void LuxpowerSNAComponent::close_connection() {
@@ -106,6 +106,7 @@ void LuxpowerSNAComponent::close_connection() {
     tcp_err(this->pcb_, nullptr);
     tcp_sent(this->pcb_, nullptr);
     tcp_recv(this->pcb_, nullptr);
+    tcp_arg(this->pcb_, nullptr);
     
     err_t err = tcp_close(this->pcb_);
     if (err != ERR_OK) {
