@@ -25,7 +25,6 @@ CONFIG_SCHEMA = (
             cv.Required("host"): cv.string,
             cv.Required("port"): cv.port,
             cv.Required("dongle_serial"): cv.string,
-            cv.Required("inverter_serial_number"): cv.string,
         }
     )
     .extend(cv.polling_component_schema("20s"))
