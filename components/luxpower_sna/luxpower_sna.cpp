@@ -10,48 +10,57 @@ namespace luxpower_sna {
 static const char *const TAG = "luxpower_sna";
 
 // =================================================================================================
-// == DEFINITIVE REGISTER MAP for 117-byte data packet (SNA models)
-// == v9 - This version is identical to v8 but adds logging to the request_data_() function
-// ==      to show the exact commands being sent to the inverter.
+// == DEFINITIVE REGISTER MAP - v10 (Bank-Based Architecture)
+// == This map uses ABSOLUTE REGISTER NUMBERS (0-119) as found in the Python code.
+// == It is used to parse a complete data buffer assembled from multiple bank requests.
 // =================================================================================================
 enum LuxpowerRegister {
-  // Note: Offsets are 1-based for readability, matching byte numbers in a hex editor.
-  // The U16/S16/U8 macros handle the 0-based array access internally.
+  // --- BANK 0 (Registers 0-39) ---
+  REG_STATUS_CODE = 0,
+  REG_V_PV1 = 1,
+  REG_V_PV2 = 2,
+  REG_V_BATTERY = 4,
+  REG_SOC = 5, // Special case: U8
+  REG_P_PV1 = 7,
+  REG_P_PV2 = 8,
+  REG_P_CHARGE = 10,
+  REG_P_DISCHARGE = 11,
+  REG_V_GRID = 12,
+  REG_F_GRID = 15,
+  REG_P_INVERTER = 16,
+  REG_P_TO_GRID = 26, // S16
+  REG_P_LOAD = 27,    // "p_to_user" in python
+  REG_E_PV1_DAY = 28,
+  REG_E_PV2_DAY = 29,
+  REG_E_CHARGE_DAY = 33,
+  REG_E_DISCHARGE_DAY = 34,
+  REG_E_EXPORT_DAY = 36, // "e_to_grid_day"
+  REG_E_IMPORT_DAY = 37, // "e_to_user_day" - This is import, not load.
 
-  // --- Mapped from LXPPacket.py get_device_values_bank0() ---
-  REG_STATUS_CODE   = 45,  // U16, from get(0)
-  REG_V_PV1         = 35,  // U16 / 10.0f, from get(1)
-  REG_V_PV2         = 37,  // U16 / 10.0f, from get(2)
-  REG_V_BATTERY     = 41,  // U16 / 10.0f, from get(4)
-  REG_SOC           = 43,  // U8, from get(5)[0] - Note: this is a single byte
-  REG_P_PV1         = 47,  // U16, from get(7)
-  REG_P_PV2         = 49,  // U16, from get(8)
-  REG_P_CHARGE      = 53,  // U16, from get(10)
-  REG_P_DISCHARGE   = 55,  // U16, from get(11)
-  REG_V_GRID        = 57,  // U16 / 10.0f, from get(12)
-  REG_F_GRID        = 63,  // U16 / 100.0f, from get(15)
-  REG_P_INVERTER    = 65,  // U16, from get(16) (Inverter power)
-  REG_P_TO_GRID     = 85,  // S16, from get(26) (Export power)
-  REG_P_LOAD        = 87,  // U16, from get(27) (Load power, "p_to_user")
-  REG_E_PV1_DAY     = 89,  // U16 / 10.0f, from get(28)
-  REG_E_PV2_DAY     = 91,  // U16 / 10.0f, from get(29)
-  REG_E_CHARGE_DAY  = 99,  // U16 / 10.0f, from get(33)
-  REG_E_DISCHARGE_DAY = 101, // U16 / 10.0f, from get(34)
-  REG_E_EXPORT_DAY  = 105, // U16 / 10.0f, from get(36)
-  REG_E_IMPORT_DAY  = 107, // U16 / 10.0f, from get(37)
+  // --- BANK 1 (Registers 40-79) ---
+  REG_E_PV1_ALL_L = 40, // Low word
+  REG_E_PV1_ALL_H = 41, // High word
+  REG_E_PV2_ALL_L = 42,
+  REG_E_PV2_ALL_H = 43,
+  // ... other bank 1 registers if needed
+  REG_T_INNER = 64,
+  REG_T_RADIATOR = 65,
+  REG_T_BAT = 67,
 
-  // --- Mapped from LXPPacket.py get_device_values_bank1() ---
-  REG_T_INVERTER    = 73,  // S16 / 10.0f, from get(64)
-  REG_T_RADIATOR    = 75,  // S16 / 10.0f, from get(65)
+  // --- BANK 2 (Registers 80-119) ---
+  // ... bank 2 registers if needed
 };
 
-// Helper macros to make parsing cleaner and handle 1-based offsets
-#define U16(reg) (raw[(reg) - 1] << 8 | raw[reg])
-#define S16(reg) (int16_t)(raw[(reg) - 1] << 8 | raw[reg])
-#define U8(reg) raw[(reg) - 1] // Use -1 to keep consistency with 1-based enum
+// Helper macros to read from the combined data_buffer_ using ABSOLUTE register numbers
+#define U16_REG(reg) (this->data_buffer_[(reg) * 2] << 8 | this->data_buffer_[(reg) * 2 + 1])
+#define S16_REG(reg) (int16_t)(this->data_buffer_[(reg) * 2] << 8 | this->data_buffer_[(reg) * 2 + 1])
+#define U8_REG(reg) (this->data_buffer_[(reg) * 2]) // SOC is the first byte of its register
+#define U32_REG(reg_l, reg_h) ((uint32_t)U16_REG(reg_h) << 16 | U16_REG(reg_l))
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA Component...");
+  this->data_buffer_.resize(this->num_banks_to_request_ * 80, 0); // 40 registers * 2 bytes/reg
+  this->banks_received_.resize(this->num_banks_to_request_, false);
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -62,106 +71,131 @@ void LuxpowerSNAComponent::dump_config() {
 }
 
 void LuxpowerSNAComponent::update() {
-  this->request_data_();
-}
-
-// ===============================================================================================
-// == THIS IS THE MODIFIED FUNCTION WITH ADDED LOGGING
-// ===============================================================================================
-void LuxpowerSNAComponent::request_data_() {
-  if (this->tcp_client_ != nullptr && this->tcp_client_->connected()) {
-    ESP_LOGD(TAG, "Skipping data request, TCP client is busy.");
+  if (this->is_updating_) {
+    ESP_LOGW(TAG, "Update already in progress. Skipping.");
     return;
   }
-  
-  ESP_LOGD(TAG, "Connecting to %s:%u", this->host_.c_str(), this->port_);
-  this->tcp_client_ = new AsyncClient();
+  this->is_updating_ = true;
+  std::fill(this->banks_received_.begin(), this->banks_received_.end(), false);
+  this->banks_received_count_ = 0;
 
-  this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
-    this->handle_packet_(data, len);
-    client->close();
-  });
-
-  this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "TCP connected, preparing to send frames.");
-    
-    // --- First Frame (Heartbeat) ---
-    std::vector<uint8_t> request;
-    request.insert(request.end(), {0xA1, 0x1A, 0x01, 0x02, 0x00, 0x0F});
-    request.insert(request.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
-    request.insert(request.end(), {0x00, 0x00});
-    
-    // ** NEW LOGGING LINE **
-    ESP_LOGD(TAG, "Sending Heartbeat Frame: %s", format_hex_pretty(request.data(), request.size()).c_str());
-    client->write(reinterpret_cast<const char*>(request.data()), request.size());
-
-    // --- Second Frame (Data Request) ---
-    request.clear();
-    request.insert(request.end(), {0xA1, 0x1A, 0x01, 0x02, 0x00, 0x12});
-    request.insert(request.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
-    request.insert(request.end(), this->inverter_serial_.begin(), this->inverter_serial_.end());
-    request.insert(request.end(), {0x00, 0x00});
-
-    // ** NEW LOGGING LINE **
-    ESP_LOGD(TAG, "Sending Data Request Frame: %s", format_hex_pretty(request.data(), request.size()).c_str());
-    client->write(reinterpret_cast<const char*>(request.data()), request.size());
-  });
-
-  this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
-    ESP_LOGE(TAG, "TCP connection error: %s", client->errorToString(error));
-  });
-
-  this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
-    ESP_LOGW(TAG, "TCP connection timeout.");
-    client->close();
-  });
-
-  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "TCP disconnected.");
-    delete this->tcp_client_;
-    this->tcp_client_ = nullptr;
-  });
-
-  this->tcp_client_->connect(this->host_.c_str(), this->port_);
+  ESP_LOGD(TAG, "Starting update cycle. Requesting %d banks.", this->num_banks_to_request_);
+  for (int i = 0; i < this->num_banks_to_request_; ++i) {
+    this->request_bank_(i);
+  }
 }
-// ===============================================================================================
-// == END OF MODIFIED FUNCTION
-// ===============================================================================================
+
+void LuxpowerSNAComponent::request_bank_(int bank_num) {
+  uint16_t start_register = bank_num * 40;
+  uint16_t num_registers = 40;
+
+  AsyncClient *client = new AsyncClient();
+  client->setRxTimeout(5); // 5 second timeout for the response
+
+  client->onData([this, client, bank_num](void *arg, AsyncClient *c, void *data, size_t len) {
+    this->handle_packet_(data, len);
+    c->close();
+  });
+
+  client->onConnect([this, client, start_register, num_registers, bank_num](void *arg, AsyncClient *c) {
+    std::vector<uint8_t> request = this->build_request_packet_(start_register, num_registers);
+    ESP_LOGD(TAG, "Requesting Bank %d (Reg %d, Count %d): %s",
+             bank_num, start_register, num_registers, format_hex_pretty(request.data(), request.size()).c_str());
+    c->write(reinterpret_cast<const char*>(request.data()), request.size());
+  });
+
+  client->onError([this, client](void *arg, AsyncClient *c, int8_t error) {
+    ESP_LOGE(TAG, "TCP connection error: %s", c->errorToString(error));
+    this->is_updating_ = false; // Abort update on error
+  });
+
+  client->onTimeout([this, client, bank_num](void *arg, AsyncClient *c, uint32_t time) {
+    ESP_LOGW(TAG, "TCP connection timeout for bank %d.", bank_num);
+    this->is_updating_ = false; // Abort update on timeout
+  });
+
+  client->onDisconnect([this, client](void *arg, AsyncClient *c) {
+    delete client;
+  });
+
+  client->connect(this->host_.c_str(), this->port_);
+}
+
+std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet_(uint16_t start_register, uint16_t num_registers) {
+    std::vector<uint8_t> packet;
+    // Header
+    packet.insert(packet.end(), {0xA1, 0x1A, 0x02, 0x00, 0x20, 0x00, 0x01, 0xC2}); // Protocol 2, Frame Len 32, TCP Func 194
+    packet.insert(packet.end(), this->dongle_serial_.begin(), this->dongle_serial_.end());
+    packet.insert(packet.end(), {0x12, 0x00}); // Data Len 18
+
+    // Data Frame
+    std::vector<uint8_t> data_frame;
+    data_frame.push_back(0x00); // Action: Write (as per python code)
+    data_frame.push_back(0x04); // Device Function: READ_INPUT
+    data_frame.insert(data_frame.end(), this->inverter_serial_.begin(), this->inverter_serial_.end());
+    data_frame.push_back(start_register & 0xFF);
+    data_frame.push_back(start_register >> 8);
+    data_frame.push_back(num_registers & 0xFF);
+    data_frame.push_back(num_registers >> 8);
+
+    // CRC
+    uint16_t crc = crc16(data_frame.data(), data_frame.size());
+    
+    // Combine and return
+    packet.insert(packet.end(), data_frame.begin(), data_frame.end());
+    packet.push_back(crc & 0xFF);
+    packet.push_back(crc >> 8);
+    return packet;
+}
 
 void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
   uint8_t *raw = (uint8_t *) data;
 
-  ESP_LOGD(TAG, "Packet received (len: %d): %s", len, format_hex_pretty(raw, len).c_str());
-
-  // === START OF ROBUSTNESS CHECKS ===
-  // 1. Check if it's the 117-byte data packet we are looking for.
-  if (len != 117) {
-    ESP_LOGD(TAG, "Ignoring packet: incorrect length.");
+  // Basic validation
+  if (len < 37 || raw[0] != 0xA1 || raw[1] != 0x1A) {
+    ESP_LOGW(TAG, "Received invalid or short packet (len: %d)", len);
     return;
   }
-  // 2. Check for the correct protocol number (0x0102).
-  if (raw[2] != 0x01 || raw[3] != 0x02) {
-    ESP_LOGD(TAG, "Ignoring packet: incorrect protocol number.");
-    return;
-  }
-  // 3. Check for the correct TCP function (0xC2) and Device function (0x04)
-  if (raw[7] != 0xC2 || raw[21] != 0x04) {
-    ESP_LOGD(TAG, "Ignoring packet: incorrect function code.");
-    return;
-  }
-  // 4. Check that the data payload starts at register 0.
-  if (raw[32] != 0x00 || raw[33] != 0x00) {
-    ESP_LOGD(TAG, "Ignoring packet: incorrect starting register.");
-    return;
-  }
-  // === END OF ROBUSTNESS CHECKS ===
-
-  ESP_LOGI(TAG, "Parsing inverter data packet...");
-
-  // --- PARSING LOGIC USING THE DEFINITIVE REGISTER MAP ---
   
+  uint16_t data_len = raw[18] | (raw[19] << 8);
+  uint8_t *data_frame = &raw[20];
+  
+  uint16_t start_reg = data_frame[12] | (data_frame[13] << 8);
+  uint8_t value_len = data_frame[14];
+  uint8_t *values = &data_frame[15];
+
+  if (value_len != 80) { // We expect 40 registers = 80 bytes
+      ESP_LOGW(TAG, "Received packet with unexpected data length: %d", value_len);
+      return;
+  }
+
+  int bank_index = start_reg / 40;
+  if (bank_index < 0 || bank_index >= this->num_banks_to_request_) {
+      ESP_LOGW(TAG, "Received data for unexpected bank index: %d", bank_index);
+      return;
+  }
+
+  ESP_LOGD(TAG, "Received data for Bank %d.", bank_index);
+  
+  // Copy received data into the correct part of the main buffer
+  memcpy(&this->data_buffer_[bank_index * 80], values, 80);
+
+  if (!this->banks_received_[bank_index]) {
+      this->banks_received_[bank_index] = true;
+      this->banks_received_count_++;
+  }
+
+  // Check if all expected banks have been received
+  if (this->banks_received_count_ >= this->num_banks_to_request_) {
+      ESP_LOGI(TAG, "All %d banks received. Parsing and publishing data.", this->num_banks_to_request_);
+      this->parse_and_publish_();
+      this->is_updating_ = false; // End of update cycle
+  }
+}
+
+void LuxpowerSNAComponent::parse_and_publish_() {
   // Status & SOC
-  int status_code = U16(REG_STATUS_CODE);
+  int status_code = U16_REG(REG_STATUS_CODE);
   this->publish_state_("status_code", (float)status_code);
   std::string status_text;
   switch(status_code) {
@@ -170,59 +204,58 @@ void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
       case 4: status_text = "Fault"; break;   default: status_text = "Checking"; break;
   }
   this->publish_state_("status_text", status_text);
-  this->publish_state_("soc", (float)U8(REG_SOC));
+  this->publish_state_("soc", (float)U8_REG(REG_SOC));
 
   // Voltages and Frequencies
-  this->publish_state_("battery_voltage", (float)U16(REG_V_BATTERY) / 10.0f);
-  this->publish_state_("grid_voltage", (float)U16(REG_V_GRID) / 10.0f);
-  this->publish_state_("pv1_voltage", (float)U16(REG_V_PV1) / 10.0f);
-  this->publish_state_("pv2_voltage", (float)U16(REG_V_PV2) / 10.0f);
-  this->publish_state_("grid_frequency", (float)U16(REG_F_GRID) / 100.0f);
+  this->publish_state_("battery_voltage", (float)U16_REG(REG_V_BATTERY) / 10.0f);
+  this->publish_state_("grid_voltage", (float)U16_REG(REG_V_GRID) / 10.0f);
+  this->publish_state_("pv1_voltage", (float)U16_REG(REG_V_PV1) / 10.0f);
+  this->publish_state_("pv2_voltage", (float)U16_REG(REG_V_PV2) / 10.0f);
+  this->publish_state_("grid_frequency", (float)U16_REG(REG_F_GRID) / 100.0f);
 
   // Power Values
-  float p_pv1 = (float)U16(REG_P_PV1);
-  float p_pv2 = (float)U16(REG_P_PV2);
+  float p_pv1 = (float)U16_REG(REG_P_PV1);
+  float p_pv2 = (float)U16_REG(REG_P_PV2);
   this->publish_state_("pv1_power", p_pv1);
   this->publish_state_("pv2_power", p_pv2);
   this->publish_state_("pv_power", p_pv1 + p_pv2);
 
-  float p_charge = (float)U16(REG_P_CHARGE);
-  float p_discharge = (float)U16(REG_P_DISCHARGE);
+  float p_charge = (float)U16_REG(REG_P_CHARGE);
+  float p_discharge = (float)U16_REG(REG_P_DISCHARGE);
   this->publish_state_("charge_power", p_charge);
   this->publish_state_("discharge_power", p_discharge);
   this->publish_state_("battery_power", p_charge - p_discharge);
   
-  this->publish_state_("inverter_power", (float)U16(REG_P_INVERTER));
-  this->publish_state_("load_power", (float)U16(REG_P_LOAD));
+  this->publish_state_("inverter_power", (float)U16_REG(REG_P_INVERTER));
+  this->publish_state_("load_power", (float)U16_REG(REG_P_LOAD));
   
-  float p_to_grid = (float)S16(REG_P_TO_GRID);
+  float p_to_grid = (float)S16_REG(REG_P_TO_GRID);
   this->publish_state_("grid_export_power", (p_to_grid > 0 ? p_to_grid : 0));
   this->publish_state_("grid_import_power", (p_to_grid < 0 ? -p_to_grid : 0));
-  this->publish_state_("grid_power", -p_to_grid); // HA convention: +import, -export
+  this->publish_state_("grid_power", -p_to_grid);
 
   // Temperatures
-  this->publish_state_("radiator_temp", (float)S16(REG_T_RADIATOR) / 10.0f);
-  this->publish_state_("inverter_temp", (float)S16(REG_T_INVERTER) / 10.0f);
+  this->publish_state_("radiator_temp", (float)S16_REG(REG_T_RADIATOR) / 10.0f);
+  this->publish_state_("inverter_temp", (float)S16_REG(REG_T_INNER) / 10.0f);
+  this->publish_state_("battery_temp", (float)S16_REG(REG_T_BAT) / 10.0f);
 
   // Daily Energy Totals
-  float e_pv1_day = (float)U16(REG_E_PV1_DAY) / 10.0f;
-  float e_pv2_day = (float)U16(REG_E_PV2_DAY) / 10.0f;
-  this->publish_state_("pv1_today", e_pv1_day);
-  this->publish_state_("pv2_today", e_pv2_day);
-  this->publish_state_("pv_today", e_pv1_day + e_pv2_day);
+  this->publish_state_("pv1_today", (float)U16_REG(REG_E_PV1_DAY) / 10.0f);
+  this->publish_state_("pv2_today", (float)U16_REG(REG_E_PV2_DAY) / 10.0f);
+  this->publish_state_("charge_today", (float)U16_REG(REG_E_CHARGE_DAY) / 10.0f);
+  this->publish_state_("discharge_today", (float)U16_REG(REG_E_DISCHARGE_DAY) / 10.0f);
+  this->publish_state_("grid_export_today", (float)U16_REG(REG_E_EXPORT_DAY) / 10.0f);
+  this->publish_state_("grid_import_today", (float)U16_REG(REG_E_IMPORT_DAY) / 10.0f);
   
-  this->publish_state_("charge_today", (float)U16(REG_E_CHARGE_DAY) / 10.0f);
-  this->publish_state_("discharge_today", (float)U16(REG_E_DISCHARGE_DAY) / 10.0f);
-  this->publish_state_("grid_export_today", (float)U16(REG_E_EXPORT_DAY) / 10.0f);
-  this->publish_state_("grid_import_today", (float)U16(REG_E_IMPORT_DAY) / 10.0f);
+  // Total Energy (example for PV1)
+  uint32_t e_pv1_total_raw = U32_REG(REG_E_PV1_ALL_L, REG_E_PV1_ALL_H);
+  this->publish_state_("pv1_total", (float)e_pv1_total_raw / 10.0f);
 }
 
 void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
     auto it = this->sensors_.find(key);
     if (it != this->sensors_.end()) {
         ((sensor::Sensor *)it->second)->publish_state(value);
-    } else {
-        ESP_LOGV(TAG, "Sensor key %s not found in map", key.c_str());
     }
 }
 
@@ -230,8 +263,6 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::str
     auto it = this->sensors_.find(key);
     if (it != this->sensors_.end()) {
         ((text_sensor::TextSensor *)it->second)->publish_state(value);
-    } else {
-        ESP_LOGV(TAG, "Text sensor key %s not found in map", key.c_str());
     }
 }
 
