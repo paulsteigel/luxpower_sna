@@ -7,7 +7,7 @@
 // We must use the low-level LwIP API directly.
 #include "lwip/tcp.h"
 #include "lwip/ip_addr.h"
-#include "lwip/dns.h"  // --- FIX 3: Include for dns_gethostbyname ---
+#include "lwip/dns.h"
 
 namespace esphome {
 namespace luxpower_sna {
@@ -80,7 +80,9 @@ void LuxpowerSNAComponent::update() {
   ip_addr_t remote_ip;
   err_t err = dns_gethostbyname(this->host_.c_str(), &remote_ip, nullptr, nullptr);
   if (err != ERR_OK && err != ERR_INPROGRESS) {
-      ESP_LOGW(TAG, "Could not resolve host %s. Error: %d", this->host_.c_c_str(), err);
+      // --- THIS IS THE FIX ---
+      // Changed this->host_.c_c_str() to this->host_.c_str()
+      ESP_LOGW(TAG, "Could not resolve host %s. Error: %d", this->host_.c_str(), err);
       this->close_connection();
       return;
   }
