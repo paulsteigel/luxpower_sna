@@ -24,13 +24,14 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_port(uint16_t port) { this->port_ = port; }
   void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
 
-  // --- Setters for our sensors (called by the generated code) ---
-  void set_v_pv1_sensor(sensor::Sensor *s) { this->v_pv1_sensor_ = s; }
-  void set_p_pv1_sensor(sensor::Sensor *s) { this->p_pv1_sensor_ = s; }
-  void set_v_bat_sensor(sensor::Sensor *s) { this->v_bat_sensor_ = s; }
-  void set_p_charge_sensor(sensor::Sensor *s) { this->p_charge_sensor_ = s; }
-  void set_p_discharge_sensor(sensor::Sensor *s) { this->p_discharge_sensor_ = s; }
-  void set_p_inv_sensor(sensor::Sensor *s) { this->p_inv_sensor_ = s; }
+  // --- Setters for our sensors (names must match sensor.py) ---
+  void set_pv1_voltage_sensor(sensor::Sensor *s) { this->pv1_voltage_sensor_ = s; }
+  void set_pv1_power_sensor(sensor::Sensor *s) { this->pv1_power_sensor_ = s; }
+  void set_battery_voltage_sensor(sensor::Sensor *s) { this->battery_voltage_sensor_ = s; }
+  void set_charge_power_sensor(sensor::Sensor *s) { this->charge_power_sensor_ = s; }
+  void set_discharge_power_sensor(sensor::Sensor *s) { this->discharge_power_sensor_ = s; }
+  void set_inverter_power_sensor(sensor::Sensor *s) { this->inverter_power_sensor_ = s; }
+  void set_soc_sensor(sensor::Sensor *s) { this->soc_sensor_ = s; }
 
   // Public members/methods for LwIP callbacks
   void close_connection();
@@ -44,20 +45,19 @@ class LuxpowerSNAComponent : public PollingComponent {
  private:
   uint16_t get_register_value(const std::vector<uint8_t> &data, int offset);
 
-  // Configuration variables
   std::string host_;
   uint16_t port_;
   std::string dongle_serial_;
   
-  // Pointers to our sensor objects
-  sensor::Sensor *v_pv1_sensor_{nullptr};
-  sensor::Sensor *p_pv1_sensor_{nullptr};
-  sensor::Sensor *v_bat_sensor_{nullptr};
-  sensor::Sensor *p_charge_sensor_{nullptr};
-  sensor::Sensor *p_discharge_sensor_{nullptr};
-  sensor::Sensor *p_inv_sensor_{nullptr};
+  // --- Pointers to our sensor objects (names must match) ---
+  sensor::Sensor *pv1_voltage_sensor_{nullptr};
+  sensor::Sensor *pv1_power_sensor_{nullptr};
+  sensor::Sensor *battery_voltage_sensor_{nullptr};
+  sensor::Sensor *charge_power_sensor_{nullptr};
+  sensor::Sensor *discharge_power_sensor_{nullptr};
+  sensor::Sensor *inverter_power_sensor_{nullptr};
+  sensor::Sensor *soc_sensor_{nullptr};
 };
 
 }  // namespace luxpower_sna
 }  // namespace esphome
-
