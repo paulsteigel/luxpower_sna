@@ -14,10 +14,15 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
+// --- FIX: Add a forward declaration for our internal-only callback ---
+// This makes the function visible only within this .cpp file.
+static err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
+
+
 // --- LwIP Callback Functions ---
-// --- FIX 4: All callbacks are now correctly inside the namespace ---
 
 // Called when data is received from the inverter
+// The definition remains the same
 err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
 
@@ -46,6 +51,7 @@ err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
   return ERR_OK;
 }
 
+// ... the rest of the file is identical ...
 // Called when the connection is successfully established.
 static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
   LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
@@ -126,7 +132,6 @@ void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "LuxpowerSNAComponent:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
   ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
-  // Also log the num_banks value
   ESP_LOGCONFIG(TAG, "  Num Banks to Request: %d", this->num_banks_to_request_);
   LOG_UPDATE_INTERVAL(this);
 }
