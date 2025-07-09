@@ -3,14 +3,9 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include <ESPAsyncTCP.h> // <--- THIS IS THE CORRECTED LINE
 #include <vector>
 #include <map>
-
-#ifdef USE_ESP32
-#include <AsyncTCP.h>
-#elif USE_ESP8266
-#include <ESPAsyncTCP.h>
-#endif
 
 namespace esphome {
 namespace luxpower_sna {
@@ -29,7 +24,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void update() override;
 
  private:
-  // --- New Bank-Based Request Logic ---
+  // --- Bank-Based Request Logic ---
   void request_bank_(int bank_num);
   std::vector<uint8_t> build_request_packet_(uint16_t start_register, uint16_t num_registers);
   void handle_packet_(void *data, size_t len, int bank_num);
@@ -56,4 +51,3 @@ class LuxpowerSNAComponent : public PollingComponent {
 
 }  // namespace luxpower_sna
 }  // namespace esphome
-
