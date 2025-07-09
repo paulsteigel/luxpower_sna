@@ -27,8 +27,8 @@ SENSOR_TYPES = {
 }
 
 # --- The CONFIG_SCHEMA for the sensor platform ---
-# Use cv.PLATFORM_SCHEMA instead of the old sensor.SENSOR_PLATFORM_SCHEMA
-CONFIG_SCHEMA = cv.PLATFORM_SCHEMA.extend(
+# THIS IS THE CORRECTED LINE: Use sensor.PLATFORM_SCHEMA
+CONFIG_SCHEMA = sensor.PLATFORM_SCHEMA.extend(
     {
         cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
         **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
@@ -47,3 +47,4 @@ async def to_code(config):
             setter = f"set_{yaml_key}_sensor" 
             sens = await sensor.new_sensor(conf)
             cg.add(getattr(hub, setter)(sens))
+
