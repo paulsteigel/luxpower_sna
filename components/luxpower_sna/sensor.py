@@ -25,6 +25,13 @@ from esphome.const import (
 
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
+def validate_update_interval(value):
+    value = cv.update_interval(value)
+    seconds = value.total_seconds()
+    if seconds < 5 or seconds > 60:
+        raise cv.Invalid("update_interval must be between 5 and 60 seconds")
+    return value
+    
 # --- Map from YAML keys to C++ names ---
 YAML_TO_C_NAMES = {
     # Section 1: Real-time Values
@@ -153,13 +160,6 @@ CONFIG_SCHEMA = cv.All(
     ),    
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
-
-def validate_update_interval(value):
-    value = cv.update_interval(value)
-    seconds = value.total_seconds()
-    if seconds < 5 or seconds > 60:
-        raise cv.Invalid("update_interval must be between 5 and 60 seconds")
-    return value
     
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
