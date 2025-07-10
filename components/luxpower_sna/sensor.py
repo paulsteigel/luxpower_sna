@@ -148,15 +148,20 @@ CONFIG_SCHEMA = cv.All(
     LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
         {
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-            cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): cv.All(
-                cv.update_interval,
-                cv.Range(min=5.0, max=60.0),
+            cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): validate_update_interval,
             ),
         }
     ),    
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
 
+def validate_update_interval(value):
+    value = cv.update_interval(value)
+    seconds = value.total_seconds()
+    if seconds < 5 or seconds > 60:
+        raise cv.Invalid("update_interval must be between 5 and 60 seconds")
+    return value
+    
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     
