@@ -106,8 +106,8 @@ struct LuxLogDataRawSection3 {
 };
 #pragma pack(pop)
 
-// Inherit from PollingComponent to get the loop() and update() methods
-class LuxpowerSNAComponent : public PollingComponent, public Component {
+// FIX 1: Removed redundant 'public Component' to resolve ambiguity
+class LuxpowerSNAComponent : public PollingComponent {
  public:
   void setup() override;
   void loop() override;
@@ -117,7 +117,8 @@ class LuxpowerSNAComponent : public PollingComponent, public Component {
   void set_host(const std::string &host) { this->host_ = host; }
   void set_port(uint16_t port) { this->port_ = port; }
   void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
-  void set_inverter_serial(const std::string &serial) { this->inverter_serial_ = serial; }
+  // FIX 2: Added this function to match the 'inverter_serial_number' from the YAML
+  void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_ = serial; }
   
   // Setter methods for each sensor
   #define LUX_FLOAT_SENSOR(name) \
@@ -194,7 +195,7 @@ class LuxpowerSNAComponent : public PollingComponent, public Component {
 
  protected:
   void request_bank_(uint8_t bank);
-  void handle_response_(); // Changed: no longer takes arguments
+  void handle_response_();
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
 
   void publish_state_(const std::string &key, float value);
@@ -207,7 +208,6 @@ class LuxpowerSNAComponent : public PollingComponent, public Component {
   AsyncClient *tcp_client_{nullptr};
   uint8_t next_bank_to_request_{0};
 
-  // New members for deferred processing
   std::vector<uint8_t> rx_buffer_;
   volatile bool data_ready_to_process_{false};
 
