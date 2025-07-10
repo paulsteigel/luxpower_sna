@@ -256,6 +256,7 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::str
     string_publishing_ = true;
     process_next_string_();
   }
+}
   
 }  // namespace luxpower_sna
 }  // namespace esphome
