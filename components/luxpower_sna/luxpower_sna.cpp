@@ -25,6 +25,9 @@ void LuxpowerSNAComponent::setup() {
   this->tcp_client_ = new AsyncClient();
   this->tcp_client_->setRxTimeout(15000); // 15 second timeout
 
+  // *** ADD THIS LINE ***
+  this->tcp_client_->setRxBufferSize(2048); // Increase buffer from default 1460 to 2048
+
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
     log_hex_buffer("<- Received", static_cast<uint8_t *>(data), len);
     this->handle_response_(static_cast<uint8_t *>(data), len);
