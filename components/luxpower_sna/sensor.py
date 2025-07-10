@@ -154,6 +154,7 @@ CONFIG_SCHEMA = cv.All(
                     min=core.TimePeriod(seconds=5),
                     max=core.TimePeriod(seconds=60),
                 ),
+            ),
         }
     ),    
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
