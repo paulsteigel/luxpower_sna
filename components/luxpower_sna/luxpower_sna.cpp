@@ -25,13 +25,14 @@ void LuxpowerSNAComponent::setup() {
   this->tcp_client_ = new AsyncClient();
   this->tcp_client_->setRxTimeout(15000); // 15 second timeout
 
-  // *** ADD THIS LINE ***
-  this->tcp_client_->setRxBufferSize(2048); // Increase buffer from default 1460 to 2048
-
+  // NEW onData: Just copy data and set a flag.
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
-    log_hex_buffer("<- Received", static_cast<uint8_t *>(data), len);
-    this->handle_response_(static_cast<uint8_t *>(data), len);
-    client->close();
+    if (this->data_ready_to_process_) {
+      ESP_LOGW(TAG, "New data arrived before previous was processed. Overwriting.");
+    }
+    this->rx_buffer_.assign(static_cast<uint8_t*>(data), static_cast<uint8_t*>(data) + len);
+    this->data_ready_to_process_ = true;
+    client->close(); // Close connection after receiving the full packet
   });
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
@@ -49,6 +50,15 @@ void LuxpowerSNAComponent::setup() {
     ESP_LOGW(TAG, "Connection timeout after %d ms.", time);
     client->close();
   });
+}
+
+// NEW loop() method: process data if the flag is set
+void LuxpowerSNAComponent::loop() {
+  if (this->data_ready_to_process_) {
+    this->data_ready_to_process_ = false; // Clear flag immediately
+    log_hex_buffer("<- Processing Received", this->rx_buffer_.data(), this->rx_buffer_.size());
+    this->handle_response_();
+  }
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -88,7 +98,11 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   }
 }
 
-void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length) {
+// MODIFIED handle_response: operates on the internal rx_buffer_
+void LuxpowerSNAComponent::handle_response_() {
+  const uint8_t *buffer = this->rx_buffer_.data();
+  size_t length = this->rx_buffer_.size();
+
   const uint16_t RESPONSE_HEADER_SIZE = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
   if (length < RESPONSE_HEADER_SIZE) {
     ESP_LOGW(TAG, "Packet too small for headers. Length: %d", length);
@@ -100,10 +114,6 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   memcpy(&header, buffer, sizeof(LuxHeader));
   memcpy(&trans, buffer + sizeof(LuxHeader), sizeof(LuxTranslatedData));
 
-  // *********************************************************************************
-  // *** CRITICAL FIX: Check the value directly. The little-endian CPU handles the
-  // *** byte order correctly when memcpy copies `A1 1A` into the uint16_t.
-  // *********************************************************************************
   if (header.prefix != 0x1AA1 || header.function != 0xC2 || trans.deviceFunction != 0x04) {
     ESP_LOGW(TAG, "Invalid header/function. Prefix: 0x%04X, Func: 0x%02X, DevFunc: 0x%02X", header.prefix, header.function, trans.deviceFunction);
     return;
