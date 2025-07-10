@@ -257,6 +257,44 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::str
     process_next_string_();
   }
 }
+
+void LuxpowerSNAComponent::process_next_float_() {
+  if (float_publish_queue_.empty()) {
+    float_publishing_ = false;
+    return;
+  }
+
+  auto item = float_publish_queue_.front();
+  float_publish_queue_.pop();
+
+  auto it = this->float_sensors_.find(item.first);
+  if (it != this->float_sensors_.end()) {
+    it->second->publish_state(item.second);
+  }
+
+  this->set_timeout(PUBLISH_DELAY_MS, [this]() {
+    this->process_next_float_();
+  });
+}
+
+void LuxpowerSNAComponent::process_next_string_() {
+  if (string_publish_queue_.empty()) {
+    string_publishing_ = false;
+    return;
+  }
+
+  auto item = string_publish_queue_.front();
+  string_publish_queue_.pop();
+
+  auto it = this->string_sensors_.find(item.first);
+  if (it != this->string_sensors_.end()) {
+    it->second->publish_state(item.second);
+  }
+
+  this->set_timeout(PUBLISH_DELAY_MS, [this]() {
+    this->process_next_string_();
+  });
+}
   
 }  // namespace luxpower_sna
 }  // namespace esphome
