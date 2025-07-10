@@ -11,11 +11,6 @@ namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
-// Inside your class (LuxpowerSNAComponent):
-std::queue<std::pair<std::string, float>> float_publish_queue_;
-std::queue<std::pair<std::string, std::string>> string_publish_queue_;
-bool float_publishing_ = false;
-bool string_publishing_ = false;
 
 // --- Helper to log byte arrays in HEX format ---
 void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
