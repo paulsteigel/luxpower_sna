@@ -7,7 +7,6 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// --- Helper to log byte arrays in HEX format ---
 void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   if (len == 0) {
     return;
@@ -16,23 +15,22 @@ void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   for (size_t i = 0; i < len; i++) {
     sprintf(str + i * 3, "%02X ", buffer[i]);
   }
-  str[len * 3 - 1] = '\0'; // Remove last space
+  str[len * 3 - 1] = '\0';
   ESP_LOGD(TAG, "%s (%d bytes): %s", title, len, str);
 }
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA...");
   this->tcp_client_ = new AsyncClient();
-  this->tcp_client_->setRxTimeout(15000); // 15 second timeout
+  this->tcp_client_->setRxTimeout(15000);
 
-  // NEW onData: Just copy data and set a flag.
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
     if (this->data_ready_to_process_) {
       ESP_LOGW(TAG, "New data arrived before previous was processed. Overwriting.");
     }
     this->rx_buffer_.assign(static_cast<uint8_t*>(data), static_cast<uint8_t*>(data) + len);
     this->data_ready_to_process_ = true;
-    client->close(); // Close connection after receiving the full packet
+    client->close();
   });
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
@@ -52,10 +50,9 @@ void LuxpowerSNAComponent::setup() {
   });
 }
 
-// NEW loop() method: process data if the flag is set
 void LuxpowerSNAComponent::loop() {
   if (this->data_ready_to_process_) {
-    this->data_ready_to_process_ = false; // Clear flag immediately
+    this->data_ready_to_process_ = false;
     log_hex_buffer("<- Processing Received", this->rx_buffer_.data(), this->rx_buffer_.size());
     this->handle_response_();
   }
@@ -98,7 +95,6 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   }
 }
 
-// MODIFIED handle_response: operates on the internal rx_buffer_
 void LuxpowerSNAComponent::handle_response_() {
   const uint8_t *buffer = this->rx_buffer_.data();
   size_t length = this->rx_buffer_.size();
@@ -129,7 +125,7 @@ void LuxpowerSNAComponent::handle_response_() {
   }
 
   const uint8_t *data_ptr = buffer + RESPONSE_HEADER_SIZE;
-  size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2; // Subtract 2 for CRC
+  size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2;
 
   if (trans.registerStart == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
     ESP_LOGD(TAG, "Parsing data for bank 0...");
@@ -215,10 +211,9 @@ void LuxpowerSNAComponent::handle_response_() {
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
   } else {
     ESP_LOGW(TAG, "Unrecognized register %d or insufficient data length %d for parsing", trans.registerStart, data_payload_length);
-    return; // Do not advance to next bank if parsing failed
+    return;
   }
 
-  // Cycle to the next bank for the next successful update
   if (this->next_bank_to_request_ == 0) this->next_bank_to_request_ = 40;
   else if (this->next_bank_to_request_ == 40) this->next_bank_to_request_ = 80;
   else this->next_bank_to_request_ = 0;
