@@ -91,7 +91,14 @@ void LuxpowerSNAComponent::request_data_() {
     request[27] = crc & 0xFF;
     request[28] = (crc >> 8) & 0xFF;
       
-    ESP_LOGD(TAG, "Sending data request (29 bytes)...", request);
+    // 🔍 Print request bytes
+    char hex_str[128];
+    char *p = hex_str;
+    for (int i = 0; i < 29; i++) {
+        p += sprintf(p, "%02X ", request[i]);
+    }
+    ESP_LOGD(TAG, "Sending data request: %s", hex_str);
+
     client->write((char*)request, 29);
   }, nullptr);
 
