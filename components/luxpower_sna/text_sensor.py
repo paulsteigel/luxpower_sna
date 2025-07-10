@@ -9,7 +9,6 @@ TEXT_SENSOR_TYPES = {
     "inverter_serial": text_sensor.text_sensor_schema(
         icon="mdi:barcode-scan",
     ),
-    # You can add other text sensors here if needed, e.g., fault codes as text
 }
 
 CONFIG_SCHEMA = cv.All(
