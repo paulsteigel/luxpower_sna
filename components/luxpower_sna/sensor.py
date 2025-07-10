@@ -23,7 +23,7 @@ from esphome.const import (
 
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-# --- Map from YAML keys to C++ names ---
+# --- Map from YAML keys to C++ names for sensor registration ---
 YAML_TO_C_NAMES = {
     # Section 1: Real-time Values
     "pv1_voltage": "pv1_voltage", "pv2_voltage": "pv2_voltage", "pv3_voltage": "pv3_voltage",
@@ -31,9 +31,10 @@ YAML_TO_C_NAMES = {
     "pv1_power": "pv1_power", "pv2_power": "pv2_power", "pv3_power": "pv3_power",
     "charge_power": "charge_power", "discharge_power": "discharge_power",
     "inverter_power": "inverter_power", "power_to_grid": "power_to_grid", "power_from_grid": "power_from_grid",
-    "grid_voltage": "grid_voltage", "grid_frequency": "grid_frequency", "power_factor": "power_factor",
-    "eps_voltage": "eps_voltage", "eps_frequency": "eps_frequency",
-    "eps_active_power": "eps_active_power", "eps_apparent_power": "eps_apparent_power",
+    "grid_voltage": "grid_voltage", "grid_voltage_s": "grid_voltage_s", "grid_voltage_t": "grid_voltage_t",
+    "grid_frequency": "grid_frequency", "power_factor": "power_factor",
+    "eps_voltage": "eps_voltage", "eps_voltage_s": "eps_voltage_s", "eps_voltage_t": "eps_voltage_t",
+    "eps_frequency": "eps_frequency", "eps_active_power": "eps_active_power", "eps_apparent_power": "eps_apparent_power",
     "bus1_voltage": "bus1_voltage", "bus2_voltage": "bus2_voltage",
 
     # Section 1: Daily Energy
@@ -77,9 +78,13 @@ SENSOR_TYPES = {
     "power_to_grid": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:transmission-tower-export"),
     "power_from_grid": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:transmission-tower-import"),
     "grid_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "grid_voltage_s": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "grid_voltage_t": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "grid_frequency": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
     "power_factor": sensor.sensor_schema(icon="mdi:angle-acute", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
     "eps_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "eps_voltage_s": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "eps_voltage_t": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "eps_frequency": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
     "eps_active_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
     "eps_apparent_power": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT_AMPERE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
