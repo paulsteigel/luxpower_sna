@@ -3,7 +3,6 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include <vector>
 #include <map>
 #include <string>
 
@@ -16,30 +15,27 @@
 namespace esphome {
 namespace luxpower_sna {
 
-// -------------------------------------------------------------------------------------------------
-// --- Protocol Structures (ported from your LuxParser.h)
-// --- Use pragma pack to ensure structs have no memory padding for correct data mapping.
 #pragma pack(push, 1)
 
 struct LuxHeader {
-  uint16_t prefix; // Should be 0x55AA on ESP (little-endian)
+  uint16_t prefix;
   uint16_t protocolVersion;
   uint16_t packetLength;
   uint8_t  address;
-  uint8_t  function; // Should be 0xC2
+  uint8_t  function;
   char     serialNumber[10];
   uint16_t dataLength;
 };
 
 struct LuxTranslatedData {
   uint8_t  address;
-  uint8_t  deviceFunction; // Should be 0x04
+  uint8_t  deviceFunction;
   char     serialNumber[10];
-  uint16_t registerStart; // 0, 40, or 80
+  uint16_t registerStart;
   uint8_t  dataFieldLength;
 };
 
-struct LuxLogDataRawSection1 { // Registers 0-39
+struct LuxLogDataRawSection1 {
   uint16_t status;
   int16_t  pv1_voltage; int16_t  pv2_voltage; int16_t  pv3_voltage;
   int16_t  battery_voltage; uint8_t  soc; uint8_t  soh;
@@ -60,7 +56,7 @@ struct LuxLogDataRawSection1 { // Registers 0-39
   int16_t  bus1_voltage; int16_t  bus2_voltage;
 };
 
-struct LuxLogDataRawSection2 { // Registers 40-79
+struct LuxLogDataRawSection2 {
   int32_t  e_pv_1_all; int32_t  e_pv_2_all; int32_t  e_pv_3_all;
   int32_t  e_inv_all; int32_t  e_rec_all; int32_t  e_chg_all;
   int32_t  e_dischg_all; int32_t  e_eps_all; int32_t  e_to_grid_all;
@@ -70,7 +66,7 @@ struct LuxLogDataRawSection2 { // Registers 40-79
   uint16_t _reserved2; uint32_t uptime;
 };
 
-struct LuxLogDataRawSection3 { // Registers 80-119
+struct LuxLogDataRawSection3 {
   uint16_t _reserved3;
   int16_t  max_chg_curr; int16_t  max_dischg_curr;
   int16_t  charge_volt_ref; int16_t  dischg_cut_volt;
@@ -84,118 +80,104 @@ struct LuxLogDataRawSection3 { // Registers 80-119
 };
 
 #pragma pack(pop)
-// -------------------------------------------------------------------------------------------------
 
 class LuxpowerSNAComponent : public PollingComponent {
  public:
-  // --- Standard ESPHome Methods ---
   void setup() override;
   void dump_config() override;
-  void update() override; // This is the polling entry point
+  void update() override;
 
-  // --- Configuration Setters (called by __init__.py) ---
   void set_host(const std::string &host) { this->host_ = host; }
   void set_port(uint16_t port) { this->port_ = port; }
-  void set_dongle_serial(const std::string &serial_str) { this->dongle_serial_ = serial_str; }
-  void set_inverter_serial_number(const std::string &serial_str) { this->inverter_serial_ = serial_str; }
+  void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
+  void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_ = serial; }
 
-  // --- Generic Sensor Setter Template (used by specific setters below) ---
-  template<typename T> void set_sensor(const std::string &key, T *sensor) {
-    this->sensors_[key] = (EntityBase *)sensor;
-  }
-  
   // --- Sensor Setters (called by python codegen) ---
-  // Section 1
-  void set_pv1_voltage_sensor(sensor::Sensor *s) { set_sensor("pv1_voltage", s); }
-  void set_pv2_voltage_sensor(sensor::Sensor *s) { set_sensor("pv2_voltage", s); }
-  void set_pv3_voltage_sensor(sensor::Sensor *s) { set_sensor("pv3_voltage", s); }
-  void set_battery_voltage_sensor(sensor::Sensor *s) { set_sensor("battery_voltage", s); }
-  void set_soc_sensor(sensor::Sensor *s) { set_sensor("soc", s); }
-  void set_soh_sensor(sensor::Sensor *s) { set_sensor("soh", s); }
-  void set_pv1_power_sensor(sensor::Sensor *s) { set_sensor("pv1_power", s); }
-  void set_pv2_power_sensor(sensor::Sensor *s) { set_sensor("pv2_power", s); }
-  void set_pv3_power_sensor(sensor::Sensor *s) { set_sensor("pv3_power", s); }
-  void set_charge_power_sensor(sensor::Sensor *s) { set_sensor("charge_power", s); }
-  void set_discharge_power_sensor(sensor::Sensor *s) { set_sensor("discharge_power", s); }
-  void set_inverter_power_sensor(sensor::Sensor *s) { set_sensor("inverter_power", s); }
-  void set_power_to_grid_sensor(sensor::Sensor *s) { set_sensor("power_to_grid", s); }
-  void set_power_from_grid_sensor(sensor::Sensor *s) { set_sensor("power_from_grid", s); }
-  void set_grid_voltage_r_sensor(sensor::Sensor *s) { set_sensor("grid_voltage_r", s); }
-  void set_grid_voltage_s_sensor(sensor::Sensor *s) { set_sensor("grid_voltage_s", s); }
-  void set_grid_voltage_t_sensor(sensor::Sensor *s) { set_sensor("grid_voltage_t", s); }
-  void set_grid_frequency_sensor(sensor::Sensor *s) { set_sensor("grid_frequency", s); }
-  void set_power_factor_sensor(sensor::Sensor *s) { set_sensor("power_factor", s); }
-  void set_eps_voltage_r_sensor(sensor::Sensor *s) { set_sensor("eps_voltage_r", s); }
-  void set_eps_voltage_s_sensor(sensor::Sensor *s) { set_sensor("eps_voltage_s", s); }
-  void set_eps_voltage_t_sensor(sensor::Sensor *s) { set_sensor("eps_voltage_t", s); }
-  void set_eps_frequency_sensor(sensor::Sensor *s) { set_sensor("eps_frequency", s); }
-  void set_eps_active_power_sensor(sensor::Sensor *s) { set_sensor("eps_active_power", s); }
-  void set_eps_apparent_power_sensor(sensor::Sensor *s) { set_sensor("eps_apparent_power", s); }
-  void set_bus1_voltage_sensor(sensor::Sensor *s) { set_sensor("bus1_voltage", s); }
-  void set_bus2_voltage_sensor(sensor::Sensor *s) { set_sensor("bus2_voltage", s); }
-  void set_pv1_energy_today_sensor(sensor::Sensor *s) { set_sensor("pv1_energy_today", s); }
-  void set_pv2_energy_today_sensor(sensor::Sensor *s) { set_sensor("pv2_energy_today", s); }
-  void set_pv3_energy_today_sensor(sensor::Sensor *s) { set_sensor("pv3_energy_today", s); }
-  void set_inverter_energy_today_sensor(sensor::Sensor *s) { set_sensor("inverter_energy_today", s); }
-  void set_ac_charging_today_sensor(sensor::Sensor *s) { set_sensor("ac_charging_today", s); }
-  void set_charging_today_sensor(sensor::Sensor *s) { set_sensor("charging_today", s); }
-  void set_discharging_today_sensor(sensor::Sensor *s) { set_sensor("discharging_today", s); }
-  void set_eps_today_sensor(sensor::Sensor *s) { set_sensor("eps_today", s); }
-  void set_exported_today_sensor(sensor::Sensor *s) { set_sensor("exported_today", s); }
-  void set_grid_today_sensor(sensor::Sensor *s) { set_sensor("grid_today", s); }
-  
-  // Section 2
-  void set_total_pv1_energy_sensor(sensor::Sensor *s) { set_sensor("total_pv1_energy", s); }
-  void set_total_pv2_energy_sensor(sensor::Sensor *s) { set_sensor("total_pv2_energy", s); }
-  void set_total_pv3_energy_sensor(sensor::Sensor *s) { set_sensor("total_pv3_energy", s); }
-  void set_total_inverter_output_sensor(sensor::Sensor *s) { set_sensor("total_inverter_output", s); }
-  void set_total_recharge_energy_sensor(sensor::Sensor *s) { set_sensor("total_recharge_energy", s); }
-  void set_total_charged_sensor(sensor::Sensor *s) { set_sensor("total_charged", s); }
-  void set_total_discharged_sensor(sensor::Sensor *s) { set_sensor("total_discharged", s); }
-  void set_total_eps_energy_sensor(sensor::Sensor *s) { set_sensor("total_eps_energy", s); }
-  void set_total_exported_sensor(sensor::Sensor *s) { set_sensor("total_exported", s); }
-  void set_total_imported_sensor(sensor::Sensor *s) { set_sensor("total_imported", s); }
-  void set_temp_inner_sensor(sensor::Sensor *s) { set_sensor("temp_inner", s); }
-  void set_temp_radiator_sensor(sensor::Sensor *s) { set_sensor("temp_radiator", s); }
-  void set_temp_radiator2_sensor(sensor::Sensor *s) { set_sensor("temp_radiator2", s); }
-  void set_temp_battery_sensor(sensor::Sensor *s) { set_sensor("temp_battery", s); }
-  void set_uptime_sensor(sensor::Sensor *s) { set_sensor("uptime", s); }
-
-  // Section 3
-  void set_max_charge_current_sensor(sensor::Sensor *s) { set_sensor("max_charge_current", s); }
-  void set_max_discharge_current_sensor(sensor::Sensor *s) { set_sensor("max_discharge_current", s); }
-  void set_charge_voltage_ref_sensor(sensor::Sensor *s) { set_sensor("charge_voltage_ref", s); }
-  void set_discharge_cutoff_voltage_sensor(sensor::Sensor *s) { set_sensor("discharge_cutoff_voltage", s); }
-  void set_battery_current_sensor(sensor::Sensor *s) { set_sensor("battery_current", s); }
-  void set_battery_count_sensor(sensor::Sensor *s) { set_sensor("battery_count", s); }
-  void set_battery_capacity_sensor(sensor::Sensor *s) { set_sensor("battery_capacity", s); }
-  void set_battery_status_inv_sensor(sensor::Sensor *s) { set_sensor("battery_status_inv", s); }
-  void set_max_cell_voltage_sensor(sensor::Sensor *s) { set_sensor("max_cell_voltage", s); }
-  void set_min_cell_voltage_sensor(sensor::Sensor *s) { set_sensor("min_cell_voltage", s); }
-  void set_max_cell_temp_sensor(sensor::Sensor *s) { set_sensor("max_cell_temp", s); }
-  void set_min_cell_temp_sensor(sensor::Sensor *s) { set_sensor("min_cell_temp", s); }
-  void set_cycle_count_sensor(sensor::Sensor *s) { set_sensor("cycle_count", s); }
-
-  // Text Sensor
-  void set_inverter_serial_sensor(text_sensor::TextSensor *s) { set_sensor("inverter_serial", s); }
+  void set_pv1_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["pv1_voltage"] = s; }
+  void set_pv2_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["pv2_voltage"] = s; }
+  void set_pv3_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["pv3_voltage"] = s; }
+  void set_battery_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["battery_voltage"] = s; }
+  void set_soc_sensor(sensor::Sensor *s) { this->float_sensors_["soc"] = s; }
+  void set_soh_sensor(sensor::Sensor *s) { this->float_sensors_["soh"] = s; }
+  void set_pv1_power_sensor(sensor::Sensor *s) { this->float_sensors_["pv1_power"] = s; }
+  void set_pv2_power_sensor(sensor::Sensor *s) { this->float_sensors_["pv2_power"] = s; }
+  void set_pv3_power_sensor(sensor::Sensor *s) { this->float_sensors_["pv3_power"] = s; }
+  void set_charge_power_sensor(sensor::Sensor *s) { this->float_sensors_["charge_power"] = s; }
+  void set_discharge_power_sensor(sensor::Sensor *s) { this->float_sensors_["discharge_power"] = s; }
+  void set_inverter_power_sensor(sensor::Sensor *s) { this->float_sensors_["inverter_power"] = s; }
+  void set_power_to_grid_sensor(sensor::Sensor *s) { this->float_sensors_["power_to_grid"] = s; }
+  void set_power_from_grid_sensor(sensor::Sensor *s) { this->float_sensors_["power_from_grid"] = s; }
+  void set_grid_voltage_r_sensor(sensor::Sensor *s) { this->float_sensors_["grid_voltage_r"] = s; }
+  void set_grid_voltage_s_sensor(sensor::Sensor *s) { this->float_sensors_["grid_voltage_s"] = s; }
+  void set_grid_voltage_t_sensor(sensor::Sensor *s) { this->float_sensors_["grid_voltage_t"] = s; }
+  void set_grid_frequency_sensor(sensor::Sensor *s) { this->float_sensors_["grid_frequency"] = s; }
+  void set_power_factor_sensor(sensor::Sensor *s) { this->float_sensors_["power_factor"] = s; }
+  void set_eps_voltage_r_sensor(sensor::Sensor *s) { this->float_sensors_["eps_voltage_r"] = s; }
+  void set_eps_voltage_s_sensor(sensor::Sensor *s) { this->float_sensors_["eps_voltage_s"] = s; }
+  void set_eps_voltage_t_sensor(sensor::Sensor *s) { this->float_sensors_["eps_voltage_t"] = s; }
+  void set_eps_frequency_sensor(sensor::Sensor *s) { this->float_sensors_["eps_frequency"] = s; }
+  void set_eps_active_power_sensor(sensor::Sensor *s) { this->float_sensors_["eps_active_power"] = s; }
+  void set_eps_apparent_power_sensor(sensor::Sensor *s) { this->float_sensors_["eps_apparent_power"] = s; }
+  void set_bus1_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["bus1_voltage"] = s; }
+  void set_bus2_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["bus2_voltage"] = s; }
+  void set_pv1_energy_today_sensor(sensor::Sensor *s) { this->float_sensors_["pv1_energy_today"] = s; }
+  void set_pv2_energy_today_sensor(sensor::Sensor *s) { this->float_sensors_["pv2_energy_today"] = s; }
+  void set_pv3_energy_today_sensor(sensor::Sensor *s) { this->float_sensors_["pv3_energy_today"] = s; }
+  void set_inverter_energy_today_sensor(sensor::Sensor *s) { this->float_sensors_["inverter_energy_today"] = s; }
+  void set_ac_charging_today_sensor(sensor::Sensor *s) { this->float_sensors_["ac_charging_today"] = s; }
+  void set_charging_today_sensor(sensor::Sensor *s) { this->float_sensors_["charging_today"] = s; }
+  void set_discharging_today_sensor(sensor::Sensor *s) { this->float_sensors_["discharging_today"] = s; }
+  void set_eps_today_sensor(sensor::Sensor *s) { this->float_sensors_["eps_today"] = s; }
+  void set_exported_today_sensor(sensor::Sensor *s) { this->float_sensors_["exported_today"] = s; }
+  void set_grid_today_sensor(sensor::Sensor *s) { this->float_sensors_["grid_today"] = s; }
+  void set_total_pv1_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_pv1_energy"] = s; }
+  void set_total_pv2_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_pv2_energy"] = s; }
+  void set_total_pv3_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_pv3_energy"] = s; }
+  void set_total_inverter_output_sensor(sensor::Sensor *s) { this->float_sensors_["total_inverter_output"] = s; }
+  void set_total_recharge_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_recharge_energy"] = s; }
+  void set_total_charged_sensor(sensor::Sensor *s) { this->float_sensors_["total_charged"] = s; }
+  void set_total_discharged_sensor(sensor::Sensor *s) { this->float_sensors_["total_discharged"] = s; }
+  void set_total_eps_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_eps_energy"] = s; }
+  void set_total_exported_sensor(sensor::Sensor *s) { this->float_sensors_["total_exported"] = s; }
+  void set_total_imported_sensor(sensor::Sensor *s) { this->float_sensors_["total_imported"] = s; }
+  void set_temp_inner_sensor(sensor::Sensor *s) { this->float_sensors_["temp_inner"] = s; }
+  void set_temp_radiator_sensor(sensor::Sensor *s) { this->float_sensors_["temp_radiator"] = s; }
+  void set_temp_radiator2_sensor(sensor::Sensor *s) { this->float_sensors_["temp_radiator2"] = s; }
+  void set_temp_battery_sensor(sensor::Sensor *s) { this->float_sensors_["temp_battery"] = s; }
+  void set_uptime_sensor(sensor::Sensor *s) { this->float_sensors_["uptime"] = s; }
+  void set_max_charge_current_sensor(sensor::Sensor *s) { this->float_sensors_["max_charge_current"] = s; }
+  void set_max_discharge_current_sensor(sensor::Sensor *s) { this->float_sensors_["max_discharge_current"] = s; }
+  void set_charge_voltage_ref_sensor(sensor::Sensor *s) { this->float_sensors_["charge_voltage_ref"] = s; }
+  void set_discharge_cutoff_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["discharge_cutoff_voltage"] = s; }
+  void set_battery_current_sensor(sensor::Sensor *s) { this->float_sensors_["battery_current"] = s; }
+  void set_battery_count_sensor(sensor::Sensor *s) { this->float_sensors_["battery_count"] = s; }
+  void set_battery_capacity_sensor(sensor::Sensor *s) { this->float_sensors_["battery_capacity"] = s; }
+  void set_battery_status_inv_sensor(sensor::Sensor *s) { this->float_sensors_["battery_status_inv"] = s; }
+  void set_max_cell_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["max_cell_voltage"] = s; }
+  void set_min_cell_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["min_cell_voltage"] = s; }
+  void set_max_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["max_cell_temp"] = s; }
+  void set_min_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["min_cell_temp"] = s; }
+  void set_cycle_count_sensor(sensor::Sensor *s) { this->float_sensors_["cycle_count"] = s; }
+  void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
 
  private:
-  // --- Private Helper Methods ---
   void request_bank_(uint8_t bank);
   void handle_response_(const uint8_t *buffer, size_t length);
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
   void publish_state_(const std::string &key, float value);
   void publish_state_(const std::string &key, const std::string &value);
+  uint16_t swap_uint16(uint16_t val);
+  uint32_t swap_uint32(uint32_t val);
 
-  // --- Private Member Variables ---
   std::string host_;
   uint16_t port_;
   std::string dongle_serial_;
   std::string inverter_serial_;
   
   AsyncClient *tcp_client_{nullptr};
-  std::map<std::string, EntityBase *> sensors_;
-  uint8_t next_bank_to_request_{0}; // State for cycling through banks 0, 40, 80
+  std::map<std::string, sensor::Sensor *> float_sensors_;
+  std::map<std::string, text_sensor::TextSensor *> string_sensors_;
+  uint8_t next_bank_to_request_{0};
 };
 
 }  // namespace luxpower_sna
