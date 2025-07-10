@@ -7,6 +7,20 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
+// --- Helper to log byte arrays in HEX format ---
+void log_hex_buffer(const uint8_t *buffer, size_t len) {
+  if (len == 0) {
+    return;
+  }
+  char str[len * 3 + 1];
+  for (size_t i = 0; i < len; i++) {
+    sprintf(str + i * 3, "%02X ", buffer[i]);
+  }
+  str[len * 3 - 1] = '\0'; // Remove last space
+  ESP_LOGD(TAG, "%s", str);
+}
+
+
 // --- Byte Swap Helpers (Inverter is Big Endian, ESP is Little Endian) ---
 uint16_t LuxpowerSNAComponent::swap_uint16(uint16_t val) { return (val << 8) | (val >> 8); }
 uint32_t LuxpowerSNAComponent::swap_uint32(uint32_t val) {
@@ -16,9 +30,12 @@ uint32_t LuxpowerSNAComponent::swap_uint32(uint32_t val) {
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA...");
   this->tcp_client_ = new AsyncClient();
+  // Set a 15 second timeout for all operations
+  this->tcp_client_->setRxTimeout(15000);
 
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
-    ESP_LOGD(TAG, "Received %d bytes of data.", len);
+    ESP_LOGD(TAG, "<- Received %d bytes of data:", len);
+    log_hex_buffer(static_cast<uint8_t *>(data), len);
     this->handle_response_(static_cast<uint8_t *>(data), len);
     client->close();
   });
@@ -35,7 +52,7 @@ void LuxpowerSNAComponent::setup() {
 
   this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) { ESP_LOGD(TAG, "Disconnected from host."); });
   this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
-    ESP_LOGW(TAG, "Connection timeout.");
+    ESP_LOGW(TAG, "Connection timeout after %d ms.", time);
     client->close();
   });
 }
@@ -52,7 +69,7 @@ void LuxpowerSNAComponent::update() {
     ESP_LOGD(TAG, "Update requested, but a connection is already in progress. Skipping.");
     return;
   }
-  ESP_LOGD(TAG, "Connecting to %s:%u to request bank %d", this->host_.c_str(), this->port_, this->next_bank_to_request_);
+  ESP_LOGD(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
   this->tcp_client_->connect(this->host_.c_str(), this->port_);
 }
 
@@ -65,6 +82,9 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   uint16_t crc = calculate_crc_(pkt + 2, 25);
   pkt[27] = crc & 0xFF;
   pkt[28] = crc >> 8;
+
+  ESP_LOGD(TAG, "-> Sending Request (%d bytes):", sizeof(pkt));
+  log_hex_buffer(pkt, sizeof(pkt));
 
   if (this->tcp_client_->space() > sizeof(pkt)) {
     this->tcp_client_->add(reinterpret_cast<const char *>(pkt), sizeof(pkt));
@@ -87,14 +107,18 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   memcpy(&header, buffer, sizeof(LuxHeader));
   memcpy(&trans, buffer + sizeof(LuxHeader), sizeof(LuxTranslatedData));
 
-  // The inverter sends big-endian data, so we must swap bytes for ESP (little-endian)
-  uint16_t prefix = swap_uint16(header.prefix);
-  uint16_t reg_start = swap_uint16(trans.registerStart);
+  uint16_t prefix_swapped = swap_uint16(header.prefix);
+  uint16_t reg_start_swapped = swap_uint16(trans.registerStart);
 
-  if (prefix != 0xAA55 || header.function != 0xC2 || trans.deviceFunction != 0x04) {
-    ESP_LOGW(TAG, "Invalid header/function. Prefix: 0x%X, Func: 0x%X, DevFunc: 0x%X", prefix, header.function, trans.deviceFunction);
+  // *********************************************************************************
+  // *** CRITICAL FIX: Check for 0x1AA1 as per your working Arduino project      ***
+  // *********************************************************************************
+  if (prefix_swapped != 0x1AA1 || header.function != 0xC2 || trans.deviceFunction != 0x04) {
+    ESP_LOGW(TAG, "Invalid header/function. Prefix: 0x%04X, Func: 0x%02X, DevFunc: 0x%02X", prefix_swapped, header.function, trans.deviceFunction);
     return;
   }
+  
+  ESP_LOGD(TAG, "✓ Decoded Header OK. Register Bank: %d", reg_start_swapped);
 
   static bool serial_published = false;
   if (!serial_published) {
@@ -106,7 +130,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   const uint8_t *data_ptr = buffer + RESPONSE_HEADER_SIZE;
   size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2; // Subtract 2 for CRC
 
-  if (reg_start == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
+  if (reg_start_swapped == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
+    ESP_LOGD(TAG, "Parsing data for bank 0...");
     const auto *raw = reinterpret_cast<const LuxLogDataRawSection1 *>(data_ptr);
     publish_state_("pv1_voltage", swap_uint16(raw->pv1_voltage) / 10.0f);
     publish_state_("pv2_voltage", swap_uint16(raw->pv2_voltage) / 10.0f);
@@ -146,7 +171,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("exported_today", swap_uint16(raw->exported_today) / 10.0f);
     publish_state_("grid_today", swap_uint16(raw->grid_today) / 10.0f);
 
-  } else if (reg_start == 40 && data_payload_length >= sizeof(LuxLogDataRawSection2)) {
+  } else if (reg_start_swapped == 40 && data_payload_length >= sizeof(LuxLogDataRawSection2)) {
+    ESP_LOGD(TAG, "Parsing data for bank 40...");
     const auto *raw = reinterpret_cast<const LuxLogDataRawSection2 *>(data_ptr);
     publish_state_("total_pv1_energy", swap_uint32(raw->e_pv_1_all) / 10.0f);
     publish_state_("total_pv2_energy", swap_uint32(raw->e_pv_2_all) / 10.0f);
@@ -164,7 +190,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("temp_battery", swap_uint16(raw->t_bat) / 10.0f);
     publish_state_("uptime", (float)swap_uint32(raw->uptime));
 
-  } else if (reg_start == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
+  } else if (reg_start_swapped == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
+    ESP_LOGD(TAG, "Parsing data for bank 80...");
     const auto *raw = reinterpret_cast<const LuxLogDataRawSection3 *>(data_ptr);
     publish_state_("max_charge_current", swap_uint16(raw->max_chg_curr) / 100.0f);
     publish_state_("max_discharge_current", swap_uint16(raw->max_dischg_curr) / 100.0f);
@@ -179,9 +206,12 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("max_cell_temp", swap_uint16(raw->max_cell_temp) / 10.0f);
     publish_state_("min_cell_temp", swap_uint16(raw->min_cell_temp) / 10.0f);
     publish_state_("cycle_count", (float)swap_uint16(raw->bat_cycle_count));
+  } else {
+    ESP_LOGW(TAG, "Unrecognized register %d or insufficient data length %d for parsing", reg_start_swapped, data_payload_length);
+    return; // Do not advance to next bank if parsing failed
   }
 
-  // Cycle to the next bank for the next update
+  // Cycle to the next bank for the next successful update
   if (this->next_bank_to_request_ == 0) this->next_bank_to_request_ = 40;
   else if (this->next_bank_to_request_ == 40) this->next_bank_to_request_ = 80;
   else this->next_bank_to_request_ = 0;
@@ -201,6 +231,8 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
   auto it = this->float_sensors_.find(key);
   if (it != this->float_sensors_.end()) {
     it->second->publish_state(value);
+  } else {
+    ESP_LOGW(TAG, "Sensor with key '%s' not found for publishing.", key.c_str());
   }
 }
 
@@ -208,6 +240,8 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::str
   auto it = this->string_sensors_.find(key);
   if (it != this->string_sensors_.end()) {
     it->second->publish_state(value);
+  } else {
+    ESP_LOGW(TAG, "Text sensor with key '%s' not found for publishing.", key.c_str());
   }
 }
 
