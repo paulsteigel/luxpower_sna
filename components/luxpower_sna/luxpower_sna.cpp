@@ -7,6 +7,10 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
+// THE MISSING PIECE: The key used to decode the data payload.
+static const char *DECODE_KEY = "lux_2021_umb";
+static const size_t DECODE_KEY_LEN = 12;
+
 void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   if (len == 0) {
     return;
@@ -17,6 +21,13 @@ void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   }
   str[len * 3 - 1] = '\0';
   ESP_LOGD(TAG, "%s (%d bytes): %s", title, len, str);
+}
+
+// NEW FUNCTION: Decodes the data payload in place.
+void decode_data(uint8_t *data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    data[i] ^= DECODE_KEY[i % DECODE_KEY_LEN];
+  }
 }
 
 void LuxpowerSNAComponent::setup() {
@@ -53,7 +64,7 @@ void LuxpowerSNAComponent::setup() {
 void LuxpowerSNAComponent::loop() {
   if (this->data_ready_to_process_) {
     this->data_ready_to_process_ = false;
-    log_hex_buffer("<- Processing Received", this->rx_buffer_.data(), this->rx_buffer_.size());
+    log_hex_buffer("<- Processing Raw Received", this->rx_buffer_.data(), this->rx_buffer_.size());
     this->handle_response_();
   }
 }
@@ -96,49 +107,54 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
 }
 
 void LuxpowerSNAComponent::handle_response_() {
-  const uint8_t *buffer = this->rx_buffer_.data();
+  uint8_t *buffer = this->rx_buffer_.data();
   size_t length = this->rx_buffer_.size();
 
-  // --- NEW ROBUST PACKET VALIDATION ---
-  const size_t MIN_PACKET_SIZE = 16; // A safe minimum for any valid response
+  // --- CORRECTED PACKET VALIDATION SEQUENCE ---
+  const size_t MIN_PACKET_SIZE = 16;
   if (length < MIN_PACKET_SIZE) {
     ESP_LOGW(TAG, "Packet too small. Received %d bytes, need at least %d.", length, MIN_PACKET_SIZE);
     return;
   }
 
-  // 1. Check for the correct response prefix
+  // 1. Check raw prefix
   if (buffer[0] != 0xA1 || buffer[1] != 0x1A) {
     ESP_LOGW(TAG, "Invalid response prefix. Expected 0xA1 0x1A, got 0x%02X 0x%02X.", buffer[0], buffer[1]);
     return;
   }
 
-  // 2. Verify the payload length
+  // 2. Check raw length
   uint16_t payload_len = buffer[4] | (buffer[5] << 8);
   if (payload_len + 6 != length) {
     ESP_LOGW(TAG, "Packet length mismatch. Header says payload is %d bytes, but total packet is %d bytes.", payload_len, length);
     return;
   }
 
-  // 3. Verify the function code
+  // 3. ***** DECODE THE PAYLOAD *****
+  // The payload starts after the header (8 bytes) and ends before the CRC (2 bytes)
+  const size_t payload_offset = 8;
+  const size_t payload_data_len = length - payload_offset - 2;
+  decode_data(buffer + payload_offset, payload_data_len);
+  log_hex_buffer("<- Decoded Full Packet", buffer, length);
+
+  // 4. Verify function code on DECODED data
   if (buffer[7] != 0xC2) {
     ESP_LOGW(TAG, "Invalid function code. Expected 0xC2, got 0x%02X.", buffer[7]);
     return;
   }
 
-  // 4. Verify the CRC
+  // 5. Verify CRC on DECODED data
   uint16_t received_crc = buffer[length - 2] | (buffer[length - 1] << 8);
-  uint16_t calculated_crc = calculate_crc_(buffer + 2, length - 4); // CRC is on data between prefix and CRC itself
+  uint16_t calculated_crc = calculate_crc_(buffer + 2, length - 4);
   if (received_crc != calculated_crc) {
-    ESP_LOGW(TAG, "CRC mismatch. Received 0x%04X, calculated 0x%04X.", received_crc, calculated_crc);
+    ESP_LOGW(TAG, "CRC mismatch on decoded data. Received 0x%04X, calculated 0x%04X.", received_crc, calculated_crc);
     return;
   }
   
-  ESP_LOGD(TAG, "✓ Packet validation successful (Prefix, Length, Function, CRC all OK)");
+  ESP_LOGD(TAG, "✓ Packet validation successful (Prefix, Length, Decode, Function, CRC all OK)");
 
-  // --- PARSE INNER DATA (now that we know the packet is valid) ---
-  const uint8_t* inner_data_start = buffer + 8; // Inner data starts after the 8-byte header
-  size_t inner_data_length = payload_len - 2; // Payload minus the 2 bytes for direction and function code
-
+  // --- PARSE INNER DATA (from the now-decoded buffer) ---
+  const uint8_t* inner_data_start = buffer + 8;
   LuxTranslatedData trans;
   memcpy(&trans, inner_data_start, sizeof(LuxTranslatedData));
 
@@ -152,8 +168,9 @@ void LuxpowerSNAComponent::handle_response_() {
   }
   
   const uint8_t *data_ptr = inner_data_start + sizeof(LuxTranslatedData);
-  size_t data_payload_length = inner_data_length - sizeof(LuxTranslatedData);
+  size_t data_payload_length = payload_data_len - sizeof(LuxTranslatedData);
 
+  // ... (The rest of the parsing logic is unchanged and should now work correctly) ...
   if (trans.registerStart == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
     ESP_LOGD(TAG, "Parsing data for bank 0...");
     LuxLogDataRawSection1 raw;
