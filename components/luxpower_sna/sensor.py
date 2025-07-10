@@ -144,18 +144,11 @@ SENSOR_TYPES = {
     "cycle_count": sensor.sensor_schema(icon="mdi:battery-sync", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
 }
 
-def validate_update_interval(value):
-    value = cv.update_interval(value)
-    seconds = value.total_seconds()
-    if seconds < 5 or seconds > 60:
-        raise cv.Invalid("update_interval must be between 5 and 60 seconds")
-    return value
-    
 CONFIG_SCHEMA = cv.All(
     LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
         {
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-            cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): validate_update_interval,
+            cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): cv.update_interval,
         }
     ),    
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
