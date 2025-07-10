@@ -83,14 +83,14 @@ void LuxpowerSNAComponent::request_data_() {
     ESP_LOGD(TAG, "Successfully connected to host.");
     // --- Build and send the request packet ---
     uint8_t request[29];
-    request[0] = 0xAA; request[1] = 0x55; request[2] = 0x01; request[3] = 0x1A;
-    request[4] = 0x01; request[5] = 0x02; request[6] = 20; // Action: Read
+    request[0] = 0xAA; request[1] = 0x55; request[2] = 0x12; request[3] = 0x00;
+    request[4] = 0x01; request[5] = 0xC1; request[6] = 20; // Action: Read
     memcpy(request + 7, this->dongle_serial_.data(), 10);
     memcpy(request + 17, this->inverter_serial_.data(), 10);
     uint16_t crc = this->calculate_crc_(request + 2, 25);
     request[27] = crc & 0xFF;
     request[28] = (crc >> 8) & 0xFF;
-    
+      
     ESP_LOGD(TAG, "Sending data request (29 bytes)...");
     client->write((char*)request, 29);
   }, nullptr);
