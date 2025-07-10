@@ -3,6 +3,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
+    CONF_ID,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_FREQUENCY,
@@ -18,6 +19,7 @@ from esphome.const import (
     UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_WATT,
+    CONF_UPDATE_INTERVAL
     # UNIT_VOLT_AMPERE has been removed from here
 )
 
@@ -148,6 +150,7 @@ CONFIG_SCHEMA = cv.All(
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
         }
     ),
+    cv.Optional(CONF_UPDATE_INTERVAL): cv.update_interval,
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
 )
 
