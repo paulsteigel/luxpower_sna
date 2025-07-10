@@ -149,7 +149,6 @@ CONFIG_SCHEMA = cv.All(
         {
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
             cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): validate_update_interval,
-            ),
         }
     ),    
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
