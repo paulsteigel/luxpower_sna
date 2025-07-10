@@ -1,4 +1,3 @@
-[[luxpower_sna.cpp]]
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
 
