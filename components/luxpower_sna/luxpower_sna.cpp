@@ -1,185 +1,191 @@
-// esphome_config/custom_components/luxpower_sna/luxpower_sna.cpp
-
+// components/luxpower_sna/luxpower_sna.cpp
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
-#include <numeric>
-#include "lwip/tcp.h"
-#include "lwip/ip_addr.h"
-#include "lwip/dns.h"
+#include "esphome/core/helpers.h" // For format_hex_pretty
 
-// All the LwIP callback functions remain the same as before.
-// We only need to adjust the component-specific methods.
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
-static err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
-static err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err);
-static void tcp_error_callback(void *arg, err_t err);
 
-
-const int DATA_START_OFFSET = 35;
-
-uint16_t LuxpowerSNAComponent::get_register_value(const std::vector<uint8_t> &data, int reg_index) {
-    int byte_pos = DATA_START_OFFSET + (reg_index * 2);
-    if (byte_pos + 1 >= data.size()) {
-        ESP_LOGW(TAG, "Not enough data to read register %d", reg_index);
-        return 0;
+// Helper function to publish state to the correct sensor type
+void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
+    if (this->sensors_.count(key)) {
+        // Cast the base entity pointer to a sensor pointer
+        auto *sensor = (sensor::Sensor *)this->sensors_[key];
+        sensor->publish_state(value);
     }
-    return (data[byte_pos + 1] << 8) | data[byte_pos];
 }
 
-void LuxpowerSNAComponent::parse_response(const std::vector<uint8_t> &data) {
-    ESP_LOGD(TAG, "Parsing response of size %d", data.size());
-    if (data.size() < 117) {
-        ESP_LOGW(TAG, "Response is too short to parse: %d bytes", data.size());
-        return;
+void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
+    if (this->sensors_.count(key)) {
+        // Cast the base entity pointer to a text_sensor pointer
+        auto *text_sensor = (text_sensor::TextSensor *)this->sensors_[key];
+        text_sensor->publish_state(value);
     }
+}
 
-    if (this->pv1_voltage_sensor_) this->pv1_voltage_sensor_->publish_state(get_register_value(data, 0) * 0.1f);
-    if (this->pv1_power_sensor_) this->pv1_power_sensor_->publish_state(get_register_value(data, 2));
-    if (this->battery_voltage_sensor_) this->battery_voltage_sensor_->publish_state(get_register_value(data, 14) * 0.1f);
-    if (this->soc_sensor_) this->soc_sensor_->publish_state(get_register_value(data, 15));
-    if (this->charge_power_sensor_) this->charge_power_sensor_->publish_state(get_register_value(data, 18));
-    if (this->discharge_power_sensor_) this->discharge_power_sensor_->publish_state(get_register_value(data, 19));
-    if (this->inverter_power_sensor_) this->inverter_power_sensor_->publish_state(get_register_value(data, 23));
-
-    ESP_LOGI(TAG, "Successfully parsed inverter data.");
+void LuxpowerSNAComponent::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA Hub...");
 }
 
 void LuxpowerSNAComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "LuxpowerSNAComponent:");
-  ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", this->inverter_serial_number_.c_str()); // Added
+  ESP_LOGCONFIG(TAG, "LuxpowerSNA Hub:");
+  ESP_LOGCONFIG(TAG, "  Host: %s:%d", this->host_.c_str(), this->port_);
   LOG_UPDATE_INTERVAL(this);
-}
-
-// --- All other functions (LwIP callbacks, build_request_packet, update, etc.) remain unchanged ---
-// (The full code from the previous correct response can be pasted here)
-
-err_t tcp_receive_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
-  LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
-  if (p == nullptr) {
-    ESP_LOGD(TAG, "Connection closed by remote host.");
-    if (!component->rx_buffer_.empty()) {
-        component->parse_response(component->rx_buffer_);
-    }
-    component->close_connection();
-    return ERR_OK;
+  
+  ESP_LOGCONFIG(TAG, "  Configured Sensors:");
+  for (auto const& [key, val] : this->sensors_) {
+    ESP_LOGCONFIG(TAG, "    - %s", key.c_str());
   }
-  if (err == ERR_OK) {
-    for (struct pbuf *q = p; q != nullptr; q = q->next) {
-      component->rx_buffer_.insert(component->rx_buffer_.end(), (uint8_t *)q->payload, (uint8_t *)q->payload + q->len);
-    }
-    tcp_recved(tpcb, p->tot_len);
-    pbuf_free(p);
-  } else {
-    ESP_LOGW(TAG, "Receive error: %d", err);
-    component->close_connection();
-  }
-  return ERR_OK;
 }
-
-err_t tcp_connected_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
-  LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
-  if (err == ERR_OK) {
-    ESP_LOGD(TAG, "Connection successful! Sending request...");
-    component->rx_buffer_.clear();
-    tcp_recv(tpcb, tcp_receive_callback);
-    std::vector<uint8_t> request = component->build_request_packet(0x10, 0, 40);
-    err_t write_err = tcp_write(tpcb, request.data(), request.size(), TCP_WRITE_FLAG_COPY);
-    if (write_err != ERR_OK) {
-      ESP_LOGW(TAG, "Error writing to TCP stream: %d", write_err);
-      component->close_connection();
-      return ERR_OK;
-    }
-    tcp_output(tpcb);
-    ESP_LOGD(TAG, "Request packet sent (%d bytes):", request.size());
-    ESP_LOGD(TAG, "  %s", format_hex_pretty(request).c_str());
-    component->status_clear_warning();
-  } else {
-    ESP_LOGW(TAG, "Connection failed. Error: %d", err);
-    component->close_connection();
-  }
-  return ERR_OK;
-}
-
-void tcp_error_callback(void *arg, err_t err) {
-  LuxpowerSNAComponent *component = static_cast<LuxpowerSNAComponent *>(arg);
-  ESP_LOGW(TAG, "TCP Error. Code: %d. Closing connection.", err);
-  component->pcb_ = nullptr;
-  component->status_set_warning();
-}
-
-uint16_t LuxpowerSNAComponent::calculate_lux_checksum(const std::vector<uint8_t> &data) {
-    return std::accumulate(data.begin() + 4, data.end(), 0);
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::build_request_packet(uint8_t function_code, uint8_t start_reg, uint8_t reg_count) {
-    std::vector<uint8_t> packet;
-    packet.resize(17);
-    packet[0] = 0xA8; packet[1] = 0x10;
-    uint16_t data_len = 11;
-    packet[2] = data_len & 0xFF; packet[3] = (data_len >> 8) & 0xFF;
-    packet[4] = 0x01; packet[5] = 0x00;
-    memcpy(&packet[6], this->dongle_serial_.c_str(), 10);
-    packet[16] = function_code;
-    packet.push_back(start_reg);
-    packet.push_back(reg_count);
-    packet.resize(21);
-    uint16_t checksum = this->calculate_lux_checksum(packet);
-    packet[19] = checksum & 0xFF; packet[20] = (checksum >> 8) & 0xFF;
-    return packet;
-}
-
-void LuxpowerSNAComponent::setup() { ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNAComponent..."); }
 
 void LuxpowerSNAComponent::update() {
-  ESP_LOGD(TAG, "Starting update...");
-  if (this->pcb_ != nullptr) {
-    ESP_LOGD(TAG, "Update called but a connection is already active. Aborting old one.");
-    this->close_connection();
+  // This is called by the PollingComponent scheduler.
+  // It will trigger the async request sequence.
+  this->request_data_();
+}
+
+uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (int j = 0; j < 8; j++) {
+      if ((crc & 0x0001) != 0) {
+        crc >>= 1;
+        crc ^= 0xA001;
+      } else {
+        crc >>= 1;
+      }
+    }
   }
-  this->pcb_ = tcp_new();
-  if (this->pcb_ == nullptr) {
-    ESP_LOGW(TAG, "Could not create TCP PCB");
-    this->status_set_warning();
+  return crc;
+}
+
+void LuxpowerSNAComponent::request_data_() {
+  // If a connection is already in progress, do nothing.
+  if (this->tcp_client_ != nullptr) {
+    ESP_LOGD(TAG, "Connection already in progress, skipping new request.");
     return;
   }
-  tcp_arg(this->pcb_, this);
-  tcp_err(this->pcb_, tcp_error_callback);
-  ip_addr_t remote_ip;
-  err_t err = dns_gethostbyname(this->host_.c_str(), &remote_ip, nullptr, nullptr);
-  if (err != ERR_OK && err != ERR_INPROGRESS) {
-      ESP_LOGW(TAG, "Could not resolve host %s. Error: %d", this->host_.c_str(), err);
-      this->close_connection();
-      return;
-  }
-  ESP_LOGD(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
-  err = tcp_connect(this->pcb_, &remote_ip, this->port_, tcp_connected_callback);
-  if (err != ERR_OK) {
-    ESP_LOGW(TAG, "Could not initiate TCP connection. Error: %d", err);
-    this->close_connection();
+  
+  ESP_LOGD(TAG, "Connecting to %s:%d", this->host_.c_str(), this->port_);
+  this->tcp_client_ = new AsyncClient();
+
+  // --- Define Callbacks ---
+  this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
+    ESP_LOGD(TAG, "Received %d bytes of data.", len);
+    this->handle_packet_(data, len);
+    client->close(); // We are done, close the connection.
+  }, nullptr);
+
+  this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
+    ESP_LOGD(TAG, "Successfully connected to host.");
+    // --- Build and send the request packet ---
+    uint8_t request[29];
+    request[0] = 0xAA; request[1] = 0x55; request[2] = 0x01; request[3] = 0x1A;
+    request[4] = 0x01; request[5] = 0x02; request[6] = 20; // Action: Read
+    memcpy(request + 7, this->dongle_serial_.data(), 10);
+    memcpy(request + 17, this->inverter_serial_.data(), 10);
+    uint16_t crc = this->calculate_crc_(request + 2, 25);
+    request[27] = crc & 0xFF;
+    request[28] = (crc >> 8) & 0xFF;
+    
+    ESP_LOGD(TAG, "Sending data request (29 bytes)...");
+    client->write((char*)request, 29);
+  }, nullptr);
+
+  this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
+    ESP_LOGW(TAG, "Connection error: %s", client->errorToString(error));
+    delete this->tcp_client_;
+    this->tcp_client_ = nullptr;
+  }, nullptr);
+
+  this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
+    ESP_LOGW(TAG, "Connection timeout");
+    delete this->tcp_client_;
+    this->tcp_client_ = nullptr;
+  }, nullptr);
+
+  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) {
+    ESP_LOGD(TAG, "Disconnected from host.");
+    delete this->tcp_client_;
+    this->tcp_client_ = nullptr;
+  }, nullptr);
+
+  // --- Initiate the connection ---
+  if (!this->tcp_client_->connect(this->host_.c_str(), this->port_)) {
+    ESP_LOGW(TAG, "Failed to initiate connection.");
+    delete this->tcp_client_;
+    this->tcp_client_ = nullptr;
   }
 }
-void LuxpowerSNAComponent::close_connection() {
-  if (this->pcb_ != nullptr) {
-    tcp_err(this->pcb_, nullptr);
-    tcp_sent(this->pcb_, nullptr);
-    tcp_recv(this->pcb_, nullptr);
-    tcp_arg(this->pcb_, nullptr);
-    err_t err = tcp_close(this->pcb_);
-    if (err != ERR_OK) {
-        ESP_LOGW(TAG, "Error closing TCP connection: %d. Aborting.", err);
-        tcp_abort(this->pcb_);
-    }
-    this->pcb_ = nullptr;
-    ESP_LOGD(TAG, "Connection closed.");
+
+void LuxpowerSNAComponent::handle_packet_(void *data, size_t len) {
+  uint8_t *raw = (uint8_t *) data;
+
+  if (len < 129) { // The full data packet is large, let's check for a reasonable minimum
+    ESP_LOGW(TAG, "Received packet too short: %d bytes. Full data may not be available.", len);
+    // You can decide to return here or try to parse what you can
   }
+  
+  ESP_LOGV(TAG, "Full packet received:\n%s", format_hex_pretty(raw, len).c_str());
+
+  // --- Parse all possible values from the data packet ---
+  // Note: These offsets are based on reverse-engineering and need to be verified.
+  this->publish_state_("battery_voltage", (float)(raw[11] << 8 | raw[12]) / 10.0f);
+  this->publish_state_("soc", (float)raw[15]);
+  this->publish_state_("battery_power", (float)(raw[13] << 8 | raw[14])); // Example: may need adjustment for charge/discharge
+  this->publish_state_("charge_power", (float)(raw[13] << 8 | raw[14])); // Placeholder, needs logic
+  this->publish_state_("discharge_power", (float)0); // Placeholder, needs logic
+  this->publish_state_("pv_power", (float)((raw[21] << 8 | raw[22]) + (raw[25] << 8 | raw[26])));
+  this->publish_state_("inverter_power", (float)(raw[31] << 8 | raw[32]));
+  this->publish_state_("grid_power", (float)(raw[33] << 8 | raw[34]));
+  this->publish_state_("load_power", (float)(raw[35] << 8 | raw[36]));
+  this->publish_state_("eps_power", (float)(raw[37] << 8 | raw[38]));
+  
+  this->publish_state_("pv1_voltage", (float)(raw[19] << 8 | raw[20]) / 10.0f);
+  this->publish_state_("pv1_power", (float)(raw[21] << 8 | raw[22]));
+  this->publish_state_("pv2_voltage", (float)(raw[23] << 8 | raw[24]) / 10.0f);
+  this->publish_state_("pv2_power", (float)(raw[25] << 8 | raw[26]));
+  
+  this->publish_state_("grid_voltage", (float)(raw[27] << 8 | raw[28]) / 10.0f);
+  this->publish_state_("grid_frequency", (float)(raw[29] << 8 | raw[30]) / 100.0f);
+  this->publish_state_("power_factor", (float)(raw[41] << 8 | raw[42]) / 1000.0f);
+  this->publish_state_("eps_voltage", (float)(raw[39] << 8 | raw[40]) / 10.0f);
+  // EPS Frequency is often the same as grid, might not be in the packet. Placeholder.
+  this->publish_state_("eps_frequency", (float)(raw[29] << 8 | raw[30]) / 100.0f);
+
+  // Daily Energy Values
+  this->publish_state_("pv_today", (float)(raw[59] << 8 | raw[60]) / 10.0f);
+  this->publish_state_("inverter_today", (float)(raw[61] << 8 | raw[62]) / 10.0f);
+  this->publish_state_("charge_today", (float)(raw[63] << 8 | raw[64]) / 10.0f);
+  this->publish_state_("discharge_today", (float)(raw[65] << 8 | raw[66]) / 10.0f);
+  this->publish_state_("grid_export_today", (float)(raw[67] << 8 | raw[68]) / 10.0f);
+  this->publish_state_("grid_import_today", (float)(raw[69] << 8 | raw[70]) / 10.0f);
+  this->publish_state_("load_today", (float)(raw[71] << 8 | raw[72]) / 10.0f);
+  this->publish_state_("eps_today", (float)(raw[73] << 8 | raw[74]) / 10.0f);
+
+  // Temperatures
+  this->publish_state_("inverter_temp", (float)(raw[45] << 8 | raw[46]) / 10.0f);
+  this->publish_state_("radiator_temp", (float)(raw[47] << 8 | raw[48]) / 10.0f);
+  this->publish_state_("battery_temp", (float)(raw[49] << 8 | raw[50]) / 10.0f);
+
+  // Status
+  int status_code = raw[51];
+  this->publish_state_("status_code", (float)status_code);
+  // You would add a switch statement here to map the code to a text string
+  std::string status_text = "Unknown";
+  switch(status_code) {
+      case 0: status_text = "Standby"; break;
+      case 1: status_text = "Self Test"; break;
+      case 2: status_text = "Normal"; break;
+      case 3: status_text = "Alarm"; break;
+      case 4: status_text = "Fault"; break;
+  }
+  this->publish_state_("status_text", status_text);
+
 }
 
 }  // namespace luxpower_sna
 }  // namespace esphome
-
