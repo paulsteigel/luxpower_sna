@@ -161,6 +161,16 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
 
  private:
+   private:
+  // Queues for throttled publishing
+  std::queue<std::pair<std::string, float>> float_publish_queue_;
+  std::queue<std::pair<std::string, std::string>> string_publish_queue_;
+  bool float_publishing_ = false;
+  bool string_publishing_ = false;
+
+  // Declare the throttle helpers
+  void process_next_float_();
+  void process_next_string_();
   void request_bank_(uint8_t bank);
   void handle_response_(const uint8_t *buffer, size_t length);
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
