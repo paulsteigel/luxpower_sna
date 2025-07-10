@@ -149,9 +149,8 @@ CONFIG_SCHEMA = cv.All(
         {
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
             cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): cv.All(
-                cv.positive_time_period_seconds,
-                cv.Range(min=5.0, max=60.0)
-                ),
+                cv.update_interval,
+                cv.Range(min=5.0, max=60.0),
             ),
         }
     ),    
