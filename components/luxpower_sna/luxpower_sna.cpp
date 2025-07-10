@@ -7,10 +7,7 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// THE MISSING PIECE: The key used to decode the data payload.
-static const char *DECODE_KEY = "lux_2021_umb";
-static const size_t DECODE_KEY_LEN = 12;
-
+// --- Helper to log byte arrays in HEX format ---
 void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   if (len == 0) {
     return;
@@ -19,28 +16,18 @@ void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   for (size_t i = 0; i < len; i++) {
     sprintf(str + i * 3, "%02X ", buffer[i]);
   }
-  str[len * 3 - 1] = '\0';
+  str[len * 3 - 1] = '\0'; // Remove last space
   ESP_LOGD(TAG, "%s (%d bytes): %s", title, len, str);
-}
-
-// NEW FUNCTION: Decodes the data payload in place.
-void decode_data(uint8_t *data, size_t len) {
-  for (size_t i = 0; i < len; ++i) {
-    data[i] ^= DECODE_KEY[i % DECODE_KEY_LEN];
-  }
 }
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA...");
   this->tcp_client_ = new AsyncClient();
-  this->tcp_client_->setRxTimeout(15000);
+  this->tcp_client_->setRxTimeout(15000); // 15 second timeout
 
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
-    if (this->data_ready_to_process_) {
-      ESP_LOGW(TAG, "New data arrived before previous was processed. Overwriting.");
-    }
-    this->rx_buffer_.assign(static_cast<uint8_t*>(data), static_cast<uint8_t*>(data) + len);
-    this->data_ready_to_process_ = true;
+    log_hex_buffer("<- Received", static_cast<uint8_t *>(data), len);
+    this->handle_response_(static_cast<uint8_t *>(data), len);
     client->close();
   });
 
@@ -59,14 +46,6 @@ void LuxpowerSNAComponent::setup() {
     ESP_LOGW(TAG, "Connection timeout after %d ms.", time);
     client->close();
   });
-}
-
-void LuxpowerSNAComponent::loop() {
-  if (this->data_ready_to_process_) {
-    this->data_ready_to_process_ = false;
-    log_hex_buffer("<- Processing Raw Received", this->rx_buffer_.data(), this->rx_buffer_.size());
-    this->handle_response_();
-  }
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -106,58 +85,27 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   }
 }
 
-void LuxpowerSNAComponent::handle_response_() {
-  uint8_t *buffer = this->rx_buffer_.data();
-  size_t length = this->rx_buffer_.size();
-
-  // --- CORRECTED PACKET VALIDATION SEQUENCE ---
-  const size_t MIN_PACKET_SIZE = 16;
-  if (length < MIN_PACKET_SIZE) {
-    ESP_LOGW(TAG, "Packet too small. Received %d bytes, need at least %d.", length, MIN_PACKET_SIZE);
+void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length) {
+  const uint16_t RESPONSE_HEADER_SIZE = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
+  if (length < RESPONSE_HEADER_SIZE) {
+    ESP_LOGW(TAG, "Packet too small for headers. Length: %d", length);
     return;
   }
 
-  // 1. Check raw prefix
-  if (buffer[0] != 0xA1 || buffer[1] != 0x1A) {
-    ESP_LOGW(TAG, "Invalid response prefix. Expected 0xA1 0x1A, got 0x%02X 0x%02X.", buffer[0], buffer[1]);
-    return;
-  }
+  LuxHeader header;
+  LuxTranslatedData trans;
+  memcpy(&header, buffer, sizeof(LuxHeader));
+  memcpy(&trans, buffer + sizeof(LuxHeader), sizeof(LuxTranslatedData));
 
-  // 2. Check raw length
-  uint16_t payload_len = buffer[4] | (buffer[5] << 8);
-  if (payload_len + 6 != length) {
-    ESP_LOGW(TAG, "Packet length mismatch. Header says payload is %d bytes, but total packet is %d bytes.", payload_len, length);
-    return;
-  }
-
-  // 3. ***** DECODE THE PAYLOAD *****
-  // The payload starts after the header (8 bytes) and ends before the CRC (2 bytes)
-  const size_t payload_offset = 8;
-  const size_t payload_data_len = length - payload_offset - 2;
-  decode_data(buffer + payload_offset, payload_data_len);
-  log_hex_buffer("<- Decoded Full Packet", buffer, length);
-
-  // 4. Verify function code on DECODED data
-  if (buffer[7] != 0xC2) {
-    ESP_LOGW(TAG, "Invalid function code. Expected 0xC2, got 0x%02X.", buffer[7]);
-    return;
-  }
-
-  // 5. Verify CRC on DECODED data
-  uint16_t received_crc = buffer[length - 2] | (buffer[length - 1] << 8);
-  uint16_t calculated_crc = calculate_crc_(buffer + 2, length - 4);
-  if (received_crc != calculated_crc) {
-    ESP_LOGW(TAG, "CRC mismatch on decoded data. Received 0x%04X, calculated 0x%04X.", received_crc, calculated_crc);
+  // *********************************************************************************
+  // *** CRITICAL FIX: Check the value directly. The little-endian CPU handles the
+  // *** byte order correctly when memcpy copies `A1 1A` into the uint16_t.
+  // *********************************************************************************
+  if (header.prefix != 0x1AA1 || header.function != 0xC2 || trans.deviceFunction != 0x04) {
+    ESP_LOGW(TAG, "Invalid header/function. Prefix: 0x%04X, Func: 0x%02X, DevFunc: 0x%02X", header.prefix, header.function, trans.deviceFunction);
     return;
   }
   
-  ESP_LOGD(TAG, "✓ Packet validation successful (Prefix, Length, Decode, Function, CRC all OK)");
-
-  // --- PARSE INNER DATA (from the now-decoded buffer) ---
-  const uint8_t* inner_data_start = buffer + 8;
-  LuxTranslatedData trans;
-  memcpy(&trans, inner_data_start, sizeof(LuxTranslatedData));
-
   ESP_LOGD(TAG, "✓ Decoded Header OK. Register Bank: %d", trans.registerStart);
 
   static bool serial_published = false;
@@ -166,11 +114,10 @@ void LuxpowerSNAComponent::handle_response_() {
     publish_state_("inverter_serial", inv_serial);
     serial_published = true;
   }
-  
-  const uint8_t *data_ptr = inner_data_start + sizeof(LuxTranslatedData);
-  size_t data_payload_length = payload_data_len - sizeof(LuxTranslatedData);
 
-  // ... (The rest of the parsing logic is unchanged and should now work correctly) ...
+  const uint8_t *data_ptr = buffer + RESPONSE_HEADER_SIZE;
+  size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2; // Subtract 2 for CRC
+
   if (trans.registerStart == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
     ESP_LOGD(TAG, "Parsing data for bank 0...");
     LuxLogDataRawSection1 raw;
@@ -255,9 +202,10 @@ void LuxpowerSNAComponent::handle_response_() {
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
   } else {
     ESP_LOGW(TAG, "Unrecognized register %d or insufficient data length %d for parsing", trans.registerStart, data_payload_length);
-    return;
+    return; // Do not advance to next bank if parsing failed
   }
 
+  // Cycle to the next bank for the next successful update
   if (this->next_bank_to_request_ == 0) this->next_bank_to_request_ = 40;
   else if (this->next_bank_to_request_ == 40) this->next_bank_to_request_ = 80;
   else this->next_bank_to_request_ = 0;
