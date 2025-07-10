@@ -5,7 +5,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/hal.h"
-#include <AsyncTCP.h>
+#include <ESPAsyncTCP.h>
 #include <map>
 #include <string>
 #include <vector>
