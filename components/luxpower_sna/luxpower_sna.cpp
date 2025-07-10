@@ -1,34 +1,22 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
+#include <cstring>
 
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// --- HELPER FUNCTIONS FOR ENDIANNESS ---
-// The inverter sends data in Big-Endian format. The ESP32 is Little-Endian.
-// These functions swap the byte order to correctly interpret the numbers.
-
-// Swaps a 16-bit unsigned integer (equivalent to ntohs)
-uint16_t swap_uint16(uint16_t val) {
-  return (val << 8) | (val >> 8);
+// --- Byte Swap Helpers (Inverter is Big Endian, ESP is Little Endian) ---
+uint16_t LuxpowerSNAComponent::swap_uint16(uint16_t val) { return (val << 8) | (val >> 8); }
+uint32_t LuxpowerSNAComponent::swap_uint32(uint32_t val) {
+  return ((val << 24) & 0xFF000000) | ((val << 8) & 0x00FF0000) | ((val >> 8) & 0x0000FF00) | ((val >> 24) & 0x000000FF);
 }
-
-// Swaps a 32-bit unsigned integer (equivalent to ntohl)
-uint32_t swap_uint32(uint32_t val) {
-  return ((val << 24) & 0xFF000000) |
-         ((val <<  8) & 0x00FF0000) |
-         ((val >>  8) & 0x0000FF00) |
-         ((val >> 24) & 0x000000FF);
-}
-
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA...");
   this->tcp_client_ = new AsyncClient();
 
-  // --- TCP Client Event Handlers ---
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
     ESP_LOGD(TAG, "Received %d bytes of data.", len);
     this->handle_response_(static_cast<uint8_t *>(data), len);
@@ -42,12 +30,10 @@ void LuxpowerSNAComponent::setup() {
 
   this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
     ESP_LOGW(TAG, "Connection error: %s", client->errorToString(error));
+    client->close();
   });
 
-  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "Disconnected from host.");
-  });
-
+  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) { ESP_LOGD(TAG, "Disconnected from host."); });
   this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
     ESP_LOGW(TAG, "Connection timeout.");
     client->close();
@@ -71,29 +57,17 @@ void LuxpowerSNAComponent::update() {
 }
 
 void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
-  // This is the known-good request format for Luxpower inverters
-  uint8_t request_packet[29] = {
-    0x55, 0xAA, 0x01, 0x00, 0x1D, 0x00, 0x01, 0x10, 
-    'S', 'E', 'R', 'I', 'A', 'L', 'D', 'O', 'N', 'G', // Placeholder for Dongle Serial (10 bytes)
-    0x05, 0x00, // Data Length (5)
-    0x02,       // Device Function
-    0x00,       // Register Start
-    0x28, 0x00, // Number of registers (40)
-    0x00, 0x00, 0x00, 0x00, 0x00 // Padding
-  };
+  uint8_t pkt[29] = {0xAA, 0x55, 0x12, 0x00, 0x01, 0xC2, 0x14};
+  memcpy(pkt + 7, this->dongle_serial_.c_str(), 10);
+  pkt[17] = bank;
+  pkt[18] = 0x00;
+  memcpy(pkt + 19, this->inverter_serial_.c_str(), 10);
+  uint16_t crc = calculate_crc_(pkt + 2, 25);
+  pkt[27] = crc & 0xFF;
+  pkt[28] = crc >> 8;
 
-  // Populate the request with our specific data
-  strncpy(reinterpret_cast<char*>(&request_packet[8]), this->dongle_serial_.c_str(), 10);
-  request_packet[21] = bank; // Set the bank (0, 40, or 80)
-  
-  // Calculate CRC and append it to the packet
-  uint16_t crc = this->calculate_crc_(request_packet, 27);
-  request_packet[27] = crc & 0xFF;
-  request_packet[28] = (crc >> 8) & 0xFF;
-
-  ESP_LOGD(TAG, "Sending data request (%d bytes)...", sizeof(request_packet));
-  if (this->tcp_client_->space() > sizeof(request_packet)) {
-    this->tcp_client_->add(reinterpret_cast<const char *>(request_packet), sizeof(request_packet));
+  if (this->tcp_client_->space() > sizeof(pkt)) {
+    this->tcp_client_->add(reinterpret_cast<const char *>(pkt), sizeof(pkt));
     this->tcp_client_->send();
   } else {
     ESP_LOGW(TAG, "Not enough space in TCP buffer to send request.");
@@ -101,138 +75,139 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   }
 }
 
-
 void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length) {
-  if (length < sizeof(LuxHeader) + sizeof(LuxTranslatedData)) {
-    ESP_LOGW(TAG, "Received packet is too short. Length: %d", length);
+  const uint16_t RESPONSE_HEADER_SIZE = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
+  if (length < RESPONSE_HEADER_SIZE) {
+    ESP_LOGW(TAG, "Packet too small for headers. Length: %d", length);
     return;
   }
 
-  const LuxHeader *header = reinterpret_cast<const LuxHeader *>(buffer);
-  const LuxTranslatedData *translated_data = reinterpret_cast<const LuxTranslatedData *>(&buffer[sizeof(LuxHeader)]);
-  
-  if (header->prefix != 0xAA55 || header->function != 0xC2 || translated_data->deviceFunction != 0x04) {
-    ESP_LOGW(TAG, "Invalid packet header/function. Prefix: 0x%X, Func: 0x%X, DevFunc: 0x%X",
-             header->prefix, header->function, translated_data->deviceFunction);
+  LuxHeader header;
+  LuxTranslatedData trans;
+  memcpy(&header, buffer, sizeof(LuxHeader));
+  memcpy(&trans, buffer + sizeof(LuxHeader), sizeof(LuxTranslatedData));
+
+  // The inverter sends big-endian data, so we must swap bytes for ESP (little-endian)
+  uint16_t prefix = swap_uint16(header.prefix);
+  uint16_t reg_start = swap_uint16(trans.registerStart);
+
+  if (prefix != 0xAA55 || header.function != 0xC2 || trans.deviceFunction != 0x04) {
+    ESP_LOGW(TAG, "Invalid header/function. Prefix: 0x%X, Func: 0x%X, DevFunc: 0x%X", prefix, header.function, trans.deviceFunction);
     return;
   }
 
-  // Publish inverter serial number once
   static bool serial_published = false;
   if (!serial_published) {
-    std::string inv_serial(translated_data->serialNumber, 10);
+    std::string inv_serial(trans.serialNumber, 10);
     publish_state_("inverter_serial", inv_serial);
     serial_published = true;
   }
 
-  uint16_t register_start = swap_uint16(translated_data->registerStart);
-  const uint8_t *data_ptr = &buffer[sizeof(LuxHeader) + sizeof(LuxTranslatedData)];
+  const uint8_t *data_ptr = buffer + RESPONSE_HEADER_SIZE;
+  size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2; // Subtract 2 for CRC
 
-  if (register_start == 0) {
-    const LuxLogDataRawSection1 *data_sec1 = reinterpret_cast<const LuxLogDataRawSection1 *>(data_ptr);
-    publish_state_("pv1_voltage", swap_uint16(data_sec1->pv1_voltage) / 10.0f);
-    publish_state_("pv2_voltage", swap_uint16(data_sec1->pv2_voltage) / 10.0f);
-    publish_state_("pv3_voltage", swap_uint16(data_sec1->pv3_voltage) / 10.0f);
-    publish_state_("battery_voltage", swap_uint16(data_sec1->battery_voltage) / 10.0f);
-    publish_state_("soc", data_sec1->soc);
-    publish_state_("soh", data_sec1->soh);
-    publish_state_("pv1_power", swap_uint16(data_sec1->pv1_power));
-    publish_state_("pv2_power", swap_uint16(data_sec1->pv2_power));
-    publish_state_("pv3_power", swap_uint16(data_sec1->pv3_power));
-    publish_state_("charge_power", swap_uint16(data_sec1->charge_power));
-    publish_state_("discharge_power", swap_uint16(data_sec1->discharge_power));
-    publish_state_("inverter_power", swap_uint16(data_sec1->activeInverter_power));
-    publish_state_("power_to_grid", swap_uint16(data_sec1->power_to_grid));
-    publish_state_("power_from_grid", swap_uint16(data_sec1->power_from_grid));
-    publish_state_("grid_voltage_r", swap_uint16(data_sec1->voltage_ac_r) / 10.0f);
-    publish_state_("grid_frequency", swap_uint16(data_sec1->frequency_grid) / 100.0f);
-    publish_state_("eps_active_power", swap_uint16(data_sec1->active_eps_power));
-    publish_state_("bus1_voltage", swap_uint16(data_sec1->bus1_voltage) / 10.0f);
-    publish_state_("pv1_energy_today", swap_uint16(data_sec1->pv1_energy_today) / 100.0f);
-    publish_state_("pv2_energy_today", swap_uint16(data_sec1->pv2_energy_today) / 100.0f);
-    publish_state_("pv3_energy_today", swap_uint16(data_sec1->pv3_energy_today) / 100.0f);
-    publish_state_("inverter_energy_today", swap_uint16(data_sec1->activeInverter_energy_today) / 100.0f);
-    publish_state_("charging_today", swap_uint16(data_sec1->charging_today) / 100.0f);
-    publish_state_("discharging_today", swap_uint16(data_sec1->discharging_today) / 100.0f);
-    publish_state_("eps_today", swap_uint16(data_sec1->eps_today) / 100.0f);
-    publish_state_("exported_today", swap_uint16(data_sec1->exported_today) / 100.0f);
-    publish_state_("grid_today", swap_uint16(data_sec1->grid_today) / 100.0f);
+  if (reg_start == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
+    const auto *raw = reinterpret_cast<const LuxLogDataRawSection1 *>(data_ptr);
+    publish_state_("pv1_voltage", swap_uint16(raw->pv1_voltage) / 10.0f);
+    publish_state_("pv2_voltage", swap_uint16(raw->pv2_voltage) / 10.0f);
+    publish_state_("pv3_voltage", swap_uint16(raw->pv3_voltage) / 10.0f);
+    publish_state_("battery_voltage", swap_uint16(raw->battery_voltage) / 10.0f);
+    publish_state_("soc", (float)raw->soc);
+    publish_state_("soh", (float)raw->soh);
+    publish_state_("pv1_power", (float)swap_uint16(raw->pv1_power));
+    publish_state_("pv2_power", (float)swap_uint16(raw->pv2_power));
+    publish_state_("pv3_power", (float)swap_uint16(raw->pv3_power));
+    publish_state_("charge_power", (float)swap_uint16(raw->charge_power));
+    publish_state_("discharge_power", (float)swap_uint16(raw->discharge_power));
+    publish_state_("inverter_power", (float)swap_uint16(raw->activeInverter_power));
+    publish_state_("power_to_grid", (float)swap_uint16(raw->power_to_grid));
+    publish_state_("power_from_grid", (float)swap_uint16(raw->power_from_grid));
+    publish_state_("grid_voltage_r", swap_uint16(raw->voltage_ac_r) / 10.0f);
+    publish_state_("grid_voltage_s", swap_uint16(raw->voltage_ac_s) / 10.0f);
+    publish_state_("grid_voltage_t", swap_uint16(raw->voltage_ac_t) / 10.0f);
+    publish_state_("grid_frequency", swap_uint16(raw->frequency_grid) / 100.0f);
+    publish_state_("power_factor", swap_uint16(raw->grid_power_factor) / 1000.0f);
+    publish_state_("eps_voltage_r", swap_uint16(raw->voltage_eps_r) / 10.0f);
+    publish_state_("eps_voltage_s", swap_uint16(raw->voltage_eps_s) / 10.0f);
+    publish_state_("eps_voltage_t", swap_uint16(raw->voltage_eps_t) / 10.0f);
+    publish_state_("eps_frequency", swap_uint16(raw->frequency_eps) / 100.0f);
+    publish_state_("eps_active_power", (float)swap_uint16(raw->active_eps_power));
+    publish_state_("eps_apparent_power", (float)swap_uint16(raw->apparent_eps_power));
+    publish_state_("bus1_voltage", swap_uint16(raw->bus1_voltage) / 10.0f);
+    publish_state_("bus2_voltage", swap_uint16(raw->bus2_voltage) / 10.0f);
+    publish_state_("pv1_energy_today", swap_uint16(raw->pv1_energy_today) / 10.0f);
+    publish_state_("pv2_energy_today", swap_uint16(raw->pv2_energy_today) / 10.0f);
+    publish_state_("pv3_energy_today", swap_uint16(raw->pv3_energy_today) / 10.0f);
+    publish_state_("inverter_energy_today", swap_uint16(raw->activeInverter_energy_today) / 10.0f);
+    publish_state_("ac_charging_today", swap_uint16(raw->ac_charging_today) / 10.0f);
+    publish_state_("charging_today", swap_uint16(raw->charging_today) / 10.0f);
+    publish_state_("discharging_today", swap_uint16(raw->discharging_today) / 10.0f);
+    publish_state_("eps_today", swap_uint16(raw->eps_today) / 10.0f);
+    publish_state_("exported_today", swap_uint16(raw->exported_today) / 10.0f);
+    publish_state_("grid_today", swap_uint16(raw->grid_today) / 10.0f);
 
-  } else if (register_start == 40) {
-    const LuxLogDataRawSection2 *data_sec2 = reinterpret_cast<const LuxLogDataRawSection2 *>(data_ptr);
-    publish_state_("total_pv1_energy", swap_uint32(data_sec2->e_pv_1_all) / 10.0f);
-    publish_state_("total_pv2_energy", swap_uint32(data_sec2->e_pv_2_all) / 10.0f);
-    publish_state_("total_pv3_energy", swap_uint32(data_sec2->e_pv_3_all) / 10.0f);
-    publish_state_("total_inverter_output", swap_uint32(data_sec2->e_inv_all) / 10.0f);
-    publish_state_("total_charged", swap_uint32(data_sec2->e_chg_all) / 10.0f);
-    publish_state_("total_discharged", swap_uint32(data_sec2->e_dischg_all) / 10.0f);
-    publish_state_("total_eps_energy", swap_uint32(data_sec2->e_eps_all) / 10.0f);
-    publish_state_("total_exported", swap_uint32(data_sec2->e_to_grid_all) / 10.0f);
-    publish_state_("total_imported", swap_uint32(data_sec2->e_to_user_all) / 10.0f);
-    publish_state_("temp_inner", swap_uint16(data_sec2->t_inner) / 10.0f);
-    publish_state_("temp_radiator", swap_uint16(data_sec2->t_rad_1) / 10.0f);
-    publish_state_("temp_battery", swap_uint16(data_sec2->t_bat) / 10.0f);
-    publish_state_("uptime", swap_uint32(data_sec2->uptime));
+  } else if (reg_start == 40 && data_payload_length >= sizeof(LuxLogDataRawSection2)) {
+    const auto *raw = reinterpret_cast<const LuxLogDataRawSection2 *>(data_ptr);
+    publish_state_("total_pv1_energy", swap_uint32(raw->e_pv_1_all) / 10.0f);
+    publish_state_("total_pv2_energy", swap_uint32(raw->e_pv_2_all) / 10.0f);
+    publish_state_("total_pv3_energy", swap_uint32(raw->e_pv_3_all) / 10.0f);
+    publish_state_("total_inverter_output", swap_uint32(raw->e_inv_all) / 10.0f);
+    publish_state_("total_recharge_energy", swap_uint32(raw->e_rec_all) / 10.0f);
+    publish_state_("total_charged", swap_uint32(raw->e_chg_all) / 10.0f);
+    publish_state_("total_discharged", swap_uint32(raw->e_dischg_all) / 10.0f);
+    publish_state_("total_eps_energy", swap_uint32(raw->e_eps_all) / 10.0f);
+    publish_state_("total_exported", swap_uint32(raw->e_to_grid_all) / 10.0f);
+    publish_state_("total_imported", swap_uint32(raw->e_to_user_all) / 10.0f);
+    publish_state_("temp_inner", swap_uint16(raw->t_inner) / 10.0f);
+    publish_state_("temp_radiator", swap_uint16(raw->t_rad_1) / 10.0f);
+    publish_state_("temp_radiator2", swap_uint16(raw->t_rad_2) / 10.0f);
+    publish_state_("temp_battery", swap_uint16(raw->t_bat) / 10.0f);
+    publish_state_("uptime", (float)swap_uint32(raw->uptime));
 
-  } else if (register_start == 80) {
-    const LuxLogDataRawSection3 *data_sec3 = reinterpret_cast<const LuxLogDataRawSection3 *>(data_ptr);
-    publish_state_("max_charge_current", swap_uint16(data_sec3->max_chg_curr) / 100.0f);
-    publish_state_("max_discharge_current", swap_uint16(data_sec3->max_dischg_curr) / 100.0f);
-    publish_state_("charge_voltage_ref", swap_uint16(data_sec3->charge_volt_ref) / 10.0f);
-    publish_state_("discharge_cutoff_voltage", swap_uint16(data_sec3->dischg_cut_volt) / 10.0f);
-    publish_state_("battery_current", swap_uint16(data_sec3->bat_current) / 100.0f);
-    publish_state_("battery_count", swap_uint16(data_sec3->bat_count));
-    publish_state_("battery_capacity", swap_uint16(data_sec3->bat_capacity));
-    publish_state_("max_cell_voltage", swap_uint16(data_sec3->max_cell_volt) / 1000.0f);
-    publish_state_("min_cell_voltage", swap_uint16(data_sec3->min_cell_volt) / 1000.0f);
-    publish_state_("max_cell_temp", swap_uint16(data_sec3->max_cell_temp) / 10.0f);
-    publish_state_("min_cell_temp", swap_uint16(data_sec3->min_cell_temp) / 10.0f);
-    publish_state_("cycle_count", swap_uint16(data_sec3->bat_cycle_count));
+  } else if (reg_start == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
+    const auto *raw = reinterpret_cast<const LuxLogDataRawSection3 *>(data_ptr);
+    publish_state_("max_charge_current", swap_uint16(raw->max_chg_curr) / 100.0f);
+    publish_state_("max_discharge_current", swap_uint16(raw->max_dischg_curr) / 100.0f);
+    publish_state_("charge_voltage_ref", swap_uint16(raw->charge_volt_ref) / 10.0f);
+    publish_state_("discharge_cutoff_voltage", swap_uint16(raw->dischg_cut_volt) / 10.0f);
+    publish_state_("battery_current", swap_uint16(raw->bat_current) / 100.0f);
+    publish_state_("battery_count", (float)swap_uint16(raw->bat_count));
+    publish_state_("battery_capacity", (float)swap_uint16(raw->bat_capacity));
+    publish_state_("battery_status_inv", (float)swap_uint16(raw->bat_status_inv));
+    publish_state_("max_cell_voltage", swap_uint16(raw->max_cell_volt) / 1000.0f);
+    publish_state_("min_cell_voltage", swap_uint16(raw->min_cell_volt) / 1000.0f);
+    publish_state_("max_cell_temp", swap_uint16(raw->max_cell_temp) / 10.0f);
+    publish_state_("min_cell_temp", swap_uint16(raw->min_cell_temp) / 10.0f);
+    publish_state_("cycle_count", (float)swap_uint16(raw->bat_cycle_count));
   }
 
   // Cycle to the next bank for the next update
-  if (this->next_bank_to_request_ == 0) {
-    this->next_bank_to_request_ = 40;
-  } else if (this->next_bank_to_request_ == 40) {
-    this->next_bank_to_request_ = 80;
-  } else {
-    this->next_bank_to_request_ = 0;
-  }
+  if (this->next_bank_to_request_ == 0) this->next_bank_to_request_ = 40;
+  else if (this->next_bank_to_request_ == 40) this->next_bank_to_request_ = 80;
+  else this->next_bank_to_request_ = 0;
 }
-
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
-  for (size_t i = 0; i < len; i++) {
-    crc ^= data[i];
-    for (int j = 0; j < 8; j++) {
-      if (crc & 0x0001) {
-        crc = (crc >> 1) ^ 0xA001;
-      } else {
-        crc >>= 1;
-      }
-    }
+  while (len--) {
+    crc ^= *data++;
+    for (uint8_t i = 0; i < 8; ++i)
+      crc = (crc >> 1) ^ (crc & 1 ? 0xA001 : 0);
   }
   return crc;
 }
 
 void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
-  auto it = this->sensors_.find(key);
-  if (it != this->sensors_.end()) {
-    auto *sensor = dynamic_cast<sensor::Sensor*>(it->second);
-    if (sensor) {
-      sensor->publish_state(value);
-    }
+  auto it = this->float_sensors_.find(key);
+  if (it != this->float_sensors_.end()) {
+    it->second->publish_state(value);
   }
 }
 
 void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
-  auto it = this->sensors_.find(key);
-  if (it != this->sensors_.end()) {
-    auto *text_sensor = dynamic_cast<text_sensor::TextSensor*>(it->second);
-    if (text_sensor) {
-      text_sensor->publish_state(value);
-    }
+  auto it = this->string_sensors_.find(key);
+  if (it != this->string_sensors_.end()) {
+    it->second->publish_state(value);
   }
 }
 
