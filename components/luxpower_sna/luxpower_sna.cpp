@@ -1,11 +1,21 @@
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
 #include <cstring>
+#include <queue>
+#include <utility>
+
+#define PUBLISH_DELAY_MS 50  // Adjust this value to slow down/speed up publishing
+
 
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
+// Inside your class (LuxpowerSNAComponent):
+std::queue<std::pair<std::string, float>> float_publish_queue_;
+std::queue<std::pair<std::string, std::string>> string_publish_queue_;
+bool float_publishing_ = false;
+bool string_publishing_ = false;
 
 // --- Helper to log byte arrays in HEX format ---
 void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
@@ -220,7 +230,7 @@ uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   }
   return crc;
 }
-
+/*
 void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
   auto it = this->float_sensors_.find(key);
   if (it != this->float_sensors_.end()) {
@@ -234,6 +244,23 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::str
     it->second->publish_state(value);
   }
 }
+*/
+// Queued float publish
+void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
+  float_publish_queue_.emplace(key, value);
+  if (!float_publishing_) {
+    float_publishing_ = true;
+    process_next_float_();
+  }
+}
 
+// Queued string publish
+void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
+  string_publish_queue_.emplace(key, value);
+  if (!string_publishing_) {
+    string_publishing_ = true;
+    process_next_string_();
+  }
+  
 }  // namespace luxpower_sna
 }  // namespace esphome
