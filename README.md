@@ -1,4 +1,6 @@
 NOTED: I AM TO REVISE ENTITY NAME TO FULLY MATCH WITH @GuyBW team, so you can test, I will make example yaml and when the revision be fully matched!
+====================================
+
 To help anyone run a LuxPower logger from a remote site and publish data to a Home Assistant server via MQTT, I’ve started working on a solution based on insights from the excellent LuxPython_DEV project, which provides a Python-based integration for Home Assistant.
 While that integration works well, it requires users to open a port and configure port forwarding to the WiFi dongle on the remote router. This setup might be fine in some countries, but in parts of Vietnam—where ISPs often assign non-public (local) WAN IPs—remote access becomes impossible.
 As a first milestone, I now have a working ESP32-based LuxPower logger using ESPHome firmware. It supports read-only mode and can expose almost all available sensors from the LuxPower Integration.
