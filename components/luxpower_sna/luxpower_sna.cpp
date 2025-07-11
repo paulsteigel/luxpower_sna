@@ -4,40 +4,36 @@
 #include <queue>
 #include <utility>
 
-#define PUBLISH_DELAY_MS 50  // Adjust this value to slow down/speed up publishing
-
+#define PUBLISH_DELAY_MS 50
 
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// --- Helper to log byte arrays in HEX format ---
-void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
-  if (len == 0) {
-    return;
-  }
+void LuxpowerSNAComponent::log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
+  if (len == 0) return;
   char str[len * 3 + 1];
   for (size_t i = 0; i < len; i++) {
     sprintf(str + i * 3, "%02X ", buffer[i]);
   }
-  str[len * 3 - 1] = '\0'; // Remove last space
+  str[len * 3 - 1] = '\0';
   ESP_LOGD(TAG, "%s (%d bytes): %s", title, len, str);
 }
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up LuxpowerSNA...");
   this->tcp_client_ = new AsyncClient();
-  this->tcp_client_->setRxTimeout(15000); // 15 second timeout
+  this->tcp_client_->setRxTimeout(15000);
 
   this->tcp_client_->onData([this](void *arg, AsyncClient *client, void *data, size_t len) {
-    log_hex_buffer("<- Received", static_cast<uint8_t *>(data), len);
+    this->log_hex_buffer("<- Received", static_cast<uint8_t *>(data), len);
     this->handle_response_(static_cast<uint8_t *>(data), len);
     client->close();
   });
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "Successfully connected. Sending request for bank %d...", this->next_bank_to_request_);
+    ESP_LOGD(TAG, "Connected. Requesting bank %d", this->next_bank_to_request_);
     this->request_bank_(this->next_bank_to_request_);
   });
 
@@ -46,23 +42,26 @@ void LuxpowerSNAComponent::setup() {
     client->close();
   });
 
-  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) { ESP_LOGD(TAG, "Disconnected from host."); });
+  this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) { 
+    ESP_LOGD(TAG, "Disconnected"); 
+  });
+  
   this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
-    ESP_LOGW(TAG, "Connection timeout after %d ms.", time);
+    ESP_LOGW(TAG, "Timeout after %d ms", time);
     client->close();
   });
 }
 
 void LuxpowerSNAComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "Luxpower SNA Component:");
+  ESP_LOGCONFIG(TAG, "Luxpower SNA:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", this->inverter_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Dongle: %s", this->dongle_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter: %s", this->inverter_serial_.c_str());
 }
 
 void LuxpowerSNAComponent::update() {
   if (this->tcp_client_->connected()) {
-    ESP_LOGD(TAG, "Update requested, but a connection is already in progress. Skipping.");
+    ESP_LOGD(TAG, "Connection in progress, skipping update");
     return;
   }
   ESP_LOGD(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
@@ -79,13 +78,13 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   pkt[27] = crc & 0xFF;
   pkt[28] = crc >> 8;
 
-  log_hex_buffer("-> Sending Request", pkt, sizeof(pkt));
+  log_hex_buffer("-> Request", pkt, sizeof(pkt));
 
   if (this->tcp_client_->space() > sizeof(pkt)) {
     this->tcp_client_->add(reinterpret_cast<const char *>(pkt), sizeof(pkt));
     this->tcp_client_->send();
   } else {
-    ESP_LOGW(TAG, "Not enough space in TCP buffer to send request.");
+    ESP_LOGW(TAG, "TCP buffer full");
     this->tcp_client_->close();
   }
 }
@@ -93,7 +92,7 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
 void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length) {
   const uint16_t RESPONSE_HEADER_SIZE = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
   if (length < RESPONSE_HEADER_SIZE) {
-    ESP_LOGW(TAG, "Packet too small for headers. Length: %d", length);
+    ESP_LOGW(TAG, "Response too small: %d bytes", length);
     return;
   }
 
@@ -102,16 +101,13 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   memcpy(&header, buffer, sizeof(LuxHeader));
   memcpy(&trans, buffer + sizeof(LuxHeader), sizeof(LuxTranslatedData));
 
-  // *********************************************************************************
-  // *** CRITICAL FIX: Check the value directly. The little-endian CPU handles the
-  // *** byte order correctly when memcpy copies `A1 1A` into the uint16_t.
-  // *********************************************************************************
   if (header.prefix != 0x1AA1 || header.function != 0xC2 || trans.deviceFunction != 0x04) {
-    ESP_LOGW(TAG, "Invalid header/function. Prefix: 0x%04X, Func: 0x%02X, DevFunc: 0x%02X", header.prefix, header.function, trans.deviceFunction);
+    ESP_LOGW(TAG, "Invalid header: prefix=0x%04X, func=0x%02X, devFunc=0x%02X", 
+             header.prefix, header.function, trans.deviceFunction);
     return;
   }
   
-  ESP_LOGD(TAG, "✓ Decoded Header OK. Register Bank: %d", trans.registerStart);
+  ESP_LOGD(TAG, "Processing bank %d", trans.registerStart);
 
   static bool serial_published = false;
   if (!serial_published) {
@@ -121,13 +117,13 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   }
 
   const uint8_t *data_ptr = buffer + RESPONSE_HEADER_SIZE;
-  size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2; // Subtract 2 for CRC
+  size_t data_payload_length = length - RESPONSE_HEADER_SIZE - 2;
 
   if (trans.registerStart == 0 && data_payload_length >= sizeof(LuxLogDataRawSection1)) {
-    ESP_LOGD(TAG, "Parsing data for bank 0...");
     LuxLogDataRawSection1 raw;
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection1));
     
+    // Section 1: Bank 0
     publish_state_("pv1_voltage", raw.pv1_voltage / 10.0f);
     publish_state_("pv2_voltage", raw.pv2_voltage / 10.0f);
     publish_state_("pv3_voltage", raw.pv3_voltage / 10.0f);
@@ -167,10 +163,10 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("grid_today", raw.grid_today / 10.0f);
 
   } else if (trans.registerStart == 40 && data_payload_length >= sizeof(LuxLogDataRawSection2)) {
-    ESP_LOGD(TAG, "Parsing data for bank 40...");
     LuxLogDataRawSection2 raw;
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection2));
     
+    // Section 2: Bank 40
     publish_state_("total_pv1_energy", raw.e_pv_1_all / 10.0f);
     publish_state_("total_pv2_energy", raw.e_pv_2_all / 10.0f);
     publish_state_("total_pv3_energy", raw.e_pv_3_all / 10.0f);
@@ -188,10 +184,10 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("uptime", (float)raw.uptime);
 
   } else if (trans.registerStart == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
-    ESP_LOGD(TAG, "Parsing data for bank 80...");
     LuxLogDataRawSection3 raw;
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection3));
 
+    // Section 3: Bank 80
     publish_state_("max_charge_current", raw.max_chg_curr / 100.0f);
     publish_state_("max_discharge_current", raw.max_dischg_curr / 100.0f);
     publish_state_("charge_voltage_ref", raw.charge_volt_ref / 10.0f);
@@ -200,19 +196,38 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("battery_count", (float)raw.bat_count);
     publish_state_("battery_capacity", (float)raw.bat_capacity);
     publish_state_("battery_status_inv", (float)raw.bat_status_inv);
-    publish_state_("max_cell_voltage", raw.max_cell_volt / 10.0f);
-    publish_state_("min_cell_voltage", raw.min_cell_volt / 10.0f);
+    publish_state_("max_cell_voltage", raw.max_cell_volt / 1000.0f);
+    publish_state_("min_cell_voltage", raw.min_cell_volt / 1000.0f);
     publish_state_("max_cell_temp", raw.max_cell_temp / 10.0f);
     publish_state_("min_cell_temp", raw.min_cell_temp / 10.0f);
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
+    publish_state_("p_load2", (float)raw.p_load2);
+
+  } else if (trans.registerStart == 120 && data_payload_length >= sizeof(LuxLogDataRawSection4)) {
+    LuxLogDataRawSection4 raw;
+    memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection4));
+    
+    // Section 4: Bank 120
+    publish_state_("gen_input_volt", raw.gen_input_volt / 10.0f);
+    publish_state_("gen_input_freq", raw.gen_input_freq / 100.0f);
+    publish_state_("gen_power_watt", (float)raw.gen_power_watt);
+    publish_state_("gen_power_day", raw.gen_power_day / 10.0f);
+    publish_state_("gen_power_all", raw.gen_power_all / 10.0f);
+    publish_state_("eps_L1_volt", raw.eps_L1_volt / 10.0f);
+    publish_state_("eps_L2_volt", raw.eps_L2_volt / 10.0f);
+    publish_state_("eps_L1_watt", (float)raw.eps_L1_watt);
+    publish_state_("eps_L2_watt", (float)raw.eps_L2_watt);
+
   } else {
-    ESP_LOGW(TAG, "Unrecognized register %d or insufficient data length %d for parsing", trans.registerStart, data_payload_length);
-    return; // Do not advance to next bank if parsing failed
+    ESP_LOGW(TAG, "Unrecognized bank %d or data too small (%d bytes)", 
+             trans.registerStart, data_payload_length);
+    return;
   }
 
-  // Cycle to the next bank for the next successful update
+  // Cycle through banks: 0 → 40 → 80 → 120 → 0
   if (this->next_bank_to_request_ == 0) this->next_bank_to_request_ = 40;
   else if (this->next_bank_to_request_ == 40) this->next_bank_to_request_ = 80;
+  else if (this->next_bank_to_request_ == 80) this->next_bank_to_request_ = 120;
   else this->next_bank_to_request_ = 0;
 }
 
@@ -225,22 +240,7 @@ uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   }
   return crc;
 }
-/*
-void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
-  auto it = this->float_sensors_.find(key);
-  if (it != this->float_sensors_.end()) {
-    it->second->publish_state(value);
-  }
-}
 
-void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
-  auto it = this->string_sensors_.find(key);
-  if (it != this->string_sensors_.end()) {
-    it->second->publish_state(value);
-  }
-}
-*/
-// Queued float publish
 void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
   float_publish_queue_.emplace(key, value);
   if (!float_publishing_) {
@@ -249,7 +249,6 @@ void LuxpowerSNAComponent::publish_state_(const std::string &key, float value) {
   }
 }
 
-// Queued string publish
 void LuxpowerSNAComponent::publish_state_(const std::string &key, const std::string &value) {
   string_publish_queue_.emplace(key, value);
   if (!string_publishing_) {
