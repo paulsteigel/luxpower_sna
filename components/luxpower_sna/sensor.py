@@ -1,4 +1,3 @@
-# components/luxpower_sna/sensor.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
@@ -18,17 +17,13 @@ from esphome.const import (
     UNIT_KILOWATT_HOURS,
     UNIT_PERCENT,
     UNIT_VOLT,
-    UNIT_MILLIVOLT,
     UNIT_WATT,
     CONF_UPDATE_INTERVAL
-    # UNIT_VOLT_AMPERE has been removed from here
 )
 
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
-# --- Map from YAML keys to C++ names ---
 YAML_TO_C_NAMES = {
-    # Section 1: Real-time Values
     "pv1_voltage": "pv1_voltage", "pv2_voltage": "pv2_voltage", "pv3_voltage": "pv3_voltage",
     "battery_voltage": "battery_voltage", "soc": "soc", "soh": "soh",
     "pv1_power": "pv1_power", "pv2_power": "pv2_power", "pv3_power": "pv3_power",
@@ -40,33 +35,30 @@ YAML_TO_C_NAMES = {
     "eps_frequency": "eps_frequency",
     "eps_active_power": "eps_active_power", "eps_apparent_power": "eps_apparent_power",
     "bus1_voltage": "bus1_voltage", "bus2_voltage": "bus2_voltage",
-
-    # Section 1: Daily Energy
     "pv1_energy_today": "pv1_energy_today", "pv2_energy_today": "pv2_energy_today", "pv3_energy_today": "pv3_energy_today",
     "inverter_energy_today": "inverter_energy_today", "ac_charging_today": "ac_charging_today",
     "charging_today": "charging_today", "discharging_today": "discharging_today",
     "eps_today": "eps_today", "exported_today": "exported_today", "grid_today": "grid_today",
-
-    # Section 2: Total Energy & Temps
     "total_pv1_energy": "total_pv1_energy", "total_pv2_energy": "total_pv2_energy", "total_pv3_energy": "total_pv3_energy",
     "total_inverter_output": "total_inverter_output", "total_recharge_energy": "total_recharge_energy",
     "total_charged": "total_charged", "total_discharged": "total_discharged",
     "total_eps_energy": "total_eps_energy", "total_exported": "total_exported", "total_imported": "total_imported",
     "temp_inner": "temp_inner", "temp_radiator": "temp_radiator", "temp_radiator2": "temp_radiator2",
     "temp_battery": "temp_battery", "uptime": "uptime",
-
-    # Section 3: BMS Details
     "max_charge_current": "max_charge_current", "max_discharge_current": "max_discharge_current",
     "charge_voltage_ref": "charge_voltage_ref", "discharge_cutoff_voltage": "discharge_cutoff_voltage",
     "battery_current": "battery_current", "battery_count": "battery_count",
     "battery_capacity": "battery_capacity", "battery_status_inv": "battery_status_inv",
     "max_cell_voltage": "max_cell_voltage", "min_cell_voltage": "min_cell_voltage",
     "max_cell_temp": "max_cell_temp", "min_cell_temp": "min_cell_temp", "cycle_count": "cycle_count",
+    "p_load2": "pload2",
+    "gen_input_volt": "gen_input_volt", "gen_input_freq": "gen_input_freq",
+    "gen_power_watt": "gen_power_watt", "gen_power_day": "gen_power_day", "gen_power_all": "gen_power_all",
+    "eps_L1_volt": "eps_L1_volt", "eps_L2_volt": "eps_L2_volt",
+    "eps_L1_watt": "eps_L1_watt", "eps_L2_watt": "eps_L2_watt"
 }
 
-# --- A dictionary that defines all possible sensors ---
 SENSOR_TYPES = {
-    # Section 1: Real-time
     "pv1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "pv2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "pv3_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
@@ -91,16 +83,9 @@ SENSOR_TYPES = {
     "eps_voltage_t": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "eps_frequency": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
     "eps_active_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
-    "eps_apparent_power": sensor.sensor_schema(
-        unit_of_measurement="VA",  # <-- THIS IS THE FIX
-        state_class=STATE_CLASS_MEASUREMENT, 
-        accuracy_decimals=0, 
-        icon="mdi:power-plug-off"
-    ),
+    "eps_apparent_power": sensor.sensor_schema(unit_of_measurement="VA", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
     "bus1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:sine-wave"),
     "bus2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:sine-wave"),
-    
-    # Section 1: Daily Energy
     "pv1_energy_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
     "pv2_energy_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
     "pv3_energy_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
@@ -111,8 +96,6 @@ SENSOR_TYPES = {
     "eps_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
     "exported_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
     "grid_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
-    
-    # Section 2: Totals & Temps
     "total_pv1_energy": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
     "total_pv2_energy": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
     "total_pv3_energy": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
@@ -128,8 +111,6 @@ SENSOR_TYPES = {
     "temp_radiator2": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "temp_battery": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "uptime": sensor.sensor_schema(unit_of_measurement="s", icon="mdi:timer-sand", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
-
-    # Section 3: BMS
     "max_charge_current": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
     "max_discharge_current": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
     "charge_voltage_ref": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
@@ -138,18 +119,28 @@ SENSOR_TYPES = {
     "battery_count": sensor.sensor_schema(icon="mdi:counter", accuracy_decimals=0),
     "battery_capacity": sensor.sensor_schema(unit_of_measurement="Ah", icon="mdi:battery-plus-variant", accuracy_decimals=0),
     "battery_status_inv": sensor.sensor_schema(icon="mdi:information-outline", accuracy_decimals=0),
-    "max_cell_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "min_cell_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "max_cell_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
+    "min_cell_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
     "max_cell_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "min_cell_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "cycle_count": sensor.sensor_schema(icon="mdi:battery-sync", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
+    "p_load2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "gen_input_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "gen_input_freq": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "gen_power_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "gen_power_day": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "gen_power_all": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "eps_L1_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "eps_L2_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "eps_L1_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "eps_L2_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
 }
 
 CONFIG_SCHEMA = cv.All(
     LUXPOWER_SNA_COMPONENT_SCHEMA.extend(
         {
             **{cv.Optional(key): schema for key, schema in SENSOR_TYPES.items()},
-            cv.Optional(CONF_UPDATE_INTERVAL, default="10s"): cv.update_interval,
+            cv.Optional(CONF_UPDATE_INTERVAL, default="20s"): cv.update_interval,
         }
     ),    
     cv.has_at_least_one_key(*SENSOR_TYPES.keys()),
