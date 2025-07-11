@@ -51,5 +51,13 @@ async def to_code(config):
         raise cv.Invalid("inverter_serial_number must be 10 characters long")
     # This call must match the function name in the .h file exactly.
     cg.add(var.set_inverter_serial_number(inverter_serial))
-
-    cg.add_library("ESPAsyncTCP", None)
+    
+    # Conditional library inclusion based on platform
+    if CORE.using_esp32:
+        cg.add_library("AsyncTCP", None)  # Use AsyncTCP for ESP32
+    elif CORE.using_esp8266:
+        cg.add_library("ESPAsyncTCP", None)  # Use ESPAsyncTCP for ESP8266
+    else:
+        # This case should ideally not be reached with Esphome's supported boards,
+        # but it's good practice to handle it.
+        raise EsphomeError("Unsupported platform for LuxpowerSNA component. Only ESP32 and ESP8266 are supported.")
