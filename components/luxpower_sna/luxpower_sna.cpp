@@ -196,8 +196,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("battery_count", (float)raw.bat_count);
     publish_state_("battery_capacity", (float)raw.bat_capacity);
     publish_state_("battery_status_inv", (float)raw.bat_status_inv);
-    publish_state_("max_cell_voltage", raw.max_cell_volt);
-    publish_state_("min_cell_voltage", raw.min_cell_volt);
+    publish_state_("max_cell_voltage", raw.max_cell_volt / 1000.0f);
+    publish_state_("min_cell_voltage", raw.min_cell_volt / 1000.0f);
     publish_state_("max_cell_temp", raw.max_cell_temp / 10.0f);
     publish_state_("min_cell_temp", raw.min_cell_temp / 10.0f);
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
