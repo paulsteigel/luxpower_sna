@@ -1,6 +1,7 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.core import CORE, EsphomeError # <--- This line is crucial
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["wifi"]
