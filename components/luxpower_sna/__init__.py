@@ -53,9 +53,9 @@ async def to_code(config):
     # This call must match the function name in the .h file exactly.
     cg.add(var.set_inverter_serial_number(inverter_serial))
     
-    if CORE.is_esp32 or CORE.is_libretiny:
-        # https://github.com/ESP32Async/AsyncTCP
-        cg.add_library("ESP32Async/AsyncTCP", "3.4.4")
-    elif CORE.is_esp8266:
-        # https://github.com/ESP32Async/ESPAsyncTCP
-        cg.add_library("ESP32Async/ESPAsyncTCP", "2.0.0")
+    #if CORE.is_esp32 or CORE.is_libretiny:
+    #    # https://github.com/ESP32Async/AsyncTCP
+    #    cg.add_library("ESP32Async/AsyncTCP", "3.4.4")
+    #elif CORE.is_esp8266:
+    #    # https://github.com/ESP32Async/ESPAsyncTCP
+    #    cg.add_library("ESP32Async/ESPAsyncTCP", "2.0.0")
