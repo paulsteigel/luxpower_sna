@@ -1,5 +1,7 @@
-Hi All,
-First achievement, the luxpower logger for esp32 with esphome firmware can be now ready with read only mode for almost all sensors avaiable in Luxpower Integration. To use the component, you need to define in esphome yaml config as following:
+To help anyone run a LuxPower logger from a remote site and publish data to a Home Assistant server via MQTT, I’ve started working on a solution based on insights from the excellent LuxPython_DEV project, which provides a Python-based integration for Home Assistant.
+While that integration works well, it requires users to open a port and configure port forwarding to the WiFi dongle on the remote router. This setup might be fine in some countries, but in parts of Vietnam—where ISPs often assign non-public (local) WAN IPs—remote access becomes impossible.
+As a first milestone, I now have a working ESP32-based LuxPower logger using ESPHome firmware. It supports read-only mode and can expose almost all available sensors from the LuxPower Integration.
+To use this custom component, simply add the following to your ESPHome YAML configuration:
 # External component definitions:
 external_components: # skip this line if you already have this
 ```
@@ -195,8 +197,10 @@ text_sensor:
       name: "Inverter Serial Number"
 ```
 
-Here is some image on the sensor list on my combined Esp32-S2-Lolin logger for JKBMS and Luxpower
+Here’s a snapshot of the sensor list on my combined ESP32-S2 Lolin logger for JKBMS and LuxPower:
 <img width="340" height="784" alt="image" src="https://github.com/user-attachments/assets/ed58fca8-83d4-4c9d-bacf-e270755629cc" />
-Happy using, in the coming days I will start to move button, switch, time so you can really use it to control your Luxpower as easy as the Integration created by @guybw's team. Also, I will make the lovelace card soon! Link for the component is here https://github.com/paulsteigel/luxpower_sna
-PS @guybw, many thanks for works, I learned a lot from your integration. Since this porting is not good enough and evolving but it would help anyone to run multiple luxpower over the internet without port forwarding at remote (inverter) router.
-All the best. 
+I'm excited to share that the logger is already functional in read-only mode, and it integrates almost all the sensors available in the official LuxPower Integration.
+In the coming days, I’ll begin adding support for buttons, switches, and time-based control—making it possible to fully control your LuxPower inverter just as easily as with the original Integration by @guybw's team. I also plan to design a Lovelace card to improve the Home Assistant dashboard experience.
+🔗 Component link: https://github.com/paulsteigel/luxpower_sna
+**Creadits:**
++ https://github.com/guybw/LuxPython_DEV
