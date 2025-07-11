@@ -1,7 +1,7 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.core import CORE, EsphomeError # <--- This line is crucial
+from esphome.core import CORE, coroutine_with_priority
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["wifi"]
@@ -53,12 +53,9 @@ async def to_code(config):
     # This call must match the function name in the .h file exactly.
     cg.add(var.set_inverter_serial_number(inverter_serial))
     
-    # Conditional library inclusion based on platform
-    if CORE.using_esp32:
-        cg.add_library("AsyncTCP", None)  # Use AsyncTCP for ESP32
-    elif CORE.using_esp8266:
-        cg.add_library("ESPAsyncTCP", None)  # Use ESPAsyncTCP for ESP8266
-    else:
-        # This case should ideally not be reached with Esphome's supported boards,
-        # but it's good practice to handle it.
-        raise EsphomeError("Unsupported platform for LuxpowerSNA component. Only ESP32 and ESP8266 are supported.")
+    if CORE.is_esp32 or CORE.is_libretiny:
+        # https://github.com/ESP32Async/AsyncTCP
+        cg.add_library("ESP32Async/AsyncTCP", "3.4.4")
+    elif CORE.is_esp8266:
+        # https://github.com/ESP32Async/ESPAsyncTCP
+        cg.add_library("ESP32Async/ESPAsyncTCP", "2.0.0")
