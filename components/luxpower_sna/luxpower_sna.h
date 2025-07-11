@@ -5,6 +5,7 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include <map>
 #include <string>
+#include <queue>
 
 #ifdef USE_ESP32
 #include <AsyncTCP.h>
@@ -77,6 +78,23 @@ struct LuxLogDataRawSection3 {
   int16_t  max_cell_volt; int16_t  min_cell_volt;
   int16_t  max_cell_temp; int16_t  min_cell_temp;
   uint16_t _reserved4; int16_t  bat_cycle_count;
+  uint8_t  _reserved5[14];
+  int16_t  p_load2;
+};
+
+struct LuxLogDataRawSection4 {
+  uint16_t reg120;
+  int16_t  gen_input_volt;
+  int16_t  gen_input_freq;
+  int16_t  gen_power_watt;
+  int16_t  gen_power_day;
+  int16_t  gen_power_all;
+  uint16_t reg126;
+  int16_t  eps_L1_volt;
+  int16_t  eps_L2_volt;
+  int16_t  eps_L1_watt;
+  int16_t  eps_L2_watt;
+  uint8_t  placeholder[50];
 };
 
 #pragma pack(pop)
@@ -92,7 +110,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
   void set_inverter_serial_number(const std::string &serial) { this->inverter_serial_ = serial; }
 
-  // --- Sensor Setters (called by python codegen) ---
+  // Sensor Setters
   void set_pv1_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["pv1_voltage"] = s; }
   void set_pv2_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["pv2_voltage"] = s; }
   void set_pv3_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["pv3_voltage"] = s; }
@@ -158,10 +176,19 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_max_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["max_cell_temp"] = s; }
   void set_min_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["min_cell_temp"] = s; }
   void set_cycle_count_sensor(sensor::Sensor *s) { this->float_sensors_["cycle_count"] = s; }
+  void set_pload2_sensor(sensor::Sensor *s) { this->float_sensors_["p_load2"] = s; }
   void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
+  void set_gen_input_volt_sensor(sensor::Sensor *s) { this->float_sensors_["gen_input_volt"] = s; }
+  void set_gen_input_freq_sensor(sensor::Sensor *s) { this->float_sensors_["gen_input_freq"] = s; }
+  void set_gen_power_watt_sensor(sensor::Sensor *s) { this->float_sensors_["gen_power_watt"] = s; }
+  void set_gen_power_day_sensor(sensor::Sensor *s) { this->float_sensors_["gen_power_day"] = s; }
+  void set_gen_power_all_sensor(sensor::Sensor *s) { this->float_sensors_["gen_power_all"] = s; }
+  void set_eps_L1_volt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L1_volt"] = s; }
+  void set_eps_L2_volt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L2_volt"] = s; }
+  void set_eps_L1_watt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L1_watt"] = s; }
+  void set_eps_L2_watt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L2_watt"] = s; }
 
  private:
-  // Declare the throttle helpers
   void process_next_float_();
   void process_next_string_();
   void request_bank_(uint8_t bank);
@@ -169,9 +196,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
   void publish_state_(const std::string &key, float value);
   void publish_state_(const std::string &key, const std::string &value);
-  uint16_t swap_uint16(uint16_t val);
-  uint32_t swap_uint32(uint32_t val);
-
+  void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len);
+  
   std::string host_;
   uint16_t port_;
   std::string dongle_serial_;
