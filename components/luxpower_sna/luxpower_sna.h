@@ -7,11 +7,11 @@
 #include <string>
 #include <queue>
 
-#ifdef USE_ESP32
-#include <AsyncTCP.h>
-#elif USE_ESP8266
+//#ifdef USE_ESP32
+//#include <AsyncTCP.h>
+//#elif USE_ESP8266
 #include <ESPAsyncTCP.h>
-#endif
+//#endif
 
 namespace esphome {
 namespace luxpower_sna {
