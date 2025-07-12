@@ -1,122 +1,240 @@
 substitutions:
-# +--------------------------------------+
-# name that will appear in esphome and homeassistant.
   name: luxpower
-  
+
 esphome:
   name: ${name}
 
-# +--------------------------------------+
-# | ESP32 settings                       |
-# +--------------------------------------+
-# For a stable Bluetooth connection keep the "esp-idf" framework
-esp32:
-  board: lolin_s2_mini
+# Board configuration (uncomment one)
+#esp32:
+#  board: lolin_s2_mini
+esp8266:
+  board: d1_mini
 
 external_components:
-# this one for remote firmware update but it only work on http
-#  - source: github://pr#5586
-#    components: [ http_request ]
   - source: github://paulsteigel/luxpower_sna@main
-    refresh: 0s   
+    refresh: 0s
 
 logger:
   level: DEBUG
 
-#api:
-#  reboot_timeout: 0s
-
-# If you don't want to use ESPHome's native API you can use MQQT instead.
-# In this case don't forget to remove the 'api:' section.
-mqtt:
-  broker: "your MQTT host address"
-  username: "your MQTT user"
-  password: "your password"
-  client_id: ${name}_mqtt
-  #keepalive: 
-  #  seconds: 300
-
-# In the event of problems with the WiFi network, the ESP32 will reboot every 15 minutes to try to resolve the problem.
-# If we don't want to connect the ESP32 to the WiFi network please remove the 4 lines below.
-
 wifi:
   ap:
     ssid: "ESP32S2Lolin"
-#    password: "your passwword for the hotspot if no wifi station defined"
+
 ota:
-  - platform: esphome
-    # safe_mode: false
-    on_state_change:
-      - logger.log: esphome.on_state_change
-    port: 8266
-    password: "your ota password"
-  
+  port: 8266
+  password: "your_ota_password"
+
 captive_portal:
 
-# define your packages if you want to separate different entities on different yaml
-#packages:
-
-#web_server:
-#  port: 80
-#  log: false
-#  ota: false
-
-# define the external component here
 luxpower_sna:
   id: ${name}_luxpower_hub
-  host: "your wifi dongle ip address"
-  port: "8000"
-  dongle_serial: "your wifi dongle serial"
-  inverter_serial_number: "your inverter serial"
+  host: "your_wifi_dongle_ip"
+  port: 8000
+  dongle_serial: "your_dongle_serial"
+  inverter_serial_number: "your_inverter_serial"
   update_interval: 20s
 
 sensor:
-# 3Define all the available numeric sensors
-  - platform: luxpower_sna    
+  # =====================
+  # PV Input Sensors
+  # =====================
+  - platform: luxpower_sna
     luxpower_sna_id: ${name}_luxpower_hub
     pv1_voltage:
-      name: "${name}_PV1 Voltage"
+      name: "${name} PV1 Voltage"
     pv2_voltage:
-      name: "${name}_PV2 Voltage"
-    battery_voltage:
-      name: "${name}_Battery Voltage"
-    soc:
-      name: "${name}_Battery SOC"
+      name: "${name} PV2 Voltage"
+    pv3_voltage:
+      name: "${name} PV3 Voltage"
     pv1_power:
-      name: "${name}_PV1 Power"
+      name: "${name} PV1 Power"
     pv2_power:
-      name: "${name}_PV2 Power"
-    charge_power:
-      name: "${name}_Battery Charge Power"
-    discharge_power:
-      name: "${name}_Battery Discharge Power"
-    inverter_power:
-      name: "${name}_Inverter Power"
-    power_to_grid:
-      name: "${name}_Power to Grid"
-    power_from_grid:
-      name: "${name}_Power from Grid"
-    grid_voltage_r:
-      name: "${name}_Grid Voltage R"
-    grid_frequency:
-      name: "Grid Frequency"
-    #eps_active_power:
-    #  name: "EPS Power"
-    #bus1_voltage:
-    #  name: "Bus1 Voltage"
-
-    # --- Daily Energy Totals ---
+      name: "${name} PV2 Power"
+    pv3_power:
+      name: "${name} PV3 Power"
     pv1_energy_today:
-      name: "${name}_PV1 Energy Today"
+      name: "${name} PV1 Today"
     pv2_energy_today:
-      name: "${name}_PV2 Energy Today"
+      name: "${name} PV2 Today"
+    pv3_energy_today:
+      name: "${name} PV3 Today"
+    total_pv1_energy:
+      name: "${name} PV1 Total"
+    total_pv2_energy:
+      name: "${name} PV2 Total"
+    total_pv3_energy:
+      name: "${name} PV3 Total"
+
+  # =====================
+  # Battery Sensors
+  # =====================
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    battery_voltage:
+      name: "${name} Battery Voltage"
+    soc:
+      name: "${name} Battery SOC"
+    soh:
+      name: "${name} Battery SOH"
     battery_current:
-      name: "${name}_Battery Current"
-    #battery_count:
-    #  name: "Battery Count"
+      name: "${name} Battery Current"
+    battery_flow:
+      name: "${name} Battery Flow"
+    charge_power:
+      name: "${name} Charge Power"
+    discharge_power:
+      name: "${name} Discharge Power"
+    charging_today:
+      name: "${name} Charged Today"
+    discharging_today:
+      name: "${name} Discharged Today"
+    total_charged:
+      name: "${name} Total Charged"
+    total_discharged:
+      name: "${name} Total Discharged"
+    max_charge_current:
+      name: "${name} Max Charge Current"
+    max_discharge_current:
+      name: "${name} Max Discharge Current"
+    charge_voltage_ref:
+      name: "${name} Charge Voltage Ref"
+    discharge_cutoff_voltage:
+      name: "${name} Discharge Cutoff"
     battery_capacity:
-      name: "${name}_Battery Capacity"
+      name: "${name} Battery Capacity"
     max_cell_voltage:
-      name: "${name}_Max Cell Voltage"
+      name: "${name} Max Cell Voltage"
     min_cell_voltage:
-      name: "${name}_Min Cell Voltage"
+      name: "${name} Min Cell Voltage"
+    max_cell_temp:
+      name: "${name} Max Cell Temp"
+    min_cell_temp:
+      name: "${name} Min Cell Temp"
+    cycle_count:
+      name: "${name} Cycle Count"
+
+  # =====================
+  # Grid Sensors
+  # =====================
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    grid_voltage_r:
+      name: "${name} Grid Voltage R"
+    grid_voltage_s:
+      name: "${name} Grid Voltage S"
+    grid_voltage_t:
+      name: "${name} Grid Voltage T"
+    grid_frequency:
+      name: "${name} Grid Frequency"
+    power_factor:
+      name: "${name} Power Factor"
+    power_to_grid:
+      name: "${name} To Grid"
+    power_from_grid:
+      name: "${name} From Grid"
+    grid_flow:
+      name: "${name} Grid Flow"
+    grid_today:
+      name: "${name} Grid Today"
+    exported_today:
+      name: "${name} Exported Today"
+    total_exported:
+      name: "${name} Total Exported"
+    total_imported:
+      name: "${name} Total Imported"
+
+  # =====================
+  # Inverter/System Sensors
+  # =====================
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    inverter_power:
+      name: "${name} Inverter Power"
+    activeInverter_energy_today:
+      name: "${name} Inverter Today"
+    total_inverter_output:
+      name: "${name} Inverter Total"
+    bus1_voltage:
+      name: "${name} Bus1 Voltage"
+    bus2_voltage:
+      name: "${name} Bus2 Voltage"
+    temp_inner:
+      name: "${name} Temp Inner"
+    temp_radiator:
+      name: "${name} Temp Radiator"
+    temp_radiator2:
+      name: "${name} Temp Radiator2"
+    temp_battery:
+      name: "${name} Temp Battery"
+    uptime:
+      name: "${name} Uptime"
+
+  # =====================
+  # EPS Sensors
+  # =====================
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    eps_voltage_r:
+      name: "${name} EPS Voltage R"
+    eps_voltage_s:
+      name: "${name} EPS Voltage S"
+    eps_voltage_t:
+      name: "${name} EPS Voltage T"
+    eps_frequency:
+      name: "${name} EPS Frequency"
+    eps_active_power:
+      name: "${name} EPS Active Power"
+    eps_apparent_power:
+      name: "${name} EPS Apparent Power"
+    eps_today:
+      name: "${name} EPS Today"
+    total_eps_energy:
+      name: "${name} EPS Total"
+
+  # =====================
+  # Generator Sensors
+  # =====================
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    gen_input_volt:
+      name: "${name} Gen Voltage"
+    gen_input_freq:
+      name: "${name} Gen Frequency"
+    gen_power_watt:
+      name: "${name} Gen Power"
+    gen_power_day:
+      name: "${name} Gen Today"
+    gen_power_all:
+      name: "${name} Gen Total"
+
+  # =====================
+  # Load/Consumption Sensors
+  # =====================
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    home_consumption_live:
+      name: "${name} Home Consumption Live"
+    home_consumption_daily:
+      name: "${name} Home Consumption Daily"
+    home_consumption_total:
+      name: "${name} Home Consumption Total"
+    home_consumption2:
+      name: "${name} Home Consumption 2"
+    p_load_ongrid:
+      name: "${name} Load Power On-grid"
+    e_load_day:
+      name: "${name} Load Energy Today"
+    e_load_all_l:
+      name: "${name} Total Load Energy"
+    p_load2:
+      name: "${name} Load Power 2"
+
+  # =====================
+  # Text Sensors
+  # =====================
+text_sensor:
+  - platform: luxpower_sna
+    luxpower_sna_id: ${name}_luxpower_hub
+    inverter_serial:
+      name: "${name} Serial"
