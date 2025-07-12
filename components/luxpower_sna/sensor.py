@@ -51,11 +51,22 @@ YAML_TO_C_NAMES = {
     "battery_capacity": "battery_capacity", "battery_status_inv": "battery_status_inv",
     "max_cell_voltage": "max_cell_voltage", "min_cell_voltage": "min_cell_voltage",
     "max_cell_temp": "max_cell_temp", "min_cell_temp": "min_cell_temp", "cycle_count": "cycle_count",
-    "p_load2": "pload2",
+    "p_load2": "p_load2",  # Fixed to match Arduino name
     "gen_input_volt": "gen_input_volt", "gen_input_freq": "gen_input_freq",
     "gen_power_watt": "gen_power_watt", "gen_power_day": "gen_power_day", "gen_power_all": "gen_power_all",
     "eps_L1_volt": "eps_L1_volt", "eps_L2_volt": "eps_L2_volt",
-    "eps_L1_watt": "eps_L1_watt", "eps_L2_watt": "eps_L2_watt"
+    "eps_L1_watt": "eps_L1_watt", "eps_L2_watt": "eps_L2_watt",
+    # New calculated fields
+    "battery_flow": "battery_flow",
+    "grid_flow": "grid_flow",
+    "home_consumption_live": "home_consumption_live",
+    "home_consumption_daily": "home_consumption_daily",
+    "home_consumption_total": "home_consumption_total",
+    "home_consumption2": "home_consumption2",
+    # Section 5 sensors
+    "p_load_ongrid": "p_load_ongrid",
+    "e_load_day": "e_load_day",
+    "e_load_all_l": "e_load_all_l"
 }
 
 SENSOR_TYPES = {
@@ -134,6 +145,17 @@ SENSOR_TYPES = {
     "eps_L2_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "eps_L1_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
     "eps_L2_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    # New calculated fields
+    "battery_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "grid_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "home_consumption_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "home_consumption_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "home_consumption_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "home_consumption2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    # Section 5 sensors
+    "p_load_ongrid": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "e_load_day": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "e_load_all_l": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1)
 }
 
 CONFIG_SCHEMA = cv.All(
