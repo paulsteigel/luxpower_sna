@@ -38,46 +38,88 @@ struct LuxTranslatedData {
 
 struct LuxLogDataRawSection1 {
   uint16_t status;
-  int16_t  pv1_voltage; int16_t  pv2_voltage; int16_t  pv3_voltage;
-  int16_t  battery_voltage; uint8_t  soc; uint8_t  soh;
-  uint16_t _reserved1;
-  int16_t  pv1_power; int16_t  pv2_power; int16_t  pv3_power;
-  int16_t  charge_power; int16_t  discharge_power;
-  int16_t  voltage_ac_r; int16_t  voltage_ac_s; int16_t  voltage_ac_t;
-  int16_t  frequency_grid; int16_t  activeInverter_power;
-  int16_t  activeCharge_power; int16_t  inductor_current;
+  int16_t  pv1_voltage;
+  int16_t  pv2_voltage;
+  int16_t  pv3_voltage;
+  int16_t  battery_voltage;
+  uint8_t  soc;
+  uint8_t  soh;
+  uint16_t internal_fault;
+  int16_t  pv1_power;
+  int16_t  pv2_power;
+  int16_t  pv3_power;
+  int16_t  charge_power;
+  int16_t  discharge_power;
+  int16_t  voltage_ac_r;
+  int16_t  voltage_ac_s;
+  int16_t  voltage_ac_t;
+  int16_t  frequency_grid;
+  int16_t  activeInverter_power;
+  int16_t  activeCharge_power;
+  int16_t  ct_clamp_live;
   int16_t  grid_power_factor;
-  int16_t  voltage_eps_r; int16_t  voltage_eps_s; int16_t  voltage_eps_t;
-  int16_t  frequency_eps; int16_t  active_eps_power; int16_t  apparent_eps_power;
-  int16_t  power_to_grid; int16_t  power_from_grid;
-  int16_t  pv1_energy_today; int16_t  pv2_energy_today; int16_t  pv3_energy_today;
-  int16_t  activeInverter_energy_today; int16_t  ac_charging_today;
-  int16_t  charging_today; int16_t  discharging_today; int16_t  eps_today;
-  int16_t  exported_today; int16_t  grid_today;
-  int16_t  bus1_voltage; int16_t  bus2_voltage;
+  int16_t  voltage_eps_r;
+  int16_t  voltage_eps_s;
+  int16_t  voltage_eps_t;
+  int16_t  frequency_eps;
+  int16_t  active_eps_power;
+  int16_t  apparent_eps_power;
+  int16_t  power_to_grid;
+  int16_t  power_from_grid;
+  int16_t  pv1_energy_today;
+  int16_t  pv2_energy_today;
+  int16_t  pv3_energy_today;
+  int16_t  activeInverter_energy_today;
+  int16_t  ac_charging_today;
+  int16_t  charging_today;
+  int16_t  discharging_today;
+  int16_t  eps_today;
+  int16_t  exported_today;
+  int16_t  grid_today;
+  int16_t  bus1_voltage;
+  int16_t  bus2_voltage;
 };
 
 struct LuxLogDataRawSection2 {
-  int32_t  e_pv_1_all; int32_t  e_pv_2_all; int32_t  e_pv_3_all;
-  int32_t  e_inv_all; int32_t  e_rec_all; int32_t  e_chg_all;
-  int32_t  e_dischg_all; int32_t  e_eps_all; int32_t  e_to_grid_all;
+  int32_t  e_pv_1_all;
+  int32_t  e_pv_2_all;
+  int32_t  e_pv_3_all;
+  int32_t  e_inv_all;
+  int32_t  e_rec_all;
+  int32_t  e_chg_all;
+  int32_t  e_dischg_all;
+  int32_t  e_eps_all;
+  int32_t  e_to_grid_all;
   int32_t  e_to_user_all;
-  uint32_t fault_code; uint32_t warning_code;
-  int16_t  t_inner; int16_t  t_rad_1; int16_t  t_rad_2; int16_t  t_bat;
-  uint16_t _reserved2; uint32_t uptime;
+  uint32_t fault_code;
+  uint32_t warning_code;
+  int16_t  t_inner;
+  int16_t  t_rad_1;
+  int16_t  t_rad_2;
+  int16_t  t_bat;
+  uint16_t _reserved2;
+  uint32_t uptime;
 };
 
 struct LuxLogDataRawSection3 {
   uint16_t _reserved3;
-  int16_t  max_chg_curr; int16_t  max_dischg_curr;
-  int16_t  charge_volt_ref; int16_t  dischg_cut_volt;
+  int16_t  max_chg_curr;
+  int16_t  max_dischg_curr;
+  int16_t  charge_volt_ref;
+  int16_t  dischg_cut_volt;
   uint8_t  placeholder[20];
-  int16_t  bat_status_inv; int16_t  bat_count; int16_t  bat_capacity;
+  int16_t  bat_status_inv;
+  int16_t  bat_count;
+  int16_t  bat_capacity;
   int16_t  bat_current;
-  uint8_t  placeholder2[6];
-  int16_t  max_cell_volt; int16_t  min_cell_volt;
-  int16_t  max_cell_temp; int16_t  min_cell_temp;
-  uint16_t _reserved4; int16_t  bat_cycle_count;
+  int16_t  reg99;
+  int16_t  reg100;
+  int16_t  max_cell_volt;
+  int16_t  min_cell_volt;
+  int16_t  max_cell_temp;
+  int16_t  min_cell_temp;
+  uint16_t _reserved4;
+  int16_t  bat_cycle_count;
   uint8_t  _reserved5[14];
   int16_t  p_load2;
 };
@@ -95,6 +137,14 @@ struct LuxLogDataRawSection4 {
   int16_t  eps_L1_watt;
   int16_t  eps_L2_watt;
   uint8_t  placeholder[50];
+};
+
+struct LuxLogDataRawSection5 {
+  uint8_t  _reserved7[20];
+  int16_t  p_load_ongrid;
+  int16_t  e_load_day;
+  int16_t  e_load_all_l;
+  uint8_t  _reserved8[54];
 };
 
 #pragma pack(pop)
@@ -176,7 +226,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_max_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["max_cell_temp"] = s; }
   void set_min_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["min_cell_temp"] = s; }
   void set_cycle_count_sensor(sensor::Sensor *s) { this->float_sensors_["cycle_count"] = s; }
-  void set_pload2_sensor(sensor::Sensor *s) { this->float_sensors_["p_load2"] = s; }
+  void set_p_load2_sensor(sensor::Sensor *s) { this->float_sensors_["p_load2"] = s; }
   void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
   void set_gen_input_volt_sensor(sensor::Sensor *s) { this->float_sensors_["gen_input_volt"] = s; }
   void set_gen_input_freq_sensor(sensor::Sensor *s) { this->float_sensors_["gen_input_freq"] = s; }
@@ -187,6 +237,19 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_eps_L2_volt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L2_volt"] = s; }
   void set_eps_L1_watt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L1_watt"] = s; }
   void set_eps_L2_watt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L2_watt"] = s; }
+  
+  // New sensor setters for calculated fields
+  void set_battery_flow_sensor(sensor::Sensor *s) { this->float_sensors_["battery_flow"] = s; }
+  void set_grid_flow_sensor(sensor::Sensor *s) { this->float_sensors_["grid_flow"] = s; }
+  void set_home_consumption_live_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_live"] = s; }
+  void set_home_consumption_daily_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_daily"] = s; }
+  void set_home_consumption_total_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_total"] = s; }
+  void set_home_consumption2_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption2"] = s; }
+  
+  // Section 5 sensor setters
+  void set_p_load_ongrid_sensor(sensor::Sensor *s) { this->float_sensors_["p_load_ongrid"] = s; }
+  void set_e_load_day_sensor(sensor::Sensor *s) { this->float_sensors_["e_load_day"] = s; }
+  void set_e_load_all_l_sensor(sensor::Sensor *s) { this->float_sensors_["e_load_all_l"] = s; }
 
  private:
   void process_next_float_();
@@ -206,7 +269,10 @@ class LuxpowerSNAComponent : public PollingComponent {
   AsyncClient *tcp_client_{nullptr};
   std::map<std::string, sensor::Sensor *> float_sensors_;
   std::map<std::string, text_sensor::TextSensor *> string_sensors_;
+  
+  // Bank management
   uint8_t next_bank_to_request_{0};
+  const uint8_t banks_[5] = {0, 40, 80, 120, 160};
 
   // Internal queues for throttled updates
   std::queue<std::pair<std::string, float>> float_publish_queue_;
