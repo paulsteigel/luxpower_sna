@@ -33,8 +33,8 @@ void LuxpowerSNAComponent::setup() {
   });
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "Connected. Requesting bank %d", this->next_bank_to_request_);
-    this->request_bank_(this->next_bank_to_request_);
+    ESP_LOGD(TAG, "Connected. Requesting bank %d", this->banks_[this->next_bank_to_request_]);
+    this->request_bank_(this->banks_[this->next_bank_to_request_]);
   });
 
   this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
@@ -69,14 +69,33 @@ void LuxpowerSNAComponent::update() {
 }
 
 void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
-  uint8_t pkt[29] = {0xAA, 0x55, 0x12, 0x00, 0x01, 0xC2, 0x14};
-  memcpy(pkt + 7, this->dongle_serial_.c_str(), 10);
-  pkt[17] = bank;
-  pkt[18] = 0x00;
-  memcpy(pkt + 19, this->inverter_serial_.c_str(), 10);
-  uint16_t crc = calculate_crc_(pkt + 2, 25);
-  pkt[27] = crc & 0xFF;
-  pkt[28] = crc >> 8;
+  uint8_t pkt[38] = {
+    0xA1, 0x1A,       // Prefix
+    0x02, 0x00,       // Protocol version 2
+    0x20, 0x00,       // Frame length (32)
+    0x01,             // Address
+    0xC2,             // Function (TRANSLATED_DATA)
+    // Dongle serial (10 bytes) - filled below
+    0,0,0,0,0,0,0,0,0,0,
+    0x12, 0x00,       // Data length (18)
+    // Data frame starts here
+    0x00,             // Address action
+    0x04,             // Device function (READ_INPUT)
+    // Inverter serial (10 bytes) - filled below
+    0,0,0,0,0,0,0,0,0,0,
+    // Register and value
+    static_cast<uint8_t>(bank), 0x00, // Register (low, high)
+    0x28, 0x00        // Value (40 registers)
+  };
+
+  // Copy serial numbers
+  memcpy(pkt + 8, this->dongle_serial_.c_str(), 10);
+  memcpy(pkt + 22, this->inverter_serial_.c_str(), 10);
+
+  // Calculate CRC for data frame portion only (16 bytes)
+  uint16_t crc = calculate_crc_(pkt + 20, 16);
+  pkt[36] = crc & 0xFF;
+  pkt[37] = crc >> 8;
 
   log_hex_buffer("-> Request", pkt, sizeof(pkt));
 
@@ -161,6 +180,29 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("eps_today", raw.eps_today / 10.0f);
     publish_state_("exported_today", raw.exported_today / 10.0f);
     publish_state_("grid_today", raw.grid_today / 10.0f);
+    
+    // Calculate additional fields from Arduino
+    // Battery flow calculation
+    float battery_flow = (raw.discharge_power > 0) ? 
+        -raw.discharge_power : raw.charge_power;
+    publish_state_("battery_flow", battery_flow);
+    
+    // Grid flow calculation
+    float grid_flow = (raw.power_from_grid > 0) ? 
+        -raw.power_from_grid : raw.power_to_grid;
+    publish_state_("grid_flow", grid_flow);
+    
+    // Home consumption calculations
+    float home_consumption_live = raw.power_from_grid - 
+        raw.activeCharge_power + raw.activeInverter_power - 
+        raw.power_to_grid;
+    publish_state_("home_consumption_live", home_consumption_live);
+    
+    float home_consumption_daily = raw.grid_today / 10.0f - 
+        raw.ac_charging_today / 10.0f + 
+        raw.activeInverter_energy_today / 10.0f - 
+        raw.exported_today / 10.0f;
+    publish_state_("home_consumption_daily", home_consumption_daily);
 
   } else if (trans.registerStart == 40 && data_payload_length >= sizeof(LuxLogDataRawSection2)) {
     LuxLogDataRawSection2 raw;
@@ -177,22 +219,28 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("total_eps_energy", raw.e_eps_all / 10.0f);
     publish_state_("total_exported", raw.e_to_grid_all / 10.0f);
     publish_state_("total_imported", raw.e_to_user_all / 10.0f);
-    publish_state_("temp_inner", raw.t_inner / 10.0f);
-    publish_state_("temp_radiator", raw.t_rad_1 / 10.0f);
-    publish_state_("temp_radiator2", raw.t_rad_2 / 10.0f);
-    publish_state_("temp_battery", raw.t_bat / 10.0f);
+    publish_state_("temp_inner", raw.t_inner);
+    publish_state_("temp_radiator", raw.t_rad_1);
+    publish_state_("temp_radiator2", raw.t_rad_2);
+    publish_state_("temp_battery", raw.t_bat);
     publish_state_("uptime", (float)raw.uptime);
+    
+    // Home consumption total
+    float home_consumption_total = (raw.e_to_user_all - 
+        raw.e_rec_all + raw.e_inv_all - 
+        raw.e_to_grid_all) / 10.0f;
+    publish_state_("home_consumption_total", home_consumption_total);
 
   } else if (trans.registerStart == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
     LuxLogDataRawSection3 raw;
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection3));
 
     // Section 3: Bank 80
-    publish_state_("max_charge_current", raw.max_chg_curr / 100.0f);
-    publish_state_("max_discharge_current", raw.max_dischg_curr / 100.0f);
+    publish_state_("max_charge_current", raw.max_chg_curr / 10.0f);
+    publish_state_("max_discharge_current", raw.max_dischg_curr / 10.0f);
     publish_state_("charge_voltage_ref", raw.charge_volt_ref / 10.0f);
     publish_state_("discharge_cutoff_voltage", raw.dischg_cut_volt / 10.0f);
-    publish_state_("battery_current", raw.bat_current / 100.0f);
+    publish_state_("battery_current", raw.bat_current / 10.0f);
     publish_state_("battery_count", (float)raw.bat_count);
     publish_state_("battery_capacity", (float)raw.bat_capacity);
     publish_state_("battery_status_inv", (float)raw.bat_status_inv);
@@ -202,6 +250,9 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("min_cell_temp", raw.min_cell_temp / 10.0f);
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
     publish_state_("p_load2", (float)raw.p_load2);
+    
+    // Home consumption 2
+    publish_state_("home_consumption2", (float)raw.p_load2);
 
   } else if (trans.registerStart == 120 && data_payload_length >= sizeof(LuxLogDataRawSection4)) {
     LuxLogDataRawSection4 raw;
@@ -210,7 +261,11 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     // Section 4: Bank 120
     publish_state_("gen_input_volt", raw.gen_input_volt / 10.0f);
     publish_state_("gen_input_freq", raw.gen_input_freq / 100.0f);
-    publish_state_("gen_power_watt", (float)raw.gen_power_watt);
+    
+    // Apply threshold from Python implementation
+    int16_t gen_power = (raw.gen_power_watt < 125) ? 0 : raw.gen_power_watt;
+    publish_state_("gen_power_watt", (float)gen_power);
+    
     publish_state_("gen_power_day", raw.gen_power_day / 10.0f);
     publish_state_("gen_power_all", raw.gen_power_all / 10.0f);
     publish_state_("eps_L1_volt", raw.eps_L1_volt / 10.0f);
@@ -218,17 +273,23 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("eps_L1_watt", (float)raw.eps_L1_watt);
     publish_state_("eps_L2_watt", (float)raw.eps_L2_watt);
 
+  } else if (trans.registerStart == 160 && data_payload_length >= sizeof(LuxLogDataRawSection5)) {
+    LuxLogDataRawSection5 raw;
+    memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection5));
+    
+    // Section 5: Bank 160
+    publish_state_("p_load_ongrid", (float)raw.p_load_ongrid);
+    publish_state_("e_load_day", raw.e_load_day / 10.0f);
+    publish_state_("e_load_all_l", raw.e_load_all_l / 10.0f);
+
   } else {
     ESP_LOGW(TAG, "Unrecognized bank %d or data too small (%d bytes)", 
              trans.registerStart, data_payload_length);
     return;
   }
 
-  // Cycle through banks: 0 → 40 → 80 → 120 → 0
-  if (this->next_bank_to_request_ == 0) this->next_bank_to_request_ = 40;
-  else if (this->next_bank_to_request_ == 40) this->next_bank_to_request_ = 80;
-  else if (this->next_bank_to_request_ == 80) this->next_bank_to_request_ = 120;
-  else this->next_bank_to_request_ = 0;
+  // Cycle through banks: 0 → 40 → 80 → 120 → 160 → 0
+  next_bank_to_request_ = (next_bank_to_request_ + 1) % 5;
 }
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
