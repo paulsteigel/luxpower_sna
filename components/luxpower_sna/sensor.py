@@ -66,7 +66,8 @@ YAML_TO_C_NAMES = {
     "total_pv_energy": "total_pv_energy",
     "home_consumption_total": "home_consumption_total",
     "battery_flow": "battery_flow",
-    
+    "grid_flow": "grid_flow",
+        
     # Text sensors
     "status_text": "status_text",
     "battery_status_text": "battery_status_text",
@@ -160,6 +161,7 @@ SENSOR_TYPES = {
     "total_pv_energy": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY,state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:solar-panel-large"),
     "home_consumption_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
     "battery_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "grid_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
     
     # Text sensor schemas
     "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
