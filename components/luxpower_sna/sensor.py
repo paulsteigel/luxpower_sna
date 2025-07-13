@@ -24,6 +24,11 @@ from esphome.const import (
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
 YAML_TO_C_NAMES = {
+    # New addition on status text
+    "status_text": "status_text",
+    "battery_status_text": "battery_status_text",
+    "grid_voltage_avg": "grid_voltage_avg",
+    "p_pv_total": "p_pv_total",
     "pv1_voltage": "pv1_voltage", "pv2_voltage": "pv2_voltage", "pv3_voltage": "pv3_voltage",
     "battery_voltage": "battery_voltage", "soc": "soc", "soh": "soh",
     "pv1_power": "pv1_power", "pv2_power": "pv2_power", "pv3_power": "pv3_power",
@@ -70,6 +75,12 @@ YAML_TO_C_NAMES = {
 }
 
 SENSOR_TYPES = {
+    # New status text
+    "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
+    "battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
+    "grid_voltage_avg": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
+    "p_pv_total": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    # existing sensors
     "pv1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "pv2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "pv3_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
