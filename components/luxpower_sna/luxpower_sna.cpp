@@ -70,6 +70,7 @@ void LuxpowerSNAComponent::setup() {
     ESP_LOGW(TAG, "Timeout after %d ms", time);
     client->close();
   });
+  ESP_LOGD(TAG, "Next bank to request: %d", banks_[next_bank_to_request_]);
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -81,9 +82,17 @@ void LuxpowerSNAComponent::dump_config() {
 
 void LuxpowerSNAComponent::update() {
   if (this->tcp_client_->connected()) {
-    ESP_LOGI(TAG, "Connection in progress, skipping update");
+    ESP_LOGW(TAG, "Connection still active, skipping update");
     return;
   }
+  
+  // Add reconnect delay to prevent flooding
+  static uint32_t last_connect = 0;
+  if (millis() - last_connect < 2000) {  // 2-second cooldown
+    return;
+  }
+  last_connect = millis();
+
   ESP_LOGI(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
   this->tcp_client_->connect(this->host_.c_str(), this->port_);
 }
