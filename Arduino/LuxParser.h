@@ -245,6 +245,10 @@ struct Section5 {
 };
 
 class LuxData {
+private:
+  void publish_status_text_(const std::string &value);
+  void publish_battery_status_text_(const std::string &value);
+  std::map<std::string, text_sensor::TextSensor *> text_sensors_;
 public:
   bool decode(const uint8_t *buffer, uint16_t length);
   void scaleSection1();
@@ -268,7 +272,17 @@ public:
   Section5 section5;
 
   String serialString;
-  
+  // for text sensors self prepared from raw data
+  void set_status_text_sensor(text_sensor::TextSensor *s) { 
+    this->text_sensors_["status_text"] = s; 
+  }
+  void set_battery_status_text_sensor(text_sensor::TextSensor *s) { 
+      this->text_sensors_["battery_status_text"] = s; 
+  }
+  void set_grid_voltage_avg_sensor(sensor::Sensor *s) {
+      this->float_sensors_["grid_voltage_avg"] = s;
+  }
+
   void reset() {
     section1.loaded = false;
     section2.loaded = false;
