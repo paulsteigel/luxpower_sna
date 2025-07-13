@@ -244,6 +244,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   // Add new sensor setters 13/07
   void set_grid_voltage_avg_sensor(sensor::Sensor *s) { this->float_sensors_["grid_voltage_avg"] = s; }
   void set_p_pv_total_sensor(sensor::Sensor *s) { this->float_sensors_["p_pv_total"] = s; }
+  void set_e_pv_total_sensor(sensor::Sensor *s) { this->float_sensors_["e_pv_total"] = s; }
   void set_internal_fault_sensor(sensor::Sensor *s) { this->float_sensors_["internal_fault"] = s; }
   void set_ct_clamp_live_sensor(sensor::Sensor *s) { this->float_sensors_["ct_clamp_live"] = s; }
   void set_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["status_text"] = s; }
