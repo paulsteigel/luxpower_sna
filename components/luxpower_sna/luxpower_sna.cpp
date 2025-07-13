@@ -150,7 +150,7 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   static bool serial_published = false;
   if (!serial_published) {
     std::string inv_serial(trans.serialNumber, 10);
-    publish_state_("inverter_serial", inv_serial);
+    publish_state_("inverter_serial_number", inv_serial);
     serial_published = true;
   }
 
