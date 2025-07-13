@@ -57,15 +57,19 @@ YAML_TO_C_NAMES = {
     "eps_L1_volt": "eps_L1_volt", "eps_L2_volt": "eps_L2_volt",
     "eps_L1_watt": "eps_L1_watt", "eps_L2_watt": "eps_L2_watt",
     
-    # New sensors added from LuxParser
+    # New sensors
     "grid_voltage_avg": "grid_voltage_avg",
     "p_pv_total": "p_pv_total",
     "internal_fault": "internal_fault",
     "ct_clamp_live": "ct_clamp_live",
-    "home_consumption2": "home_consumption2",  # Replaces p_load2
+    "home_consumption2": "home_consumption2",
+    "total_pv_energy": "total_pv_energy",
+    "home_consumption_total": "home_consumption_total",
+    
+    # Text sensors
     "status_text": "status_text",
     "battery_status_text": "battery_status_text",
-    "inverter_serial": "inverter_serial"  # Moved from text_sensor.py
+    "inverter_serial": "inverter_serial"
 }
 
 SENSOR_TYPES = {
@@ -151,6 +155,9 @@ SENSOR_TYPES = {
     "internal_fault": sensor.sensor_schema(icon="mdi:alert", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
     "ct_clamp_live": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2, icon="mdi:current-ac"),
     "home_consumption2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:home-lightning-bolt"),
+    "p_pv_total": sensor.sensor_schema(unit_of_measurement=UNIT_WATT,device_class=DEVICE_CLASS_POWER,state_class=STATE_CLASS_MEASUREMENT,accuracy_decimals=0,icon="mdi:solar-power"),
+    "total_pv_energy": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY,state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:solar-panel-large"),
+    "home_consumption_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
     
     # Text sensor schemas
     "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
@@ -175,9 +182,10 @@ async def to_code(config):
         if yaml_key in config:
             conf = config[yaml_key]
             
-            # Determine if it's a text sensor
+            # Handle text sensors
             if yaml_key in ["status_text", "battery_status_text", "inverter_serial"]:
                 sens = await text_sensor.new_text_sensor(conf)
+            # Handle regular sensors
             else:
                 sens = await sensor.new_sensor(conf)
                 
