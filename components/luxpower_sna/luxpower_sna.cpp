@@ -239,8 +239,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("lux_power_to_grid_total", raw.e_to_grid_all / 10.0f);
     publish_state_("lux_power_from_grid_total", raw.e_to_user_all / 10.0f);
     publish_state_("lux_internal_temp", raw.t_inner / 10.0f);
-    publish_state_("lux_radiator1_temp", raw.t_rad_1 / 10.0f);
-    publish_state_("lux_radiator2_temp", raw.t_rad_2 / 10.0f);
+    publish_state_("lux_radiator1_temp", raw.t_rad_1); // changed from /10.0f to 1
+    publish_state_("lux_radiator2_temp", raw.t_rad_2);
     publish_state_("lux_battery_temperature_live", raw.t_bat / 10.0f);
     publish_state_("lux_uptime", (float)raw.uptime);
     
