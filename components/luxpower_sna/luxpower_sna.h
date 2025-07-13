@@ -244,7 +244,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   // Add new sensor setters 13/07
   void set_grid_voltage_avg_sensor(sensor::Sensor *s) { this->float_sensors_["grid_voltage_avg"] = s; }
   void set_p_pv_total_sensor(sensor::Sensor *s) { this->float_sensors_["p_pv_total"] = s; }
-  void set_e_pv_total_sensor(sensor::Sensor *s) { this->float_sensors_["e_pv_total"] = s; }
+  void set_daily_solar_sensor(sensor::Sensor *s) { this->float_sensors_["daily_solar"] = s; }
   void set_internal_fault_sensor(sensor::Sensor *s) { this->float_sensors_["internal_fault"] = s; }
   void set_ct_clamp_live_sensor(sensor::Sensor *s) { this->float_sensors_["ct_clamp_live"] = s; }
   void set_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["status_text"] = s; }
@@ -294,7 +294,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   uint8_t next_bank_to_request_{0};
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
   
-  float e_pv_total_today_ = 0.0f;
+  float daily_solar_ = 0.0f;
   float home_consumption_total_ = 0.0f;
 
   // Internal queues for throttled updates
