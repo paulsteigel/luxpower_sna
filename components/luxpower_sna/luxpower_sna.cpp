@@ -10,6 +10,26 @@ namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
+// revised 13/07
+const char* LuxpowerSNAComponent::STATUS_TEXTS[193] = {
+  "Standby", "Error", "Inverting", "", "Solar > Load - Surplus > Grid", 
+  "Float", "", "Charger Off", "Supporting", "Selling", "Pass Through", 
+  "Offsetting", "Solar > Battery Charging", "", "", "",
+  "Battery Discharging > LOAD - Surplus > Grid", "Temperature Over Range", "", "",
+  "Solar + Battery Discharging > LOAD - Surplus > Grid", "", "", "", "", "", "", "",
+  "AC Battery Charging", "", "", "", "", "", "Solar + Grid > Battery Charging",
+  "", "", "", "", "", "", "", "", "", "No Grid : Battery > EPS", "", "", "", "", 
+  "", "", "", "", "No Grid : Solar > EPS - Surplus > Battery Charging", "", "", 
+  "", "", "No Grid : Solar + Battery Discharging > EPS"
+};
+
+// Battery status text mapping
+const char* LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
+  "Charge Forbidden & Discharge Forbidden", "Unknown", 
+  "Charge Forbidden & Discharge Allowed", "Charge Allowed & Discharge Allowed",
+  "", "", "", "", "", "", "", "", "", "", "", "", 
+  "Charge Allowed & Discharge Forbidden"
+};
 
 void LuxpowerSNAComponent::log_hex_buffer(const char* title, const uint8_t *buffer, size_t len) {
   if (len == 0) return;
@@ -180,6 +200,24 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("eps_today", raw.eps_today / 10.0f);
     publish_state_("exported_today", raw.exported_today / 10.0f);
     publish_state_("grid_today", raw.grid_today / 10.0f);
+
+    // NEW: Additional sensors and calculations 13/07
+    publish_state_("internal_fault", (float)raw.internal_fault);
+    publish_state_("ct_clamp_live", raw.ct_clamp_live / 100.0f);
+    
+    // Calculated values
+    float grid_voltage_avg = (raw.voltage_ac_r + raw.voltage_ac_s + raw.voltage_ac_t) / 30.0f;
+    int16_t p_pv_total = raw.pv1_power + raw.pv2_power + raw.pv3_power;
+    
+    publish_state_("grid_voltage_avg", grid_voltage_avg);
+    publish_state_("p_pv_total", (float)p_pv_total);
+    
+    // Status text
+    if (raw.status < sizeof(STATUS_TEXTS)/sizeof(STATUS_TEXTS[0])) {
+      publish_state_("status_text", std::string(STATUS_TEXTS[raw.status]));
+    } else {
+      publish_state_("status_text", "Unknown Status");
+    }
     
     // Calculate additional fields from Arduino
     // Battery flow calculation
@@ -250,6 +288,13 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("min_cell_temp", raw.min_cell_temp / 10.0f);
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
     publish_state_("p_load2", (float)raw.p_load2);
+    
+    // Battery status text 13/07
+    if (raw.bat_status_inv < sizeof(BATTERY_STATUS_TEXTS)/sizeof(BATTERY_STATUS_TEXTS[0])) {
+      publish_state_("battery_status_text", std::string(BATTERY_STATUS_TEXTS[raw.bat_status_inv]));
+    } else {
+      publish_state_("battery_status_text", "Unknown Battery Status");
+    }
     
     // Home consumption 2
     publish_state_("home_consumption2", (float)raw.p_load2);
