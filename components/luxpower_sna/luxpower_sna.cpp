@@ -206,8 +206,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("ct_clamp_live", raw.ct_clamp_live / 100.0f);
 
     // Calculate total PV energy
-    total_pv_energy_ = (raw.pv1_energy_today + raw.pv2_energy_today + raw.pv3_energy_today) / 10.0f;
-    publish_state_("total_pv_energy", total_pv_energy_);
+    e_pv_total_ = (raw.pv1_energy_today + raw.pv2_energy_today + raw.pv3_energy_today) / 10.0f;
+    publish_state_("e_pv_total", e_pv_total_);
     float grid_voltage_avg = (raw.voltage_ac_r + raw.voltage_ac_s + raw.voltage_ac_t) / 30.0f;
     int16_t p_pv_total = raw.pv1_power + raw.pv2_power + raw.pv3_power;
     
