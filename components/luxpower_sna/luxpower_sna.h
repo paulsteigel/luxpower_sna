@@ -187,6 +187,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_power_from_inverter_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_from_inverter_live"] = s; }
   void set_lux_power_to_inverter_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_inverter_live"] = s; }
   void set_lux_power_current_clamp_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_current_clamp"] = s; }
+  void set_lux_grid_power_factor_sensor(sensor::Sensor *s) { this->float_sensors_["grid_power_factor"] = s; }
   void set_lux_power_to_eps_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_eps"] = s; }
   void set_lux_power_to_grid_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_grid_live"] = s; }
   void set_lux_power_from_grid_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_from_grid_live"] = s; }
