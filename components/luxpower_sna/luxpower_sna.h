@@ -226,7 +226,10 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_max_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["max_cell_temp"] = s; }
   void set_min_cell_temp_sensor(sensor::Sensor *s) { this->float_sensors_["min_cell_temp"] = s; }
   void set_cycle_count_sensor(sensor::Sensor *s) { this->float_sensors_["cycle_count"] = s; }
-  void set_p_load2_sensor(sensor::Sensor *s) { this->float_sensors_["p_load2"] = s; }
+  
+  // no need this 13/7
+  //void set_p_load2_sensor(sensor::Sensor *s) { this->float_sensors_["p_load2"] = s; }
+  
   void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
   void set_gen_input_volt_sensor(sensor::Sensor *s) { this->float_sensors_["gen_input_volt"] = s; }
   void set_gen_input_freq_sensor(sensor::Sensor *s) { this->float_sensors_["gen_input_freq"] = s; }
@@ -249,7 +252,10 @@ class LuxpowerSNAComponent : public PollingComponent {
   // New sensor setters for calculated fields
   void set_battery_flow_sensor(sensor::Sensor *s) { this->float_sensors_["battery_flow"] = s; }
   void set_grid_flow_sensor(sensor::Sensor *s) { this->float_sensors_["grid_flow"] = s; }
-  void set_home_consumption_live_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_live"] = s; }
+  
+  // revise from p_load2
+  void set_home_consumption_live_sensor(sensor::Sensor *s) { this->float_sensors_["p_load2"] = s; }
+
   void set_home_consumption_daily_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_daily"] = s; }
   void set_home_consumption_total_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_total"] = s; }
   void set_home_consumption2_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption2"] = s; }
