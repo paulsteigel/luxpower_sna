@@ -5,8 +5,8 @@
 #include "LuxParser.h"
 
 // ───────────────────────────────── Wi‑Fi / OTA ─────────────────────────────────
-const char* ssid     = "HOME_F4";
-const char* password = "ngoc12345";
+const char* ssid      = "WIFI";
+const char* password = "pass";
 
 // OTA (blank password)
 void setupOTA() {
@@ -20,15 +20,15 @@ const char* inverterHost = "192.168.100.10";
 const uint16_t inverterPort = 8000;
 
 // Default serials (will be overwritten by EEPROM config)
-char dongleSerial[11]   = "BA32500699";
-char inverterSerial[11] = "3253631886";
+char dongleSerial[11]     = "xxxxxxxxxx";
+char inverterSerial[11] = "xxxxxxxxxx";
 
 // ─────────────────────────── EEPROM Configuration ─────────────────────────────
 struct Config {
   char magic[4] = "CFG";  // Configuration marker
   uint8_t version = 1;
-  char dongle[11] = "BA32500699";
-  char inverter[11] = "3253631886";
+  char dongle[11] = "xxxxxxxxxx";
+  char inverter[11] = "xxxxxxxxxx";
 };
 
 Config config;
@@ -61,7 +61,7 @@ void saveConfig() {
 
 // ─────────────────────────── Globals & helpers ────────────────────────────────
 ESP8266WebServer server(80);
-WiFiClient       client;
+WiFiClient        client;
 
 // Global sections to preserve data between polls
 Section1 gSection1 = { .loaded = false };
@@ -69,6 +69,7 @@ Section2 gSection2 = { .loaded = false };
 Section3 gSection3 = { .loaded = false };
 Section4 gSection4 = { .loaded = false };
 Section5 gSection5 = { .loaded = false };
+SystemData gSystem;  // Added global system data
 
 const uint8_t BANKS[] = {0, 40, 80, 120, 160};
 uint8_t bankIndex = 0;
@@ -94,6 +95,14 @@ String row(const String& k, const String& v, bool isCalculated = false) {
 }
 String fmtF(float v, uint8_t d=1) { return isnan(v) ? "-" : String(v, d); }
 
+// System state helper
+String getSystemState() {
+  // Renamed from gSystem.last_heartbeat to gSystem.lux_data_last_received_time
+  if (gSystem.lux_data_last_received_time == 0) return "OFFLINE (no heartbeat)";
+  // Renamed from gSystem.last_heartbeat to gSystem.lux_data_last_received_time
+  return (millis() - gSystem.lux_data_last_received_time) < 15000 ? "ONLINE" : "OFFLINE";
+}
+
 // ───────────────────────────── Web UI (all data) ──────────────────────────────
 String webPage() {
   String h = "<html><head><meta http-equiv='refresh' content='20'>";
@@ -101,136 +110,154 @@ String webPage() {
        "td,th{border:1px solid #888;padding:5px 10px}"
        ".note{color:#666;font-size:0.9em}"
        "a{color:#0066cc;text-decoration:none}"
-       ".calculated {color: #006400; font-weight: bold}</style></head><body>";
+       ".calculated {color: #006400; font-weight: bold}"
+       ".system-row {background-color: #f0f0f0; font-weight: bold}</style></head><body>";
   h += "<h2>LuxPower Real‑time Data</h2>";
   h += "<p class='note'>Dongle: " + String(dongleSerial) + " | Inverter: " + String(inverterSerial) + 
        " | <a href='/config'>Configure</a></p>";
   h += "<table>";
   h += "<tr><th>Field</th><th>Value</th></tr>";
 
+  // System Information
+  h += "<tr class='system-row'><td colspan='2'>System Information</td></tr>";
+  h += row("Lux Inverter Model", gSystem.lux_inverter_model);
+  h += row("Lux Firmware Version", gSystem.lux_firmware_version);
+  h += row("Lux Status (Text)", gSystem.lux_status_text);
+  h += row("Lux Battery Status", gSystem.lux_battery_status_text);
+  h += row("Online State", getSystemState());
+
   // Section 1 - Bank 0
   if (gSection1.loaded) {
-    h += row("Section 1","");
-    h += row("PV1 Voltage", fmtF(gSection1.pv1_voltage) + " V");
-    h += row("PV2 Voltage", fmtF(gSection1.pv2_voltage) + " V");
-    h += row("PV3 Voltage", fmtF(gSection1.pv3_voltage) + " V");
-    h += row("Battery Voltage", fmtF(gSection1.battery_voltage) + " V");
-    h += row("SOC", String(gSection1.soc) + " %");
+    h += "<tr class='system-row'><td colspan='2'>Section 1 - Real-time Data</td></tr>";
+    h += row("Lux Status", String(gSection1.lux_status));
+    h += row("Lux Solar Voltage Array 1 (Live)", fmtF(gSection1.lux_current_solar_voltage_1) + " V");
+    h += row("Lux Solar Voltage Array 2 (Live)", fmtF(gSection1.lux_current_solar_voltage_2) + " V");
+    h += row("Lux Solar Voltage Array 3 (Live)", fmtF(gSection1.lux_current_solar_voltage_3) + " V");
+    h += row("Lux Battery Voltage (Live)", fmtF(gSection1.lux_battery_voltage) + " V");
+    h += row("Lux Battery %", String(gSection1.lux_battery_percent) + " %");
     h += row("SOH", String(gSection1.soh) + " %");
+    h += row("Lux Internal Fault", String(gSection1.lux_internal_fault));
 
-    h += row("PV1 Power", String(gSection1.pv1_power) + " W");
-    h += row("PV2 Power", String(gSection1.pv2_power) + " W");
-    h += row("PV3 Power", String(gSection1.pv3_power) + " W");
-    h += row("Charge Power", String(gSection1.charge_power) + " W");
-    h += row("Discharge Power", String(gSection1.discharge_power) + " W");
-    h += row("Inverter Power", String(gSection1.inverter_power) + " W");
-    h += row("To Grid", String(gSection1.power_to_grid) + " W");
-    h += row("From Grid", String(gSection1.power_from_grid) + " W");
+    h += row("Lux Solar Output Array 1 (Live)", String(gSection1.lux_current_solar_output_1) + " W");
+    h += row("Lux Solar Output Array 2 (Live)", String(gSection1.lux_current_solar_output_2) + " W");
+    h += row("Lux Solar Output Array 3 (Live)", String(gSection1.lux_current_solar_output_3) + " W");
+    h += row("Lux Battery Charge (Live)", String(gSection1.lux_battery_charge) + " W");
+    h += row("Lux Battery Discharge (Live)", String(gSection1.lux_battery_discharge) + " W");
+    h += row("Lux Power From Inverter (Live)", String(gSection1.lux_power_from_inverter_live) + " W");
+    h += row("Lux Power To Inverter (Live)", String(gSection1.lux_power_to_inverter_live) + " W");
+    h += row("Lux Power To Grid (Live)", String(gSection1.lux_power_to_grid_live) + " W");
+    h += row("Lux Power From Grid (Live)", String(gSection1.lux_power_from_grid_live) + " W");
 
-    h += row("Grid Volt R", fmtF(gSection1.grid_voltage) + " V");
+    h += row("Grid Volt R", fmtF(gSection1.grid_voltage_r) + " V");
     h += row("Grid Volt S", fmtF(gSection1.grid_voltage_s) + " V");
     h += row("Grid Volt T", fmtF(gSection1.grid_voltage_t) + " V");
-    h += row("Grid Frequency", fmtF(gSection1.frequency_grid, 2) + " Hz");
+    h += row("Lux Grid Voltage (Live)", fmtF(gSection1.lux_grid_voltage_live) + " V");
+    h += row("Lux Grid Frequency (Live)", fmtF(gSection1.lux_grid_frequency_live, 2) + " Hz");
+
+    h += row("Lux CT Clamp (Live)", fmtF(gSection1.lux_power_current_clamp, 2) + " A");
+    h += row("Grid Power Factor", fmtF(gSection1.grid_power_factor, 3));
 
     h += row("EPS Volt R", fmtF(gSection1.eps_voltage_r) + " V");
     h += row("EPS Volt S", fmtF(gSection1.eps_voltage_s) + " V");
     h += row("EPS Volt T", fmtF(gSection1.eps_voltage_t) + " V");
     h += row("EPS Frequency", fmtF(gSection1.eps_frequency, 2) + " Hz");
-    h += row("EPS Active Power", String(gSection1.eps_active_power) + " W");
-    h += row("EPS Apparent Power", String(gSection1.eps_apparent_power) + " VA");
+    h += row("Lux Power To EPS (Live)", String(gSection1.lux_power_to_eps) + " W");
+    h += row("EPS Apparent Power", String(gSection1.apparent_eps_power) + " VA");
 
-    h += row("CT Clamp (Live)", fmtF(gSection1.ct_clamp_live, 2) + " A");
-    h += row("Grid Power Factor", fmtF(gSection1.grid_power_factor, 3));
-
-    h += row("PV1 kWh Today", fmtF(gSection1.pv1_energy_today) + " kWh");
-    h += row("PV2 kWh Today", fmtF(gSection1.pv2_energy_today) + " kWh");
-    h += row("PV3 kWh Today", fmtF(gSection1.pv3_energy_today) + " kWh");
-    h += row("Inverter Energy Today", fmtF(gSection1.activeInverter_energy_today) + " kWh");
-    h += row("AC Charging Today", fmtF(gSection1.ac_charging_today) + " kWh");
-    h += row("Charging Today", fmtF(gSection1.charging_today) + " kWh");
-    h += row("Discharging Today", fmtF(gSection1.discharging_today) + " kWh");
-    h += row("EPS Today", fmtF(gSection1.eps_today) + " kWh");
-    h += row("Exported Today", fmtF(gSection1.exported_today) + " kWh");
-    h += row("Grid Today", fmtF(gSection1.grid_today) + " kWh");
+    h += row("Lux Solar Output Array 1 (Daily)", fmtF(gSection1.lux_daily_solar_array_1) + " kWh");
+    h += row("Lux Solar Output Array 2 (Daily)", fmtF(gSection1.lux_daily_solar_array_2) + " kWh");
+    h += row("Lux Solar Output Array 3 (Daily)", fmtF(gSection1.lux_daily_solar_array_3) + " kWh");
+    h += row("Lux Power from Inverter to Home (Daily)", fmtF(gSection1.lux_power_from_inverter_daily) + " kWh");
+    h += row("Lux Power to Inverter (Daily)", fmtF(gSection1.lux_power_to_inverter_daily) + " kWh");
+    h += row("Lux Battery Charge (Daily)", fmtF(gSection1.lux_daily_battery_charge) + " kWh");
+    h += row("Lux Battery Discharge (Daily)", fmtF(gSection1.lux_daily_battery_discharge) + " kWh");
+    h += row("Lux Power To EPS (Daily)", fmtF(gSection1.lux_power_to_eps_daily) + " kWh");
+    h += row("Lux Power To Grid (Daily)", fmtF(gSection1.lux_power_to_grid_daily) + " kWh");
+    h += row("Lux Power From Grid (Daily)", fmtF(gSection1.lux_power_from_grid_daily) + " kWh");
 
     h += row("Bus1 Voltage", fmtF(gSection1.bus1_voltage) + " V");
     h += row("Bus2 Voltage", fmtF(gSection1.bus2_voltage) + " V");
     
     // CALCULATED FIELDS - SECTION 1
-    h += row("Battery Flow", String(gSection1.battery_flow) + " W", true);
-    h += row("Grid Flow", String(gSection1.grid_flow) + " W", true);
-    h += row("Home Consumption (Live)", String(gSection1.home_consumption_live) + " W", true);
-    h += row("Home Consumption (Daily)", fmtF(gSection1.home_consumption_daily) + " kWh", true);
+    h += row("Lux Solar Output (Live)", String(gSection1.lux_current_solar_output) + " W", true);
+    h += row("Lux Solar Output (Daily)", fmtF(gSection1.lux_daily_solar) + " kWh", true);
+    h += row("Lux Power From Grid to HOUSE (Live)", String(gSection1.lux_power_to_home) + " W", true);
+    h += row("Lux Battery Flow (Live)", String(gSection1.lux_battery_flow) + " W", true);
+    h += row("Lux Grid Flow (Live)", String(gSection1.lux_grid_flow) + " W", true);
+    h += row("Lux Home Consumption (Live)", String(gSection1.lux_home_consumption_live) + " W", true);
+    h += row("Lux Home Consumption (Daily)", fmtF(gSection1.lux_home_consumption) + " kWh", true);
   }
 
   // Section 2 - Bank 40
   if (gSection2.loaded) {
-    h += row("Section 2","");
-    h += row("PV1 Total Gen", fmtF(gSection2.total_pv1_energy) + " kWh");
-    h += row("PV2 Total Gen", fmtF(gSection2.total_pv2_energy) + " kWh");
-    h += row("PV3 Total Gen", fmtF(gSection2.total_pv3_energy) + " kWh");
-    h += row("Inverter Output", fmtF(gSection2.total_inverter_output) + " kWh");
-    h += row("Recharge Energy", fmtF(gSection2.total_recharge_energy) + " kWh");
-    h += row("Charged", fmtF(gSection2.total_charged) + " kWh");
-    h += row("Discharged", fmtF(gSection2.total_discharged) + " kWh");
-    h += row("EPS Total", fmtF(gSection2.total_eps_energy) + " kWh");
-    h += row("Total Exported", fmtF(gSection2.total_exported) + " kWh");
-    h += row("Total Imported", fmtF(gSection2.total_imported) + " kWh");
+    h += "<tr class='system-row'><td colspan='2'>Section 2 - Total Energy Data</td></tr>";
+    h += row("Lux Solar Output Array 1 (Total)", fmtF(gSection2.lux_total_solar_array_1) + " kWh");
+    h += row("Lux Solar Output Array 2 (Total)", fmtF(gSection2.lux_total_solar_array_2) + " kWh");
+    h += row("Lux Solar Output Array 3 (Total)", fmtF(gSection2.lux_total_solar_array_3) + " kWh");
+    h += row("Lux Power from Inverter to Home (Total)", fmtF(gSection2.lux_power_from_inverter_total) + " kWh");
+    h += row("Lux Power to Inverter (Total)", fmtF(gSection2.lux_power_to_inverter_total) + " kWh");
+    h += row("Lux Battery Charge (Total)", fmtF(gSection2.lux_total_battery_charge) + " kWh");
+    h += row("Lux Battery Discharge (Total)", fmtF(gSection2.lux_total_battery_discharge) + " kWh");
+    h += row("Lux Power To EPS (Total)", fmtF(gSection2.lux_power_to_eps_total) + " kWh");
+    h += row("Lux Power To Grid (Total)", fmtF(gSection2.lux_power_to_grid_total) + " kWh");
+    h += row("Lux Power From Grid (Total)", fmtF(gSection2.lux_power_from_grid_total) + " kWh");
 
-    h += row("Temp Inner", fmtF(gSection2.temp_inner) + " °C");
-    h += row("Temp Radiator", fmtF(gSection2.temp_radiator) + " °C");
-    h += row("Temp Radiator2", fmtF(gSection2.temp_radiator2) + " °C");
-    h += row("Temp Battery", fmtF(gSection2.temp_battery) + " °C");
+    h += row("Lux Fault Code", String(gSection2.lux_fault_code));
+    h += row("Lux Warning Code", String(gSection2.lux_warning_code));
+    h += row("Lux Internal Temperature (Live)", fmtF(gSection2.lux_internal_temp) + " °C");
+    h += row("Lux Radiator 1 Temperature (Live)", fmtF(gSection2.lux_radiator1_temp) + " °C");
+    h += row("Lux Radiator 2 Temperature (Live)", fmtF(gSection2.lux_radiator2_temp) + " °C");
+    h += row("Lux Battery Temperature (Live)", fmtF(gSection2.lux_battery_temperature_live) + " °C");
 
-    h += row("Uptime", String(gSection2.uptime_seconds) + " s");
+    h += row("Lux Uptime (Potential)", String(gSection2.lux_uptime) + " s");
     
     // CALCULATED FIELDS - SECTION 2
-    h += row("Home Consumption (Total)", fmtF(gSection2.home_consumption_total) + " kWh", true);
+    h += row("Lux Solar Output (Total)", fmtF(gSection2.lux_total_solar) + " kWh", true);
+    h += row("Lux Home Consumption (Total)", fmtF(gSection2.lux_home_consumption_total) + " kWh", true);
   }
 
   // Section 3 - Bank 80
   if (gSection3.loaded) {    
-    h += row("Section 3","");
-    h += row("Max Charge Current", fmtF(gSection3.max_charge_current) + " A");
-    h += row("Max Discharge Current", fmtF(gSection3.max_discharge_current) + " A");
+    h += "<tr class='system-row'><td colspan='2'>Section 3 - Battery Data</td></tr>";
+    h += row("Lux BMS Limit Charge (Live)", fmtF(gSection3.lux_bms_limit_charge) + " A");
+    h += row("Lux BMS Limit Discharge (Live)", fmtF(gSection3.lux_bms_limit_discharge) + " A");
     h += row("Charge Voltage Ref", fmtF(gSection3.charge_voltage_ref) + " V");
     h += row("Discharge Cutoff Voltage", fmtF(gSection3.discharge_cutoff_voltage) + " V");
-
-    h += row("Battery Current", fmtF(gSection3.battery_current, 2) + " A");
-    h += row("Battery Count", String(gSection3.battery_count));
-    h += row("Battery Capacity", String(gSection3.battery_capacity) + " Ah");
     h += row("Battery Status INV", String(gSection3.battery_status_inv));
+    h += row("Lux Battery Count", String(gSection3.lux_battery_count));
+    h += row("Lux Battery Capacity Ah", String(gSection3.lux_battery_capacity_ah) + " Ah");
 
-    h += row("Max Cell Volt", fmtF(gSection3.max_cell_voltage, 3) + " V");
-    h += row("Min Cell Volt", fmtF(gSection3.min_cell_voltage, 3) + " V");
-    h += row("Max Cell Temp", fmtF(gSection3.max_cell_temp, 1) + " °C");
-    h += row("Min Cell Temp", fmtF(gSection3.min_cell_temp, 1) + " °C");
+    h += row("Lux Battery Current", fmtF(gSection3.lux_battery_current, 2) + " A");
+    h += row("Lux Battery Max Cell Voltage (Live)", fmtF(gSection3.max_cell_volt, 3) + " V");
+    h += row("Lux Battery Min Cell Voltage (Live)", fmtF(gSection3.min_cell_volt, 3) + " V");
+    h += row("Lux Battery Max Cell Temperature (Live)", fmtF(gSection3.max_cell_temp, 1) + " °C");
+    h += row("Lux Battery Min Cell Temperature (Live)", fmtF(gSection3.min_cell_temp, 1) + " °C");
 
-    h += row("Battery Cycle Count", String(gSection3.cycle_count));
-    h += row("Load Power 2", String(gSection3.p_load2) + " W");
+    h += row("Lux Battery Cycle Count", String(gSection3.lux_battery_cycle_count));
+    h += row("Lux Home Consumption 2 (Live)", String(gSection3.lux_home_consumption_2_live) + " W");
     
     // CALCULATED FIELDS - SECTION 3
-    h += row("Home Consumption 2", String(gSection3.home_consumption2) + " W", true);
+    h += row("Lux Home Consumption 2 (Live)", String(gSection3.lux_home_consumption_2_live_alias) + " W", true);
   }
 
   // Section 4 - Bank 120
   if (gSection4.loaded) {
-    h += row("Section 4","");
-    h += row("Generator Voltage", fmtF(gSection4.gen_input_volt) + " V");
-    h += row("Generator Frequency", fmtF(gSection4.gen_input_freq, 2) + " Hz");
-    h += row("Generator Power", String(gSection4.gen_power_watt) + " W");
-    h += row("Gen Energy Today", fmtF(gSection4.gen_power_day) + " kWh");
-    h += row("Gen Total Energy", fmtF(gSection4.gen_power_all) + " kWh");
+    h += "<tr class='system-row'><td colspan='2'>Section 4 - Generator & EPS Data</td></tr>";
+    h += row("Lux Generator Voltage (Live)", fmtF(gSection4.lux_current_generator_voltage) + " V");
+    h += row("Lux Generator Frequency (Live)", fmtF(gSection4.lux_current_generator_frequency, 2) + " Hz");
+    h += row("Lux Generator Power (Live)", String(gSection4.lux_current_generator_power) + " W");
+    h += row("Lux Generator Power (Daily)", fmtF(gSection4.lux_current_generator_power_daily) + " kWh");
+    h += row("Lux Generator Power (Total)", fmtF(gSection4.lux_current_generator_power_all) + " kWh");
     
-    h += row("EPS L1 Voltage", fmtF(gSection4.eps_L1_volt) + " V");
-    h += row("EPS L2 Voltage", fmtF(gSection4.eps_L2_volt) + " V");
-    h += row("EPS L1 Power", String(gSection4.eps_L1_watt) + " W");
-    h += row("EPS L2 Power", String(gSection4.eps_L2_watt) + " W");
+    h += row("Lux EPS L1 Voltage (Live)", fmtF(gSection4.lux_current_eps_L1_voltage) + " V");
+    h += row("Lux EPS L2 Voltage (Live)", fmtF(gSection4.lux_current_eps_L2_voltage) + " V");
+    h += row("Lux EPS L1 Watts (Live)", String(gSection4.lux_current_eps_L1_watt) + " W");
+    h += row("Lux EPS L2 Watts (Live)", String(gSection4.lux_current_eps_L2_watt) + " W");
   }
 
   // Section 5 - Bank 160
   if (gSection5.loaded) {
-    h += row("Section 5","");
+    h += "<tr class='system-row'><td colspan='2'>Section 5 - Load Data</td></tr>";
     h += row("On-grid Load Power", String(gSection5.p_load_ongrid) + " W");
     h += row("Load Energy Today", fmtF(gSection5.e_load_day) + " kWh");
     h += row("Total Load Energy", fmtF(gSection5.e_load_all_l) + " kWh");
@@ -276,24 +303,24 @@ bool sendRequest(uint8_t bank) {
   }
 
   uint8_t pkt[38] = {
-    0xA1, 0x1A,       // Prefix
-    0x02, 0x00,       // Protocol version 2
-    0x20, 0x00,       // Frame length (32)
-    0x01,             // Address
-    0xC2,             // Function (TRANSLATED_DATA)
+    0xA1, 0x1A,        // Prefix
+    0x02, 0x00,        // Protocol version 2
+    0x20, 0x00,        // Frame length (32)
+    0x01,              // Address
+    0xC2,              // Function (TRANSLATED_DATA)
     // Dongle serial (10 bytes)
     dongleSerial[0], dongleSerial[1], dongleSerial[2], dongleSerial[3], dongleSerial[4],
     dongleSerial[5], dongleSerial[6], dongleSerial[7], dongleSerial[8], dongleSerial[9],
-    0x12, 0x00,       // Data length (18)
+    0x12, 0x00,        // Data length (18)
     // Data frame starts here
-    0x00,             // Address action
-    0x04,             // Device function (READ_INPUT)
+    0x00,              // Address action
+    0x04,              // Device function (READ_INPUT)
     // Inverter serial (10 bytes)
     inverterSerial[0], inverterSerial[1], inverterSerial[2], inverterSerial[3], inverterSerial[4],
     inverterSerial[5], inverterSerial[6], inverterSerial[7], inverterSerial[8], inverterSerial[9],
     // Register and value
     static_cast<uint8_t>(bank), 0x00, // Register (low, high)
-    0x28, 0x00        // Value (40 registers)
+    0x28, 0x00         // Value (40 registers)
   };
 
   // Calculate CRC for data frame portion only
@@ -387,7 +414,7 @@ void loop() {
   uint8_t bank = BANKS[bankIndex];
   bankIndex = (bankIndex + 1) % 5;  // Now cycles through 5 banks
 
-  uint8_t rx[512]; 
+  uint8_t rx[512];  
   uint16_t rxLen;
   LuxData lux;  // Temporary for decoding
   
@@ -399,17 +426,21 @@ void loop() {
         Serial.print("✅ ");
         if (lux.header.function == 0xC1) {
           Serial.print("Heartbeat");
+          // Renamed from gSystem.last_heartbeat to gSystem.lux_data_last_received_time
+          gSystem.lux_data_last_received_time = millis();  // Update heartbeat
         } else {
           Serial.print("Decoded");
+          // Update global system data
+          gSystem = lux.system;
+          
+          // Update sections
+          if (lux.section1.loaded) gSection1 = lux.section1;
+          if (lux.section2.loaded) gSection2 = lux.section2;
+          if (lux.section3.loaded) gSection3 = lux.section3;
+          if (lux.section4.loaded) gSection4 = lux.section4;
+          if (lux.section5.loaded) gSection5 = lux.section5;
         }
         Serial.printf(" bank %d\n", bank);
-        
-        // Update global sections
-        if (lux.section1.loaded) gSection1 = lux.section1;
-        if (lux.section2.loaded) gSection2 = lux.section2;
-        if (lux.section3.loaded) gSection3 = lux.section3;
-        if (lux.section4.loaded) gSection4 = lux.section4;
-        if (lux.section5.loaded) gSection5 = lux.section5;
       }
     }
   }
@@ -417,4 +448,4 @@ void loop() {
   if (!success) {
     Serial.printf("❌ Failed bank %d after 2 attempts\n", bank);
   }
-}
+}   
