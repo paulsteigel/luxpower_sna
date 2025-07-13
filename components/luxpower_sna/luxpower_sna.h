@@ -158,7 +158,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_host(const std::string &host) { this->host_ = host; }
   void set_port(uint16_t port) { this->port_ = port; }
   void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
-  void set_inverter_serial_number_sensor(const std::string &serial) { this->inverter_serial_ = serial; }
+  //void set_inverter_serial_number_sensor(const std::string &serial) { this->inverter_serial_ = serial; }
+  void set_inverter_serial_number_sensor(text_sensor::TextSensor *s) {this->string_sensors_["inverter_serial_number"] = s;}
 
   // System Sensor Setters
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { this->string_sensors_["lux_firmware_version"] = s; }
@@ -260,9 +261,9 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_e_load_all_l_sensor(sensor::Sensor *s) { this->float_sensors_["e_load_all_l"] = s; }
 
   // Text Sensor Setters
-  void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
-  void set_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["status_text"] = s; }
-  void set_battery_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["battery_status_text"] = s; }
+  //void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
+  //void set_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["status_text"] = s; }
+  //void set_battery_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["battery_status_text"] = s; }
 
   // Miscellaneous Sensor Setters
   void set_soh_sensor(sensor::Sensor *s) { this->float_sensors_["soh"] = s; }
