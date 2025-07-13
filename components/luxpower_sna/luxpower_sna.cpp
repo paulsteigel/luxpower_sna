@@ -194,6 +194,7 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("lux_power_from_grid_daily", raw.e_to_user_day / 10.0f);
     publish_state_("lux_internal_fault", (float)raw.internal_fault);
     publish_state_("lux_power_current_clamp", raw.rms_current / 100.0f);
+    publish_state_("grid_power_factor", raw.pf / 1000.0f);
     
     // Calculated fields
     float lux_grid_voltage_live = (raw.v_ac_r + raw.v_ac_s + raw.v_ac_t) / 30.0f;
