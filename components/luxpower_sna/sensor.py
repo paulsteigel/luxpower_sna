@@ -64,7 +64,9 @@ YAML_TO_C_NAMES = {
     "ct_clamp_live": "ct_clamp_live",
     "home_consumption2": "home_consumption2",
     "total_pv_energy": "total_pv_energy",
+    "e_pv_total_today": "e_pv_total_today",    
     "home_consumption_total": "home_consumption_total",
+    "home_consumption_live": "home_consumption_live",        
     "battery_flow": "battery_flow",
     "grid_flow": "grid_flow",
         
@@ -162,6 +164,8 @@ SENSOR_TYPES = {
     "home_consumption_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
     "battery_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
     "grid_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "home_consumption_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
+    "e_pv_total_today": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
     
     # Text sensor schemas
     "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
