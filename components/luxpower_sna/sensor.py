@@ -118,7 +118,7 @@ YAML_TO_C_NAMES = {
     "min_cell_temp": "min_cell_temp",
     "lux_battery_cycle_count": "lux_battery_cycle_count",
     "lux_home_consumption_2_live": "lux_home_consumption_2_live",
-    "lux_home_consumption_2_live_alias": "lux_home_consumption_2_live_alias",
+    #"lux_home_consumption_2_live_alias": "lux_home_consumption_2_live_alias",
     
     # Section4 sensors
     "lux_current_generator_voltage": "lux_current_generator_voltage",
