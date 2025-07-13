@@ -31,6 +31,7 @@ YAML_TO_C_NAMES = {
     "lux_status_text": "lux_status_text",
     "lux_battery_status_text": "lux_battery_status_text",
     "lux_data_last_received_time": "lux_data_last_received_time",
+    "inverter_serial_number": "inverter_serial_number",   
     
     # Section1 sensors
     "lux_current_solar_voltage_1": "lux_current_solar_voltage_1",
@@ -144,6 +145,7 @@ SENSOR_TYPES = {
     "lux_status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
     "lux_battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
     "lux_data_last_received_time": sensor.sensor_schema(icon="mdi:clock", state_class=STATE_CLASS_MEASUREMENT),
+    inverter_serial_number
     
     # Section1 sensors
     "lux_current_solar_voltage_1": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
@@ -269,7 +271,7 @@ async def to_code(config):
             
             # Handle text sensors
             if yaml_key in ["lux_firmware_version", "lux_inverter_model", 
-                            "lux_status_text", "lux_battery_status_text"]:
+                            "lux_status_text", "lux_battery_status_text","inverter_serial_number"]:
                 sens = await text_sensor.new_text_sensor(conf)
             # Handle regular sensors
             else:
