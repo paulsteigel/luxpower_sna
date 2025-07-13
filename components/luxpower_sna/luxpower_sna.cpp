@@ -163,86 +163,65 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection1));
     
     // Section 1: Bank 0
-    publish_state_("pv1_voltage", raw.pv1_voltage / 10.0f);
-    publish_state_("pv2_voltage", raw.pv2_voltage / 10.0f);
-    publish_state_("pv3_voltage", raw.pv3_voltage / 10.0f);
-    publish_state_("battery_voltage", raw.battery_voltage / 10.0f);
-    publish_state_("soc", (float)raw.soc);
+    publish_state_("lux_current_solar_voltage_1", raw.v_pv_1 / 10.0f);
+    publish_state_("lux_current_solar_voltage_2", raw.v_pv_2 / 10.0f);
+    publish_state_("lux_current_solar_voltage_3", raw.v_pv_3 / 10.0f);
+    publish_state_("lux_battery_voltage", raw.v_bat / 10.0f);
+    publish_state_("lux_battery_percent", (float)raw.soc);
     publish_state_("soh", (float)raw.soh);
-    publish_state_("pv1_power", (float)raw.pv1_power);
-    publish_state_("pv2_power", (float)raw.pv2_power);
-    publish_state_("pv3_power", (float)raw.pv3_power);
-    publish_state_("charge_power", (float)raw.charge_power);
-    publish_state_("discharge_power", (float)raw.discharge_power);
-    publish_state_("inverter_power", (float)raw.activeInverter_power);
-    publish_state_("power_to_grid", (float)raw.power_to_grid);
-    publish_state_("power_from_grid", (float)raw.power_from_grid);
-    publish_state_("grid_voltage_r", raw.voltage_ac_r / 10.0f);
-    publish_state_("grid_voltage_s", raw.voltage_ac_s / 10.0f);
-    publish_state_("grid_voltage_t", raw.voltage_ac_t / 10.0f);
-    publish_state_("grid_frequency", raw.frequency_grid / 100.0f);
-    publish_state_("power_factor", raw.grid_power_factor / 1000.0f);
-    publish_state_("eps_voltage_r", raw.voltage_eps_r / 10.0f);
-    publish_state_("eps_voltage_s", raw.voltage_eps_s / 10.0f);
-    publish_state_("eps_voltage_t", raw.voltage_eps_t / 10.0f);
-    publish_state_("eps_frequency", raw.frequency_eps / 100.0f);
-    publish_state_("eps_active_power", (float)raw.active_eps_power);
-    publish_state_("eps_apparent_power", (float)raw.apparent_eps_power);
-    publish_state_("bus1_voltage", raw.bus1_voltage / 10.0f);
-    publish_state_("bus2_voltage", raw.bus2_voltage / 10.0f);
-    publish_state_("pv1_energy_today", raw.pv1_energy_today / 10.0f);
-    publish_state_("pv2_energy_today", raw.pv2_energy_today / 10.0f);
-    publish_state_("pv3_energy_today", raw.pv3_energy_today / 10.0f);
-    publish_state_("inverter_energy_today", raw.activeInverter_energy_today / 10.0f);
-    publish_state_("ac_charging_today", raw.ac_charging_today / 10.0f);
-    publish_state_("charging_today", raw.charging_today / 10.0f);
-    publish_state_("discharging_today", raw.discharging_today / 10.0f);
-    publish_state_("eps_today", raw.eps_today / 10.0f);
-    publish_state_("exported_today", raw.exported_today / 10.0f);
-    publish_state_("grid_today", raw.grid_today / 10.0f);
-
-    // NEW: Additional sensors and calculations 13/07
-    publish_state_("internal_fault", (float)raw.internal_fault);
-    publish_state_("ct_clamp_live", raw.ct_clamp_live / 100.0f);
-
-    // Calculate total PV energy
-    daily_solar_ = (raw.pv1_energy_today + raw.pv2_energy_today + raw.pv3_energy_today) / 10.0f;
-    publish_state_("daily_solar_", daily_solar_);
-    float grid_voltage_avg = (raw.voltage_ac_r + raw.voltage_ac_s + raw.voltage_ac_t) / 30.0f;
-    int16_t p_pv_total = raw.pv1_power + raw.pv2_power + raw.pv3_power;
+    publish_state_("lux_current_solar_output_1", (float)raw.p_pv_1);
+    publish_state_("lux_current_solar_output_2", (float)raw.p_pv_2);
+    publish_state_("lux_current_solar_output_3", (float)raw.p_pv_3);
+    publish_state_("lux_battery_charge", (float)raw.p_charge);
+    publish_state_("lux_battery_discharge", (float)raw.p_discharge);
+    publish_state_("lux_power_from_inverter_live", (float)raw.p_inv);
+    publish_state_("lux_power_to_inverter_live", (float)raw.p_rec);
+    publish_state_("lux_grid_voltage_r", raw.v_ac_r / 10.0f);
+    publish_state_("lux_grid_voltage_s", raw.v_ac_s / 10.0f);
+    publish_state_("lux_grid_voltage_t", raw.v_ac_t / 10.0f);
+    publish_state_("lux_grid_frequency_live", raw.f_ac / 100.0f);
+    publish_state_("lux_power_to_eps", (float)raw.p_to_eps);
+    publish_state_("lux_power_to_grid_live", (float)raw.p_to_grid);
+    publish_state_("lux_power_from_grid_live", (float)raw.p_to_user);
+    publish_state_("lux_daily_solar_array_1", raw.e_pv_1_day / 10.0f);
+    publish_state_("lux_daily_solar_array_2", raw.e_pv_2_day / 10.0f);
+    publish_state_("lux_daily_solar_array_3", raw.e_pv_3_day / 10.0f);
+    publish_state_("lux_power_from_inverter_daily", raw.e_inv_day / 10.0f);
+    publish_state_("lux_power_to_inverter_daily", raw.e_rec_day / 10.0f);
+    publish_state_("lux_daily_battery_charge", raw.e_chg_day / 10.0f);
+    publish_state_("lux_daily_battery_discharge", raw.e_dischg_day / 10.0f);
+    publish_state_("lux_power_to_eps_daily", raw.e_eps_day / 10.0f);
+    publish_state_("lux_power_to_grid_daily", raw.e_to_grid_day / 10.0f);
+    publish_state_("lux_power_from_grid_daily", raw.e_to_user_day / 10.0f);
+    publish_state_("lux_internal_fault", (float)raw.internal_fault);
+    publish_state_("lux_power_current_clamp", raw.rms_current / 100.0f);
     
-    publish_state_("grid_voltage_avg", grid_voltage_avg);
-    publish_state_("p_pv_total", (float)p_pv_total);
+    // Calculated fields
+    float lux_grid_voltage_live = (raw.v_ac_r + raw.v_ac_s + raw.v_ac_t) / 30.0f;
+    int16_t lux_current_solar_output = raw.p_pv_1 + raw.p_pv_2 + raw.p_pv_3;
+    float lux_daily_solar = (raw.e_pv_1_day + raw.e_pv_2_day + raw.e_pv_3_day) / 10.0f;
+    int16_t lux_power_to_home = raw.p_to_user - raw.p_rec;
+    float lux_battery_flow = (raw.p_discharge > 0) ? -raw.p_discharge : raw.p_charge;
+    float lux_grid_flow = (raw.p_to_user > 0) ? -raw.p_to_user : raw.p_to_grid;
+    float lux_home_consumption_live = raw.p_to_user - raw.p_rec + raw.p_inv - raw.p_to_grid;
+    float lux_home_consumption = raw.e_to_user_day/10.0f - raw.e_rec_day/10.0f + 
+                                 raw.e_inv_day/10.0f - raw.e_to_grid_day/10.0f;
+    
+    publish_state_("lux_grid_voltage_live", lux_grid_voltage_live);
+    publish_state_("lux_current_solar_output", (float)lux_current_solar_output);
+    publish_state_("lux_daily_solar", lux_daily_solar);
+    publish_state_("lux_power_to_home", (float)lux_power_to_home);
+    publish_state_("lux_battery_flow", lux_battery_flow);
+    publish_state_("lux_grid_flow", lux_grid_flow);
+    publish_state_("lux_home_consumption_live", lux_home_consumption_live);
+    publish_state_("lux_home_consumption", lux_home_consumption);
     
     // Status text
     if (raw.status < sizeof(STATUS_TEXTS)/sizeof(STATUS_TEXTS[0])) {
-      publish_state_("status_text", std::string(STATUS_TEXTS[raw.status]));
+      publish_state_("lux_status_text", std::string(STATUS_TEXTS[raw.status]));
     } else {
-      publish_state_("status_text", "Unknown Status");
+      publish_state_("lux_status_text", "Unknown Status");
     }
-    
-    // Calculate additional fields from Arduino
-    // Battery flow calculation
-    float battery_flow = (raw.discharge_power > 0) ? 
-        -raw.discharge_power : raw.charge_power;
-    publish_state_("battery_flow", battery_flow);
-    
-    // Grid flow calculation
-    float grid_flow = (raw.power_from_grid > 0) ? 
-        -raw.power_from_grid : raw.power_to_grid;
-    publish_state_("grid_flow", grid_flow);
-    
-    // Home consumption calculations
-    float home_consumption_live = raw.power_from_grid - 
-        raw.activeCharge_power + raw.activeInverter_power - 
-        raw.power_to_grid;
-    publish_state_("home_consumption_live", home_consumption_live);
-    
-    float home_consumption_daily = raw.grid_today / 10.0f - 
-        raw.ac_charging_today / 10.0f + 
-        raw.activeInverter_energy_today / 10.0f - 
-        raw.exported_today / 10.0f;
-    publish_state_("home_consumption_daily", home_consumption_daily);
 
   } else if (trans.registerStart == 40 && data_payload_length >= sizeof(LuxLogDataRawSection2)) {
     LuxLogDataRawSection2 raw;
@@ -273,34 +252,28 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     LuxLogDataRawSection3 raw;
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection3));
 
-    // Section 3: Bank 80
-    publish_state_("max_charge_current", raw.max_chg_curr / 10.0f);
-    publish_state_("max_discharge_current", raw.max_dischg_curr / 10.0f);
-    publish_state_("charge_voltage_ref", raw.charge_volt_ref / 10.0f);
-    publish_state_("discharge_cutoff_voltage", raw.dischg_cut_volt / 10.0f);
-    publish_state_("battery_current", raw.bat_current / 10.0f);
-    publish_state_("battery_count", (float)raw.bat_count);
-    publish_state_("battery_capacity", (float)raw.bat_capacity);
-    publish_state_("battery_status_inv", (float)raw.bat_status_inv);
-    publish_state_("max_cell_voltage", raw.max_cell_volt / 1000.0f);
-    publish_state_("min_cell_voltage", raw.min_cell_volt / 1000.0f);
+    // Battery current conversion
+    int16_t raw_current = raw.bat_current;
+    if (raw_current & 0x8000) raw_current -= 0x10000;
+    
+    publish_state_("lux_bms_limit_charge", raw.max_chg_curr / 10.0f);
+    publish_state_("lux_bms_limit_discharge", raw.max_dischg_curr / 10.0f);
+    publish_state_("lux_battery_count", (float)raw.bat_count);
+    publish_state_("lux_battery_capacity_ah", (float)raw.bat_capacity);
+    publish_state_("lux_battery_current", raw_current / 10.0f);
+    publish_state_("max_cell_volt", raw.max_cell_volt / 1000.0f);
+    publish_state_("min_cell_volt", raw.min_cell_volt / 1000.0f);
     publish_state_("max_cell_temp", raw.max_cell_temp / 10.0f);
     publish_state_("min_cell_temp", raw.min_cell_temp / 10.0f);
-    publish_state_("cycle_count", (float)raw.bat_cycle_count);
+    publish_state_("lux_battery_cycle_count", (float)raw.bat_cycle_count);
+    publish_state_("lux_home_consumption_2_live", (float)raw.p_load2);
     
-    //removed as not needed
-    //publish_state_("p_load2", (float)raw.p_load2);
-    
-    // Battery status text 13/07
+    // Battery status text
     if (raw.bat_status_inv < sizeof(BATTERY_STATUS_TEXTS)/sizeof(BATTERY_STATUS_TEXTS[0])) {
-      publish_state_("battery_status_text", std::string(BATTERY_STATUS_TEXTS[raw.bat_status_inv]));
+      publish_state_("lux_battery_status_text", std::string(BATTERY_STATUS_TEXTS[raw.bat_status_inv]));
     } else {
-      publish_state_("battery_status_text", "Unknown Battery Status");
+      publish_state_("lux_battery_status_text", "Unknown Battery Status");
     }
-    
-    // Home consumption 2
-    //publish_state_("home_consumption2", (float)raw.p_load2);
-    publish_state_("home_consumption2", static_cast<float>(raw.p_load2));
 
   } else if (trans.registerStart == 120 && data_payload_length >= sizeof(LuxLogDataRawSection4)) {
     LuxLogDataRawSection4 raw;
