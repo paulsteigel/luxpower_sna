@@ -302,6 +302,18 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::queue<std::pair<std::string, std::string>> string_publish_queue_;
   bool float_publishing_{false};
   bool string_publishing_{false};
+
+  // NEW: State machine for per-bank sequence
+  enum State {
+    IDLE,
+    CONNECTING,
+    WAITING_RESPONSE,
+  };
+  State state_ = IDLE;
+  uint32_t request_start_time_ = 0;
+  const uint32_t RESPONSE_TIMEOUT_MS = 15000;  // 15s timeout
+  uint32_t last_request_time_ = 0;
+  const uint32_t MIN_INTERVAL_BETWEEN_REQUESTS_MS = 5000;  // Min 5s between requests
 };
 
 }  // namespace luxpower_sna
