@@ -38,7 +38,7 @@ void LuxpowerSNAComponent::log_hex_buffer(const char* title, const uint8_t *buff
     sprintf(str + i * 3, "%02X ", buffer[i]);
   }
   str[len * 3 - 1] = '\0';
-  ESP_LOGD(TAG, "%s (%d bytes): %s", title, len, str);
+  ESP_LOGI(TAG, "%s (%d bytes): %s", title, len, str);
 }
 
 void LuxpowerSNAComponent::setup() {
@@ -53,7 +53,7 @@ void LuxpowerSNAComponent::setup() {
   });
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
-    ESP_LOGD(TAG, "Connected. Requesting bank %d", this->banks_[this->next_bank_to_request_]);
+    ESP_LOGI(TAG, "Connected. Requesting bank %d", this->banks_[this->next_bank_to_request_]);
     this->request_bank_(this->banks_[this->next_bank_to_request_]);
   });
 
@@ -63,7 +63,7 @@ void LuxpowerSNAComponent::setup() {
   });
 
   this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) { 
-    ESP_LOGD(TAG, "Disconnected"); 
+    ESP_LOGI(TAG, "Disconnected"); 
   });
   
   this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
@@ -81,10 +81,10 @@ void LuxpowerSNAComponent::dump_config() {
 
 void LuxpowerSNAComponent::update() {
   if (this->tcp_client_->connected()) {
-    ESP_LOGD(TAG, "Connection in progress, skipping update");
+    ESP_LOGI(TAG, "Connection in progress, skipping update");
     return;
   }
-  ESP_LOGD(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
+  ESP_LOGI(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
   this->tcp_client_->connect(this->host_.c_str(), this->port_);
 }
 
@@ -146,7 +146,7 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     return;
   }
   
-  ESP_LOGD(TAG, "Processing bank %d", trans.registerStart);
+  ESP_LOGI(TAG, "Processing bank %d", trans.registerStart);
 
   static bool serial_published = false;
   if (!serial_published) {
