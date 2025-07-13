@@ -303,17 +303,9 @@ class LuxpowerSNAComponent : public PollingComponent {
   bool float_publishing_{false};
   bool string_publishing_{false};
 
-  // NEW: State machine for per-bank sequence
-  enum State {
-    IDLE,
-    CONNECTING,
-    WAITING_RESPONSE,
-  };
-  State state_ = IDLE;
-  uint32_t request_start_time_ = 0;
-  const uint32_t RESPONSE_TIMEOUT_MS = 15000;  // 15s timeout
-  uint32_t last_request_time_ = 0;
-  const uint32_t MIN_INTERVAL_BETWEEN_REQUESTS_MS = 5000;  // Min 5s between requests
+  bool in_burst_{false};
+  uint8_t banks_remaining_{0};  
+
 };
 
 }  // namespace luxpower_sna
