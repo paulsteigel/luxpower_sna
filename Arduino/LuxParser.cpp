@@ -1,4 +1,44 @@
 #include "LuxParser.h"
+static const char* STATUS_TEXTS[] = {
+  "Standby",                     // 0
+  "Error",                       // 1
+  "Inverting",                   // 2
+  "",                            // 3
+  "Solar > Load - Surplus > Grid", // 4
+  "Float",                       // 5
+  "",                            // 6
+  "Charger Off",                 // 7
+  "Supporting",                  // 8
+  "Selling",                     // 9
+  "Pass Through",                // 10
+  "Offsetting",                  // 11
+  "Solar > Battery Charging",    // 12
+  "", "", "",                    // 13-15
+  "Battery Discharging > LOAD - Surplus > Grid", // 16
+  "Temperature Over Range",      // 17
+  "", "",                        // 18-19
+  "Solar + Battery Discharging > LOAD - Surplus > Grid", // 20
+  "", "", "", "", "", "", "",    // 21-27
+  "AC Battery Charging",         // 32
+  "", "", "", "",                // 33-36
+  "Solar + Grid > Battery Charging", // 40
+  "", "", "", "", "", "", "", "", // 41-48
+  "No Grid : Battery > EPS",     // 64
+  "", "", "", "", "", "", "", "", // 65-72
+  "No Grid : Solar > EPS - Surplus > Battery Charging", // 136
+  "", "", "", "",                // 137-140
+  "No Grid : Solar + Battery Discharging > EPS" // 192
+};
+
+// Battery status text mapping (from Python)
+static const char* BATTERY_STATUS_TEXTS[] = {
+  "Charge Forbidden & Discharge Forbidden",  // 0
+  "Unknown",                                 // 1 (Changed from empty string)
+  "Charge Forbidden & Discharge Allowed",    // 2
+  "Charge Allowed & Discharge Allowed",      // 3
+  "", "", "", "", "", "", "", "", "", "", "", "", "", // 4-15
+  "Charge Allowed & Discharge Forbidden"     // 16 (Index 16)
+};
 
 bool LuxData::decode(const uint8_t *buffer, uint16_t length) {
   reset();  // Reset loaded flags before decoding new data
@@ -107,6 +147,9 @@ void LuxData::scaleSection1() {
   section1.grid_today               = raw.grid_today / 10.0f;
   section1.bus1_voltage             = raw.bus1_voltage / 10.0f;
   section1.bus2_voltage             = raw.bus2_voltage / 10.0f;
+
+  float grid_voltage_avg = (raw.voltage_ac_r + raw.voltage_ac_s + raw.voltage_ac_t) / 30.0f;
+  int16_t p_pv_total = raw.pv1_power + raw.pv2_power + raw.pv3_power;
   
   // Calculated fields
   section1.battery_flow = (section1.discharge_power > 0) ? 
