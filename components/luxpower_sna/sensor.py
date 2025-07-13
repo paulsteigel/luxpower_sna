@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor
+from esphome.components import sensor, text_sensor  
 from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_CURRENT,
@@ -29,6 +29,7 @@ YAML_TO_C_NAMES = {
     "battery_status_text": "battery_status_text",
     "grid_voltage_avg": "grid_voltage_avg",
     "p_pv_total": "p_pv_total",
+    
     "pv1_voltage": "pv1_voltage", "pv2_voltage": "pv2_voltage", "pv3_voltage": "pv3_voltage",
     "battery_voltage": "battery_voltage", "soc": "soc", "soh": "soh",
     "pv1_power": "pv1_power", "pv2_power": "pv2_power", "pv3_power": "pv3_power",
@@ -189,5 +190,11 @@ async def to_code(config):
     for yaml_key, c_name in YAML_TO_C_NAMES.items():
         if yaml_key in config:
             conf = config[yaml_key]
-            sens = await sensor.new_sensor(conf)
+            
+            # Handle text sensors differently
+            if yaml_key.endswith("_text"):
+                sens = await text_sensor.new_text_sensor(conf)
+            else:
+                sens = await sensor.new_sensor(conf)
+                
             cg.add(getattr(hub, f"set_{c_name}_sensor")(sens))
