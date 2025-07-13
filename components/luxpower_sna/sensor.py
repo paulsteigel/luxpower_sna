@@ -424,7 +424,7 @@ SENSOR_TYPES = {
     ),
     "lux_power_from_inverter_total": sensor.sensor_schema(
         unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_EnERGY,
+        device_class=DEVICE_CLASS_ENERGY,
         state_class=STATE_CLASS_TOTAL_INCREASING,
         accuracy_decimals=1
     ),
