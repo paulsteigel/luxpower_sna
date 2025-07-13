@@ -3,7 +3,6 @@
 #include <cstring>
 #include <queue>
 #include <utility>
-
 #define PUBLISH_DELAY_MS 50
 
 namespace esphome {
