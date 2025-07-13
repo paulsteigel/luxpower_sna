@@ -294,7 +294,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   uint8_t next_bank_to_request_{0};
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
   
-  float e_pv_total_ = 0.0f;
+  float e_pv_total_today_ = 0.0f;
   float home_consumption_total_ = 0.0f;
 
   // Internal queues for throttled updates
