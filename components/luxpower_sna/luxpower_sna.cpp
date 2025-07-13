@@ -228,25 +228,25 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection2));
     
     // Section 2: Bank 40
-    publish_state_("total_pv1_energy", raw.e_pv_1_all / 10.0f);
-    publish_state_("total_pv2_energy", raw.e_pv_2_all / 10.0f);
-    publish_state_("total_pv3_energy", raw.e_pv_3_all / 10.0f);
-    publish_state_("total_inverter_output", raw.e_inv_all / 10.0f);
-    publish_state_("total_recharge_energy", raw.e_rec_all / 10.0f);
-    publish_state_("total_charged", raw.e_chg_all / 10.0f);
-    publish_state_("total_discharged", raw.e_dischg_all / 10.0f);
-    publish_state_("total_eps_energy", raw.e_eps_all / 10.0f);
-    publish_state_("total_exported", raw.e_to_grid_all / 10.0f);
-    publish_state_("total_imported", raw.e_to_user_all / 10.0f);
-    publish_state_("temp_inner", raw.t_inner);
-    publish_state_("temp_radiator", raw.t_rad_1);
-    publish_state_("temp_radiator2", raw.t_rad_2);
-    publish_state_("temp_battery", raw.t_bat);
-    publish_state_("uptime", (float)raw.uptime);
+    publish_state_("lux_total_solar_array_1", raw.e_pv_1_all / 10.0f);
+    publish_state_("lux_total_solar_array_2", raw.e_pv_2_all / 10.0f);
+    publish_state_("lux_total_solar_array_3", raw.e_pv_3_all / 10.0f);
+    publish_state_("lux_power_from_inverter_total", raw.e_inv_all / 10.0f);
+    publish_state_("lux_power_to_inverter_total", raw.e_rec_all / 10.0f);
+    publish_state_("lux_total_battery_charge", raw.e_chg_all / 10.0f);
+    publish_state_("lux_total_battery_discharge", raw.e_dischg_all / 10.0f);
+    publish_state_("lux_power_to_eps_total", raw.e_eps_all / 10.0f);
+    publish_state_("lux_power_to_grid_total", raw.e_to_grid_all / 10.0f);
+    publish_state_("lux_power_from_grid_total", raw.e_to_user_all / 10.0f);
+    publish_state_("lux_internal_temp", raw.t_inner / 10.0f);
+    publish_state_("lux_radiator1_temp", raw.t_rad_1 / 10.0f);
+    publish_state_("lux_radiator2_temp", raw.t_rad_2 / 10.0f);
+    publish_state_("lux_battery_temperature_live", raw.t_bat / 10.0f);
+    publish_state_("lux_uptime", (float)raw.uptime);
     
     // Home consumption total
     float home_consumption_total = (raw.e_to_user_all - raw.e_rec_all + raw.e_inv_all - raw.e_to_grid_all) / 10.0f;
-    publish_state_("home_consumption_total", home_consumption_total);
+    publish_state_("lux_home_consumption_total", home_consumption_total);
 
   } else if (trans.registerStart == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
     LuxLogDataRawSection3 raw;
@@ -280,19 +280,19 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     memcpy(&raw, data_ptr, sizeof(LuxLogDataRawSection4));
     
     // Section 4: Bank 120
-    publish_state_("gen_input_volt", raw.gen_input_volt / 10.0f);
-    publish_state_("gen_input_freq", raw.gen_input_freq / 100.0f);
+    publish_state_("lux_current_generator_voltage", raw.gen_input_volt / 10.0f);
+    publish_state_("lux_current_generator_frequency", raw.gen_input_freq / 100.0f);
     
     // Apply threshold from Python implementation
     int16_t gen_power = (raw.gen_power_watt < 125) ? 0 : raw.gen_power_watt;
-    publish_state_("gen_power_watt", (float)gen_power);
+    publish_state_("lux_current_generator_power", (float)gen_power);
     
-    publish_state_("gen_power_day", raw.gen_power_day / 10.0f);
-    publish_state_("gen_power_all", raw.gen_power_all / 10.0f);
-    publish_state_("eps_L1_volt", raw.eps_L1_volt / 10.0f);
-    publish_state_("eps_L2_volt", raw.eps_L2_volt / 10.0f);
-    publish_state_("eps_L1_watt", (float)raw.eps_L1_watt);
-    publish_state_("eps_L2_watt", (float)raw.eps_L2_watt);
+    publish_state_("lux_current_generator_power_daily", raw.gen_power_day / 10.0f);
+    publish_state_("lux_current_generator_power_all", raw.gen_power_all / 10.0f);
+    publish_state_("lux_current_eps_L1_voltage", raw.eps_L1_volt / 10.0f);
+    publish_state_("lux_current_eps_L2_voltage", raw.eps_L2_volt / 10.0f);
+    publish_state_("lux_current_eps_L1_watt", (float)raw.eps_L1_watt);
+    publish_state_("lux_current_eps_L2_watt", (float)raw.eps_L2_watt);
 
   } else if (trans.registerStart == 160 && data_payload_length >= sizeof(LuxLogDataRawSection5)) {
     LuxLogDataRawSection5 raw;
