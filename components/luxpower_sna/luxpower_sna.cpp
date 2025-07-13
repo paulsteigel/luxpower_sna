@@ -53,8 +53,9 @@ void LuxpowerSNAComponent::setup() {
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
     ESP_LOGI(TAG, "Connected. Requesting bank %d", this->banks_[this->next_bank_to_request_]);
-    this->request_bank_(this->banks_[this->next_bank_to_request_]);
   });
+  // if failed, go next bank
+  this->request_bank_(this->banks_[this->next_bank_to_request_]);
 
   this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
     ESP_LOGW(TAG, "Connection error: %s", client->errorToString(error));
