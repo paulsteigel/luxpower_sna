@@ -70,7 +70,7 @@ void LuxpowerSNAComponent::setup() {
     ESP_LOGW(TAG, "Timeout after %d ms", time);
     client->close();
   });
-  ESP_LOGD(TAG, "Next bank to request: %d", banks_[next_bank_to_request_]);
+  ESP_LOGI(TAG, "Next bank to request: %d", banks_[next_bank_to_request_]);
 }
 
 void LuxpowerSNAComponent::dump_config() {
