@@ -287,7 +287,9 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("max_cell_temp", raw.max_cell_temp / 10.0f);
     publish_state_("min_cell_temp", raw.min_cell_temp / 10.0f);
     publish_state_("cycle_count", (float)raw.bat_cycle_count);
-    publish_state_("p_load2", (float)raw.p_load2);
+    
+    //removed as not needed
+    //publish_state_("p_load2", (float)raw.p_load2);
     
     // Battery status text 13/07
     if (raw.bat_status_inv < sizeof(BATTERY_STATUS_TEXTS)/sizeof(BATTERY_STATUS_TEXTS[0])) {
