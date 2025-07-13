@@ -259,7 +259,9 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_home_consumption_daily_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_daily"] = s; }
   void set_home_consumption_total_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_total"] = s; }
   void set_home_consumption2_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption2"] = s; }
-  
+  void set_total_pv_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_pv_energy"] = s; }
+  void set_home_consumption_total_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_total"] = s; }
+
   // Section 5 sensor setters
   void set_p_load_ongrid_sensor(sensor::Sensor *s) { this->float_sensors_["p_load_ongrid"] = s; }
   void set_e_load_day_sensor(sensor::Sensor *s) { this->float_sensors_["e_load_day"] = s; }
@@ -291,6 +293,9 @@ class LuxpowerSNAComponent : public PollingComponent {
   // Bank management
   uint8_t next_bank_to_request_{0};
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
+  
+  float total_pv_energy_ = 0.0f;
+  float home_consumption_total_ = 0.0f;
 
   // Internal queues for throttled updates
   std::queue<std::pair<std::string, float>> float_publish_queue_;
