@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, text_sensor  
+from esphome.components import sensor, text_sensor
 from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_CURRENT,
@@ -24,12 +24,7 @@ from esphome.const import (
 from . import LUXPOWER_SNA_COMPONENT_SCHEMA, CONF_LUXPOWER_SNA_ID
 
 YAML_TO_C_NAMES = {
-    # New addition on status text
-    "status_text": "status_text",
-    "battery_status_text": "battery_status_text",
-    "grid_voltage_avg": "grid_voltage_avg",
-    "p_pv_total": "p_pv_total",
-    
+    # Existing sensors
     "pv1_voltage": "pv1_voltage", "pv2_voltage": "pv2_voltage", "pv3_voltage": "pv3_voltage",
     "battery_voltage": "battery_voltage", "soc": "soc", "soh": "soh",
     "pv1_power": "pv1_power", "pv2_power": "pv2_power", "pv3_power": "pv3_power",
@@ -57,31 +52,24 @@ YAML_TO_C_NAMES = {
     "battery_capacity": "battery_capacity", "battery_status_inv": "battery_status_inv",
     "max_cell_voltage": "max_cell_voltage", "min_cell_voltage": "min_cell_voltage",
     "max_cell_temp": "max_cell_temp", "min_cell_temp": "min_cell_temp", "cycle_count": "cycle_count",
-    #"p_load2": "p_load2",  # duplicated 13/7 as made on home_consumption2 already
     "gen_input_volt": "gen_input_volt", "gen_input_freq": "gen_input_freq",
     "gen_power_watt": "gen_power_watt", "gen_power_day": "gen_power_day", "gen_power_all": "gen_power_all",
     "eps_L1_volt": "eps_L1_volt", "eps_L2_volt": "eps_L2_volt",
     "eps_L1_watt": "eps_L1_watt", "eps_L2_watt": "eps_L2_watt",
-    # New calculated fields
-    "battery_flow": "battery_flow",
-    "grid_flow": "grid_flow",
-    "home_consumption_live": "home_consumption_live",
-    "home_consumption_daily": "home_consumption_daily",
-    "home_consumption_total": "home_consumption_total",
-    "home_consumption2": "home_consumption2",
-    # Section 5 sensors
-    "p_load_ongrid": "p_load_ongrid",
-    "e_load_day": "e_load_day",
-    "e_load_all_l": "e_load_all_l"
+    
+    # New sensors added from LuxParser
+    "grid_voltage_avg": "grid_voltage_avg",
+    "p_pv_total": "p_pv_total",
+    "internal_fault": "internal_fault",
+    "ct_clamp_live": "ct_clamp_live",
+    "home_consumption2": "home_consumption2",  # Replaces p_load2
+    "status_text": "status_text",
+    "battery_status_text": "battery_status_text",
+    "inverter_serial": "inverter_serial"  # Moved from text_sensor.py
 }
 
 SENSOR_TYPES = {
-    # New status text
-    "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
-    "battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
-    "grid_voltage_avg": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
-    "p_pv_total": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
-    # existing sensors
+    # Existing sensor schemas
     "pv1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "pv2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "pv3_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
@@ -147,9 +135,6 @@ SENSOR_TYPES = {
     "max_cell_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "min_cell_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "cycle_count": sensor.sensor_schema(icon="mdi:battery-sync", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
-    
-    #"p_load2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0), removed
-    
     "gen_input_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
     "gen_input_freq": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
     "gen_power_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
@@ -160,18 +145,17 @@ SENSOR_TYPES = {
     "eps_L1_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
     "eps_L2_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
     
-    # New calculated fields
-    "battery_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "grid_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "home_consumption_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "home_consumption_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
-    "home_consumption_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
-    "home_consumption2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    # New sensor schemas
+    "grid_voltage_avg": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:transmission-tower"),
+    "p_pv_total": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    "internal_fault": sensor.sensor_schema(icon="mdi:alert", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "ct_clamp_live": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2, icon="mdi:current-ac"),
+    "home_consumption2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:home-lightning-bolt"),
     
-    # Section 5 sensors
-    "p_load_ongrid": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
-    "e_load_day": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
-    "e_load_all_l": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1)
+    # Text sensor schemas
+    "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
+    "battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
+    "inverter_serial": text_sensor.text_sensor_schema(icon="mdi:barcode-scan"),
 }
 
 CONFIG_SCHEMA = cv.All(
@@ -191,8 +175,8 @@ async def to_code(config):
         if yaml_key in config:
             conf = config[yaml_key]
             
-            # Handle text sensors differently
-            if yaml_key.endswith("_text"):
+            # Determine if it's a text sensor
+            if yaml_key in ["status_text", "battery_status_text", "inverter_serial"]:
                 sens = await text_sensor.new_text_sensor(conf)
             else:
                 sens = await sensor.new_sensor(conf)
