@@ -38,45 +38,45 @@ struct LuxTranslatedData {
 
 struct LuxLogDataRawSection1 {
   uint16_t status;
-  int16_t  pv1_voltage;
-  int16_t  pv2_voltage;
+  int16_t  pv1_voltage; 
+  int16_t  pv2_voltage; 
   int16_t  pv3_voltage;
-  int16_t  battery_voltage;
-  uint8_t  soc;
+  int16_t  battery_voltage; 
+  uint8_t  soc; 
   uint8_t  soh;
-  uint16_t internal_fault;
-  int16_t  pv1_power;
-  int16_t  pv2_power;
+  uint16_t internal_fault;  // Changed from _reserved1
+  int16_t  pv1_power; 
+  int16_t  pv2_power; 
   int16_t  pv3_power;
-  int16_t  charge_power;
+  int16_t  charge_power; 
   int16_t  discharge_power;
-  int16_t  voltage_ac_r;
-  int16_t  voltage_ac_s;
+  int16_t  voltage_ac_r; 
+  int16_t  voltage_ac_s; 
   int16_t  voltage_ac_t;
-  int16_t  frequency_grid;
+  int16_t  frequency_grid; 
   int16_t  activeInverter_power;
-  int16_t  activeCharge_power;
-  int16_t  ct_clamp_live;
+  int16_t  activeCharge_power; 
+  int16_t  ct_clamp_live;  // Changed from inductor_current
   int16_t  grid_power_factor;
-  int16_t  voltage_eps_r;
-  int16_t  voltage_eps_s;
+  int16_t  voltage_eps_r; 
+  int16_t  voltage_eps_s; 
   int16_t  voltage_eps_t;
-  int16_t  frequency_eps;
-  int16_t  active_eps_power;
+  int16_t  frequency_eps; 
+  int16_t  active_eps_power; 
   int16_t  apparent_eps_power;
-  int16_t  power_to_grid;
+  int16_t  power_to_grid; 
   int16_t  power_from_grid;
-  int16_t  pv1_energy_today;
-  int16_t  pv2_energy_today;
+  int16_t  pv1_energy_today; 
+  int16_t  pv2_energy_today; 
   int16_t  pv3_energy_today;
-  int16_t  activeInverter_energy_today;
+  int16_t  activeInverter_energy_today; 
   int16_t  ac_charging_today;
-  int16_t  charging_today;
-  int16_t  discharging_today;
+  int16_t  charging_today; 
+  int16_t  discharging_today; 
   int16_t  eps_today;
-  int16_t  exported_today;
+  int16_t  exported_today; 
   int16_t  grid_today;
-  int16_t  bus1_voltage;
+  int16_t  bus1_voltage; 
   int16_t  bus2_voltage;
 };
 
@@ -237,7 +237,15 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_eps_L2_volt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L2_volt"] = s; }
   void set_eps_L1_watt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L1_watt"] = s; }
   void set_eps_L2_watt_sensor(sensor::Sensor *s) { this->float_sensors_["eps_L2_watt"] = s; }
-  
+
+  // Add new sensor setters 13/07
+  void set_grid_voltage_avg_sensor(sensor::Sensor *s) { this->float_sensors_["grid_voltage_avg"] = s; }
+  void set_p_pv_total_sensor(sensor::Sensor *s) { this->float_sensors_["p_pv_total"] = s; }
+  void set_internal_fault_sensor(sensor::Sensor *s) { this->float_sensors_["internal_fault"] = s; }
+  void set_ct_clamp_live_sensor(sensor::Sensor *s) { this->float_sensors_["ct_clamp_live"] = s; }
+  void set_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["status_text"] = s; }
+  void set_battery_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["battery_status_text"] = s; }
+
   // New sensor setters for calculated fields
   void set_battery_flow_sensor(sensor::Sensor *s) { this->float_sensors_["battery_flow"] = s; }
   void set_grid_flow_sensor(sensor::Sensor *s) { this->float_sensors_["grid_flow"] = s; }
@@ -261,6 +269,10 @@ class LuxpowerSNAComponent : public PollingComponent {
   void publish_state_(const std::string &key, const std::string &value);
   void log_hex_buffer(const char* title, const uint8_t *buffer, size_t len);
   
+  // Status text mappings 13/07
+  static const char* STATUS_TEXTS[193];
+  static const char* BATTERY_STATUS_TEXTS[17];
+
   std::string host_;
   uint16_t port_;
   std::string dongle_serial_;
