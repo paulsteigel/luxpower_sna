@@ -64,7 +64,7 @@ YAML_TO_C_NAMES = {
     "ct_clamp_live": "ct_clamp_live",
     "home_consumption2": "home_consumption2",
     "total_pv_energy": "total_pv_energy",
-    "e_pv_total_today": "e_pv_total_today",    
+    "e_pv_total_today": "e_pv_total_today",
     "home_consumption_total": "home_consumption_total",
     "home_consumption_live": "home_consumption_live",        
     "battery_flow": "battery_flow",
