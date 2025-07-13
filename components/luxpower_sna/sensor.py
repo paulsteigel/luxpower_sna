@@ -145,8 +145,8 @@ SENSOR_TYPES = {
     "lux_status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
     "lux_battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
     "lux_data_last_received_time": sensor.sensor_schema(icon="mdi:clock", state_class=STATE_CLASS_MEASUREMENT),
-    inverter_serial_number
-    
+    "inverter_serial_number": text_sensor.text_sensor_schema(icon="mdi:solar-panel"),
+        
     # Section1 sensors
     "lux_current_solar_voltage_1": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
     "lux_current_solar_voltage_2": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
