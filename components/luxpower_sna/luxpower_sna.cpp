@@ -53,13 +53,14 @@ void LuxpowerSNAComponent::setup() {
 
   this->tcp_client_->onConnect([this](void *arg, AsyncClient *client) {
     ESP_LOGI(TAG, "Connected. Requesting bank %d", this->banks_[this->next_bank_to_request_]);
+    this->request_bank_(this->banks_[this->next_bank_to_request_]);
   });
-  // if failed, go next bank
-  this->request_bank_(this->banks_[this->next_bank_to_request_]);
 
   this->tcp_client_->onError([this](void *arg, AsyncClient *client, int8_t error) {
-    ESP_LOGW(TAG, "Connection error: %s", client->errorToString(error));
-    client->close();
+  ESP_LOGW(TAG, "Connection error: %s", client->errorToString(error));
+  client->close();
+  this->in_burst_ = false; // Cancel burst on error
+  this->banks_remaining_ = 0;
   });
 
   this->tcp_client_->onDisconnect([this](void *arg, AsyncClient *client) { 
@@ -67,10 +68,11 @@ void LuxpowerSNAComponent::setup() {
   });
   
   this->tcp_client_->onTimeout([this](void *arg, AsyncClient *client, uint32_t time) {
-    ESP_LOGW(TAG, "Timeout after %d ms", time);
-    client->close();
+  ESP_LOGW(TAG, "Timeout after %d ms", time);
+  client->close();
+  this->in_burst_ = false; // Cancel burst on timeout
+  this->banks_remaining_ = 0;
   });
-  ESP_LOGI(TAG, "Next bank to request: %d", banks_[next_bank_to_request_]);
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -81,19 +83,14 @@ void LuxpowerSNAComponent::dump_config() {
 }
 
 void LuxpowerSNAComponent::update() {
-  if (this->tcp_client_->connected()) {
-    ESP_LOGW(TAG, "Connection still active, skipping update");
+  if (this->tcp_client_->connected() || this->in_burst_) {
+    ESP_LOGI(TAG, "Connection in progress or in burst, skipping update");
     return;
   }
   
-  // Add reconnect delay to prevent flooding
-  static uint32_t last_connect = 0;
-  if (millis() - last_connect < 2000) {  // 2-second cooldown
-    return;
-  }
-  last_connect = millis();
-
-  ESP_LOGI(TAG, "Connecting to %s:%u...", this->host_.c_str(), this->port_);
+  ESP_LOGI(TAG, "Starting burst: Connecting to %s:%u...", this->host_.c_str(), this->port_);
+  this->in_burst_ = true;
+  this->banks_remaining_ = 5;
   this->tcp_client_->connect(this->host_.c_str(), this->port_);
 }
 
@@ -320,7 +317,20 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
   }
 
   // Cycle through banks: 0 → 40 → 80 → 120 → 160 → 0
-  next_bank_to_request_ = (next_bank_to_request_ + 1) % 5;
+  //next_bank_to_request_ = (next_bank_to_request_ + 1) % 5;
+  // Burst continuation logic
+  this->banks_remaining_--;
+  if (this->banks_remaining_ > 0) {
+    next_bank_to_request_ = (next_bank_to_request_ + 1) % 5;
+    
+    this->set_timeout(100, [this]() { // 100ms delay between banks
+      ESP_LOGI(TAG, "Burst: requesting next bank %d", 
+               this->banks_[this->next_bank_to_request_]);
+      this->tcp_client_->connect(this->host_.c_str(), this->port_);
+    });
+  } else {
+    this->in_burst_ = false; // End burst after last bank
+  }
 }
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
