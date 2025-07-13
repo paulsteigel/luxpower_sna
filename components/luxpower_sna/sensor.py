@@ -56,7 +56,7 @@ YAML_TO_C_NAMES = {
     "battery_capacity": "battery_capacity", "battery_status_inv": "battery_status_inv",
     "max_cell_voltage": "max_cell_voltage", "min_cell_voltage": "min_cell_voltage",
     "max_cell_temp": "max_cell_temp", "min_cell_temp": "min_cell_temp", "cycle_count": "cycle_count",
-    #"p_load2": "p_load2",  # duplicated 13/7 as made on home_consumption_live already
+    #"p_load2": "p_load2",  # duplicated 13/7 as made on home_consumption2 already
     "gen_input_volt": "gen_input_volt", "gen_input_freq": "gen_input_freq",
     "gen_power_watt": "gen_power_watt", "gen_power_day": "gen_power_day", "gen_power_all": "gen_power_all",
     "eps_L1_volt": "eps_L1_volt", "eps_L2_volt": "eps_L2_volt",
