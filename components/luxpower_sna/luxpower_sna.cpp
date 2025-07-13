@@ -204,8 +204,10 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     // NEW: Additional sensors and calculations 13/07
     publish_state_("internal_fault", (float)raw.internal_fault);
     publish_state_("ct_clamp_live", raw.ct_clamp_live / 100.0f);
-    
-    // Calculated values
+
+    // Calculate total PV energy
+    total_pv_energy_ = (raw.pv1_energy_today + raw.pv2_energy_today + raw.pv3_energy_today) / 10.0f;
+    publish_state_("total_pv_energy", total_pv_energy_);
     float grid_voltage_avg = (raw.voltage_ac_r + raw.voltage_ac_s + raw.voltage_ac_t) / 30.0f;
     int16_t p_pv_total = raw.pv1_power + raw.pv2_power + raw.pv3_power;
     
@@ -264,9 +266,7 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     publish_state_("uptime", (float)raw.uptime);
     
     // Home consumption total
-    float home_consumption_total = (raw.e_to_user_all - 
-        raw.e_rec_all + raw.e_inv_all - 
-        raw.e_to_grid_all) / 10.0f;
+    float home_consumption_total = (raw.e_to_user_all - raw.e_rec_all + raw.e_inv_all - raw.e_to_grid_all) / 10.0f;
     publish_state_("home_consumption_total", home_consumption_total);
 
   } else if (trans.registerStart == 80 && data_payload_length >= sizeof(LuxLogDataRawSection3)) {
@@ -299,7 +299,8 @@ void LuxpowerSNAComponent::handle_response_(const uint8_t *buffer, size_t length
     }
     
     // Home consumption 2
-    publish_state_("home_consumption2", (float)raw.p_load2);
+    //publish_state_("home_consumption2", (float)raw.p_load2);
+    publish_state_("home_consumption2", static_cast<float>(raw.p_load2));
 
   } else if (trans.registerStart == 120 && data_payload_length >= sizeof(LuxLogDataRawSection4)) {
     LuxLogDataRawSection4 raw;
