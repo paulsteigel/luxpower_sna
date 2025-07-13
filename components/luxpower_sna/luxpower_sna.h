@@ -158,8 +158,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_host(const std::string &host) { this->host_ = host; }
   void set_port(uint16_t port) { this->port_ = port; }
   void set_dongle_serial(const std::string &serial) { this->dongle_serial_ = serial; }
-  //void set_inverter_serial_number_sensor(const std::string &serial) { this->inverter_serial_ = serial; }
-  void set_inverter_serial_number_sensor(text_sensor::TextSensor *s) {this->string_sensors_["inverter_serial_number"] = s;}
+  void set_inverter_serial(const std::string &serial) { this->inverter_serial_ = serial; }
 
   // System Sensor Setters
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { this->string_sensors_["lux_firmware_version"] = s; }
@@ -167,6 +166,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["lux_status_text"] = s; }
   void set_lux_battery_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["lux_battery_status_text"] = s; }
   void set_lux_data_last_received_time_sensor(sensor::Sensor *s) { this->float_sensors_["lux_data_last_received_time"] = s; }
+  void set_inverter_serial_number_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial_number"] = s; }
 
   // Section1 Sensor Setters
   void set_lux_current_solar_voltage_1_sensor(sensor::Sensor *s) { this->float_sensors_["lux_current_solar_voltage_1"] = s; }
@@ -174,6 +174,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_current_solar_voltage_3_sensor(sensor::Sensor *s) { this->float_sensors_["lux_current_solar_voltage_3"] = s; }
   void set_lux_battery_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["lux_battery_voltage"] = s; }
   void set_lux_battery_percent_sensor(sensor::Sensor *s) { this->float_sensors_["lux_battery_percent"] = s; }
+  void set_soh_sensor(sensor::Sensor *s) { this->float_sensors_["soh"] = s; }
   void set_lux_internal_fault_sensor(sensor::Sensor *s) { this->float_sensors_["lux_internal_fault"] = s; }
   void set_lux_current_solar_output_1_sensor(sensor::Sensor *s) { this->float_sensors_["lux_current_solar_output_1"] = s; }
   void set_lux_current_solar_output_2_sensor(sensor::Sensor *s) { this->float_sensors_["lux_current_solar_output_2"] = s; }
@@ -188,7 +189,11 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_power_from_inverter_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_from_inverter_live"] = s; }
   void set_lux_power_to_inverter_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_inverter_live"] = s; }
   void set_lux_power_current_clamp_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_current_clamp"] = s; }
-  void set_lux_grid_power_factor_sensor(sensor::Sensor *s) { this->float_sensors_["grid_power_factor"] = s; }
+  void set_grid_power_factor_sensor(sensor::Sensor *s) { this->float_sensors_["grid_power_factor"] = s; }
+  void set_eps_voltage_r_sensor(sensor::Sensor *s) { this->float_sensors_["eps_voltage_r"] = s; }
+  void set_eps_voltage_s_sensor(sensor::Sensor *s) { this->float_sensors_["eps_voltage_s"] = s; }
+  void set_eps_voltage_t_sensor(sensor::Sensor *s) { this->float_sensors_["eps_voltage_t"] = s; }
+  void set_eps_frequency_sensor(sensor::Sensor *s) { this->float_sensors_["eps_frequency"] = s; }
   void set_lux_power_to_eps_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_eps"] = s; }
   void set_lux_power_to_grid_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_grid_live"] = s; }
   void set_lux_power_from_grid_live_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_from_grid_live"] = s; }
@@ -202,6 +207,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_power_to_eps_daily_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_eps_daily"] = s; }
   void set_lux_power_to_grid_daily_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_grid_daily"] = s; }
   void set_lux_power_from_grid_daily_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_from_grid_daily"] = s; }
+  void set_bus1_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["bus1_voltage"] = s; }
+  void set_bus2_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["bus2_voltage"] = s; }
   void set_lux_current_solar_output_sensor(sensor::Sensor *s) { this->float_sensors_["lux_current_solar_output"] = s; }
   void set_lux_daily_solar_sensor(sensor::Sensor *s) { this->float_sensors_["lux_daily_solar"] = s; }
   void set_lux_power_to_home_sensor(sensor::Sensor *s) { this->float_sensors_["lux_power_to_home"] = s; }
@@ -234,6 +241,9 @@ class LuxpowerSNAComponent : public PollingComponent {
   // Section3 Sensor Setters
   void set_lux_bms_limit_charge_sensor(sensor::Sensor *s) { this->float_sensors_["lux_bms_limit_charge"] = s; }
   void set_lux_bms_limit_discharge_sensor(sensor::Sensor *s) { this->float_sensors_["lux_bms_limit_discharge"] = s; }
+  void set_charge_voltage_ref_sensor(sensor::Sensor *s) { this->float_sensors_["charge_voltage_ref"] = s; }
+  void set_discharge_cutoff_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["discharge_cutoff_voltage"] = s; }
+  void set_battery_status_inv_sensor(sensor::Sensor *s) { this->float_sensors_["battery_status_inv"] = s; }
   void set_lux_battery_count_sensor(sensor::Sensor *s) { this->float_sensors_["lux_battery_count"] = s; }
   void set_lux_battery_capacity_ah_sensor(sensor::Sensor *s) { this->float_sensors_["lux_battery_capacity_ah"] = s; }
   void set_lux_battery_current_sensor(sensor::Sensor *s) { this->float_sensors_["lux_battery_current"] = s; }
@@ -259,20 +269,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_p_load_ongrid_sensor(sensor::Sensor *s) { this->float_sensors_["p_load_ongrid"] = s; }
   void set_e_load_day_sensor(sensor::Sensor *s) { this->float_sensors_["e_load_day"] = s; }
   void set_e_load_all_l_sensor(sensor::Sensor *s) { this->float_sensors_["e_load_all_l"] = s; }
-
-  // Text Sensor Setters
-  //void set_inverter_serial_sensor(text_sensor::TextSensor *s) { this->string_sensors_["inverter_serial"] = s; }
-  //void set_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["status_text"] = s; }
-  //void set_battery_status_text_sensor(text_sensor::TextSensor *s) { this->string_sensors_["battery_status_text"] = s; }
-
-  // Miscellaneous Sensor Setters
-  void set_soh_sensor(sensor::Sensor *s) { this->float_sensors_["soh"] = s; }
-  void set_power_factor_sensor(sensor::Sensor *s) { this->float_sensors_["power_factor"] = s; }
-  void set_eps_apparent_power_sensor(sensor::Sensor *s) { this->float_sensors_["eps_apparent_power"] = s; }
-  void set_bus1_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["bus1_voltage"] = s; }
-  void set_bus2_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["bus2_voltage"] = s; }
-  void set_charge_voltage_ref_sensor(sensor::Sensor *s) { this->float_sensors_["charge_voltage_ref"] = s; }
-  void set_discharge_cutoff_voltage_sensor(sensor::Sensor *s) { this->float_sensors_["discharge_cutoff_voltage"] = s; }
 
  private:
   void process_next_float_();
@@ -301,9 +297,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   uint8_t next_bank_to_request_{0};
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
   
-  float daily_solar_ = 0.0f;
-  float home_consumption_total_ = 0.0f;
-
   // Internal queues for throttled updates
   std::queue<std::pair<std::string, float>> float_publish_queue_;
   std::queue<std::pair<std::string, std::string>> string_publish_queue_;
