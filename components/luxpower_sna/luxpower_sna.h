@@ -260,7 +260,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_home_consumption_total_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_total"] = s; }
   void set_home_consumption2_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption2"] = s; }
   void set_total_pv_energy_sensor(sensor::Sensor *s) { this->float_sensors_["total_pv_energy"] = s; }
-  void set_home_consumption_total_sensor(sensor::Sensor *s) { this->float_sensors_["home_consumption_total"] = s; }
 
   // Section 5 sensor setters
   void set_p_load_ongrid_sensor(sensor::Sensor *s) { this->float_sensors_["p_load_ongrid"] = s; }
