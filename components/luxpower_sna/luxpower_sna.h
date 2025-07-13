@@ -302,10 +302,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::queue<std::pair<std::string, std::string>> string_publish_queue_;
   bool float_publishing_{false};
   bool string_publishing_{false};
-
-  bool in_burst_{false};
-  uint8_t banks_remaining_{0};  
-
 };
 
 }  // namespace luxpower_sna
