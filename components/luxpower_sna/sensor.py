@@ -130,591 +130,116 @@ YAML_TO_C_NAMES = {
 
 SENSOR_TYPES = {
     # System
-    "lux_firmware_version": text_sensor.text_sensor_schema(
-        icon="mdi:information-outline"
-    ),
-    "lux_inverter_model": text_sensor.text_sensor_schema(
-        icon="mdi:barcode-scan"
-    ),
-    "lux_status_text": text_sensor.text_sensor_schema(
-        icon="mdi:information-outline"
-    ),
-    "lux_battery_status_text": text_sensor.text_sensor_schema(
-        icon="mdi:battery-alert"
-    ),
-    "lux_data_last_received_time": sensor.sensor_schema(
-        icon="mdi:timer-sand",
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=0
-    ),
+    "lux_firmware_version": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
+    "lux_inverter_model": text_sensor.text_sensor_schema(icon="mdi:barcode-scan"),
+    "lux_status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
+    "lux_battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
+    "lux_data_last_received_time": sensor.sensor_schema(icon="mdi:timer-sand", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
 
     # Section1
-    "lux_current_solar_voltage_1": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1,
-        icon="mdi:solar-panel"
-    ),
-    "lux_current_solar_voltage_2": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1,
-        icon="mdi:solar-panel"
-    ),
-    "lux_current_solar_voltage_3": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1,
-        icon="mdi:solar-panel"
-    ),
-    "lux_battery_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_battery_percent": sensor.sensor_schema(
-        unit_of_measurement=UNIT_PERCENT,
-        device_class="battery",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "lux_internal_fault": sensor.sensor_schema(
-        icon="mdi:alert",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "lux_current_solar_output_1": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:solar-power"
-    ),
-    "lux_current_solar_output_2": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:solar-power"
-    ),
-    "lux_current_solar_output_3": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:solar-power"
-    ),
-    "lux_battery_charge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:battery-plus"
-    ),
-    "lux_battery_discharge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:battery-minus"
-    ),
-    "lux_grid_voltage_r": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_grid_voltage_s": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_grid_voltage_t": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_grid_frequency_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_HERTZ,
-        device_class=DEVICE_CLASS_FREQUENCY,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=2
-    ),
-    "lux_grid_voltage_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1,
-        icon="mdi:transmission-tower"
-    ),
-    "lux_power_from_inverter_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:power-plug"
-    ),
-    "lux_power_to_inverter_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:battery-minus"
-    ),
-    "lux_power_current_clamp": sensor.sensor_schema(
-        unit_of_measurement=UNIT_AMPERE,
-        device_class=DEVICE_CLASS_CURRENT,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=2,
-        icon="mdi:current-ac"
-    ),
-    "lux_power_to_eps": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:power-plug-off"
-    ),
-    "lux_power_to_grid_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:transmission-tower-export"
-    ),
-    "lux_power_from_grid_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:transmission-tower-import"
-    ),
-    "lux_daily_solar_array_1": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_daily_solar_array_2": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_daily_solar_array_3": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_power_from_inverter_daily": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_power_to_inverter_daily": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_daily_battery_charge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_daily_battery_discharge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_power_to_eps_daily": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_power_to_grid_daily": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_power_from_grid_daily": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_current_solar_output": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:solar-power"
-    ),
-    "lux_daily_solar": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1,
-        icon="mdi:home-lightning-bolt-outline"
-    ),
-    "lux_power_to_home": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:home-lightning-bolt"
-    ),
-    "lux_battery_flow": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_grid_flow": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_home_consumption_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1,
-        icon="mdi:home-lightning-bolt-outline"
-    ),
-    "lux_home_consumption": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1,
-        icon="mdi:home-lightning-bolt-outline"
-    ),
+    "lux_current_solar_voltage_1": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
+    "lux_current_solar_voltage_2": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
+    "lux_current_solar_voltage_3": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:solar-panel"),
+    "lux_battery_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_battery_percent": sensor.sensor_schema(unit_of_measurement=UNIT_PERCENT, device_class="battery", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "lux_internal_fault": sensor.sensor_schema(icon="mdi:alert", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "lux_current_solar_output_1": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    "lux_current_solar_output_2": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    "lux_current_solar_output_3": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    "lux_battery_charge": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-plus"),
+    "lux_battery_discharge": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-minus"),
+    "lux_grid_voltage_r": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_grid_voltage_s": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_grid_voltage_t": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_grid_frequency_live": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "lux_grid_voltage_live": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:transmission-tower"),
+    "lux_power_from_inverter_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug"),
+    "lux_power_to_inverter_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:battery-minus"),
+    "lux_power_current_clamp": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2, icon="mdi:current-ac"),
+    "lux_power_to_eps": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
+    "lux_power_to_grid_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:transmission-tower-export"),
+    "lux_power_from_grid_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:transmission-tower-import"),
+    "lux_daily_solar_array_1": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_daily_solar_array_2": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_daily_solar_array_3": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_power_from_inverter_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_power_to_inverter_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_daily_battery_charge": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_daily_battery_discharge": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_power_to_eps_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_power_to_grid_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_power_from_grid_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_current_solar_output": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:solar-power"),
+    "lux_daily_solar": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
+    "lux_power_to_home": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:home-lightning-bolt"),
+    "lux_battery_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_grid_flow": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_home_consumption_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
+    "lux_home_consumption": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
 
     # Section2
-    "lux_total_solar_array_1": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_total_solar_array_2": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_total_solar_array_3": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_power_from_inverter_total": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_power_to_inverter_total": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_total_battery_charge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_total_battery_discharge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_power_to_eps_total": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_power_to_grid_total": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_power_from_grid_total": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_fault_code": sensor.sensor_schema(
-        icon="mdi:alert",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "lux_warning_code": sensor.sensor_schema(
-        icon="mdi:alert",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "lux_internal_temp": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_radiator1_temp": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_radiator2_temp": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_battery_temperature_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_uptime": sensor.sensor_schema(
-        unit_of_measurement="s",
-        icon="mdi:timer-sand",
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=0
-    ),
-    "lux_total_solar": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1,
-        icon="mdi:solar-panel-large"
-    ),
-    "lux_home_consumption_total": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1,
-        icon="mdi:home-lightning-bolt-outline"
-    ),
+    "lux_total_solar_array_1": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_total_solar_array_2": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_total_solar_array_3": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_power_from_inverter_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_power_to_inverter_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_total_battery_charge": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_total_battery_discharge": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_power_to_eps_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_power_to_grid_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_power_from_grid_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_fault_code": sensor.sensor_schema(icon="mdi:alert", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "lux_warning_code": sensor.sensor_schema(icon="mdi:alert", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "lux_internal_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_radiator1_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_radiator2_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_battery_temperature_live": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_uptime": sensor.sensor_schema(unit_of_measurement="s", icon="mdi:timer-sand", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
+    "lux_total_solar": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:solar-panel-large"),
+    "lux_home_consumption_total": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1, icon="mdi:home-lightning-bolt-outline"),
 
     # Section3
-    "lux_bms_limit_charge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_AMPERE,
-        device_class=DEVICE_CLASS_CURRENT,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=2
-    ),
-    "lux_bms_limit_discharge": sensor.sensor_schema(
-        unit_of_measurement=UNIT_AMPERE,
-        device_class=DEVICE_CLASS_CURRENT,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=2
-    ),
-    "lux_battery_count": sensor.sensor_schema(
-        icon="mdi:counter",
-        accuracy_decimals=0
-    ),
-    "lux_battery_capacity_ah": sensor.sensor_schema(
-        unit_of_measurement="Ah",
-        icon="mdi:battery-plus-variant",
-        accuracy_decimals=0
-    ),
-    "lux_battery_current": sensor.sensor_schema(
-        unit_of_measurement=UNIT_AMPERE,
-        device_class=DEVICE_CLASS_CURRENT,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=2
-    ),
-    "max_cell_volt": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=3
-    ),
-    "min_cell_volt": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=3
-    ),
-    "max_cell_temp": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "min_cell_temp": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_battery_cycle_count": sensor.sensor_schema(
-        icon="mdi:battery-sync",
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=0
-    ),
-    "lux_home_consumption_2_live": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:home-lightning-bolt"
-    ),
+    "lux_bms_limit_charge": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "lux_bms_limit_discharge": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "lux_battery_count": sensor.sensor_schema(icon="mdi:counter", accuracy_decimals=0),
+    "lux_battery_capacity_ah": sensor.sensor_schema(unit_of_measurement="Ah", icon="mdi:battery-plus-variant", accuracy_decimals=0),
+    "lux_battery_current": sensor.sensor_schema(unit_of_measurement=UNIT_AMPERE, device_class=DEVICE_CLASS_CURRENT, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "max_cell_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
+    "min_cell_volt": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
+    "max_cell_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "min_cell_temp": sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_battery_cycle_count": sensor.sensor_schema(icon="mdi:battery-sync", state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=0),
+    "lux_home_consumption_2_live": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:home-lightning-bolt"),
 
     # Section4
-    "lux_current_generator_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_current_generator_frequency": sensor.sensor_schema(
-        unit_of_measurement=UNIT_HERTZ,
-        device_class=DEVICE_CLASS_FREQUENCY,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=2
-    ),
-    "lux_current_generator_power": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "lux_current_generator_power_daily": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "lux_current_generator_power_all": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
-    "lux_current_eps_L1_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_current_eps_L2_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "lux_current_eps_L1_watt": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "lux_current_eps_L2_watt": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
+    "lux_current_generator_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_current_generator_frequency": sensor.sensor_schema(unit_of_measurement=UNIT_HERTZ, device_class=DEVICE_CLASS_FREQUENCY, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=2),
+    "lux_current_generator_power": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "lux_current_generator_power_daily": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "lux_current_generator_power_all": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
+    "lux_current_eps_L1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_current_eps_L2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "lux_current_eps_L1_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "lux_current_eps_L2_watt": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
 
     # Section5
-    "p_load_ongrid": sensor.sensor_schema(
-        unit_of_measurement=UNIT_WATT,
-        device_class=DEVICE_CLASS_POWER,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "e_load_day": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=2
-    ),
-    "e_load_all_l": sensor.sensor_schema(
-        unit_of_measurement=UNIT_KILOWATT_HOURS,
-        device_class=DEVICE_CLASS_ENERGY,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        accuracy_decimals=1
-    ),
+    "p_load_ongrid": sensor.sensor_schema(unit_of_measurement=UNIT_WATT, device_class=DEVICE_CLASS_POWER, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "e_load_day": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=2),
+    "e_load_all_l": sensor.sensor_schema(unit_of_measurement=UNIT_KILOWATT_HOURS, device_class=DEVICE_CLASS_ENERGY, state_class=STATE_CLASS_TOTAL_INCREASING, accuracy_decimals=1),
 
     # Text Sensors
-    "status_text": text_sensor.text_sensor_schema(
-        icon="mdi:information-outline"
-    ),
-    "battery_status_text": text_sensor.text_sensor_schema(
-        icon="mdi:battery-alert"
-    ),
-    "inverter_serial": text_sensor.text_sensor_schema(
-        icon="mdi:barcode-scan"
-    ),
+    "status_text": text_sensor.text_sensor_schema(icon="mdi:information-outline"),
+    "battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
+    "inverter_serial": text_sensor.text_sensor_schema(icon="mdi:barcode-scan"),
 
     # Miscellaneous Sensors (not mapped in YAML_TO_C_NAMES)
-    "soh": sensor.sensor_schema(
-        unit_of_measurement=UNIT_PERCENT,
-        icon="mdi:battery-heart-variant",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0
-    ),
-    "power_factor": sensor.sensor_schema(
-        icon="mdi:angle-acute",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=3
-    ),
-    "eps_apparent_power": sensor.sensor_schema(
-        unit_of_measurement="VA",
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=0,
-        icon="mdi:power-plug-off"
-    ),
-    "bus1_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1,
-        icon="mdi:sine-wave"
-    ),
-    "bus2_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1,
-        icon="mdi:sine-wave"
-    ),
-    "charge_voltage_ref": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
-    "discharge_cutoff_voltage": sensor.sensor_schema(
-        unit_of_measurement=UNIT_VOLT,
-        device_class=DEVICE_CLASS_VOLTAGE,
-        state_class=STATE_CLASS_MEASUREMENT,
-        accuracy_decimals=1
-    ),
+    "soh": sensor.sensor_schema(unit_of_measurement=UNIT_PERCENT, icon="mdi:battery-heart-variant", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0),
+    "power_factor": sensor.sensor_schema(icon="mdi:angle-acute", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=3),
+    "eps_apparent_power": sensor.sensor_schema(unit_of_measurement="VA", state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=0, icon="mdi:power-plug-off"),
+    "bus1_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:sine-wave"),
+    "bus2_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1, icon="mdi:sine-wave"),
+    "charge_voltage_ref": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
+    "discharge_cutoff_voltage": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=STATE_CLASS_MEASUREMENT, accuracy_decimals=1),
 }
 
 CONFIG_SCHEMA = cv.All(
