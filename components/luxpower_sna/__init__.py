@@ -51,7 +51,7 @@ async def to_code(config):
     if len(inverter_serial) != 10:
         raise cv.Invalid("inverter_serial_number must be 10 characters long")
     # This call must match the function name in the .h file exactly.
-    cg.add(var.set_inverter_serial_number(inverter_serial))
+    cg.add(var.set_inverter_serial(inverter_serial))
     
     #if CORE.is_esp32 or CORE.is_libretiny:
     #    # https://github.com/ESP32Async/AsyncTCP
