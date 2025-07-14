@@ -37,7 +37,7 @@ luxpower_sna:
   port: 8000
   dongle_serial: "your_dongle_serial"
   inverter_serial_number: "your_inverter_serial"
-  update_interval: 20s
+  update_interval: 20s # better make it in 60s interval for not terrifying lux's dongle
 
 sensor:
   - platform: luxpower_sna    
