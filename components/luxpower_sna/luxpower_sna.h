@@ -153,7 +153,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_host(const std::string &host) { host_ = host; }
   void set_port(uint16_t port) { port_ = port; }
   void set_dongle_serial(const std::string &serial) { dongle_serial_ = serial; }
-  //void set_inverter_serial(const std::string &serial) { inverter_serial_ = serial; }
+  void set_inverter_serial(const std::string &serial) { inverter_serial_ = serial; }
 
   // System Sensor Setters
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
