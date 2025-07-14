@@ -1,5 +1,5 @@
 # known issue: 
-# too many senssor will be problematic on esp8266, so use what needed only
+# too many sensors will be problematic on esp8266, so use what needed only
 # This can also work in combination with other component but dont try to use too many sensors.
 
 substitutions:
