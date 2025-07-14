@@ -1,3 +1,7 @@
+# known issue: 
+# too many senssor will be problematic on esp8266, so use what needed only
+# This can also work in combination with other component but dont try to use too many sensors.
+
 substitutions:
   name: luxpower
 
@@ -247,7 +251,8 @@ sensor:
       name: "${name}_Lux Home Consumption 2 (Live)"
       id: "${name}_home_consumption_2_live"
 
-    # Section4 Sensors
+    # I would normally dont use sensors in this section.
+    # Section4 Sensors.
     lux_current_generator_voltage:
       name: "${name}_Lux Generator Voltage (Live)"
       id: "${name}_current_generator_voltage"
