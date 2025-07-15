@@ -29,7 +29,7 @@ const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
 // Key timing constants for connection management
 const uint32_t CONNECT_RETRY_INTERVAL = 10000; // Retry connection after 10 seconds on failure
 const uint32_t HEARTBEAT_TIMEOUT = 45000;      // Disconnect if no communication for 45 seconds
-const uint32_t RESPONSE_TIMEOUT = 10000;       // Timeout for waiting for a response to a data request
+const uint32_t RESPONSE_TIMEOUT = 15000;       // Timeout for waiting for a response to a data request
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA component...");
@@ -242,7 +242,8 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank_start_register) {
 
   // 1. Fill the Header
   LuxHeader* header = reinterpret_cast<LuxHeader*>(packet);
-  header->prefix = 0x55AA; // Let's test with the original byte order
+  //header->prefix = 0x55AA; // Let's test with the original byte order
+  header->prefix = 0xAA55; // revised for esphome
   header->protocolVersion = 0x0101;
   header->packetLength = 25;
   header->address = 1;
