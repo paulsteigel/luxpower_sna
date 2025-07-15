@@ -311,7 +311,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::string dongle_serial_;
   std::string inverter_serial_;
   
-  WiFiClient client_;
+  //WiFiClient client_;
   uint8_t next_bank_index_{0};
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
 
