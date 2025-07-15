@@ -6,12 +6,45 @@
 namespace esphome {
 namespace luxpower_sna {
 
+const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
+  "Unknown", // Placeholder for index 0
+  // Add actual status text mappings here (up to 193 entries)
+  // Example: "Standby", "Running", etc.
+  // For now, initialize with placeholders
+};
+const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
+  "Unknown", // Placeholder for index 0
+  // Add actual battery status text mappings here (up to 17 entries)
+  // Example: "Charging", "Discharging", etc.
+};
+
 void LuxpowerSNAComponent::setup() {
-  this->current_bank_ = 0;
-  this->connected_ = false;
-  this->last_request_ = 0;
-  this->last_heartbeat_ = 0;
-  this->request_in_progress_ = false; // Lock-like mechanism
+  current_bank_ = 0;
+  next_bank_index_ = 0;
+  connected_ = false;
+  last_request_ = 0;
+  last_heartbeat_ = 0;
+  request_in_progress_ = false; // Lock-like mechanism
+}
+
+void LuxpowerSNAComponent::loop() {
+  // Handle incoming data in the main loop to process heartbeats and responses
+  if (client_.available()) {
+    uint8_t buffer[512];
+    size_t bytes_read = client_.readBytes(buffer, sizeof(buffer));
+    if (bytes_read > 0) {
+      packet_buffer_.insert(packet_buffer_.end(), buffer, buffer + bytes_read);
+      process_packet_buffer_(current_bank_);
+    }
+  }
+}
+
+void LuxpowerSNAComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "Luxpower SNA:");
+  ESP_LOGCONFIG(TAG, "  Host: %s", host_.c_str());
+  ESP_LOGCONFIG(TAG, "  Port: %u", port_);
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", dongle_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", inverter_serial_.c_str());
 }
 
 void LuxpowerSNAComponent::update() {
@@ -36,7 +69,8 @@ void LuxpowerSNAComponent::update() {
   }
 
   request_in_progress_ = true;
-  request_bank_(banks_[current_bank_]);
+  current_bank_ = banks_[next_bank_index_];
+  request_bank_(current_bank_);
   last_request_ = now;
 }
 
@@ -78,7 +112,7 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
         packet_buffer_.insert(packet_buffer_.end(), buffer, buffer + bytes_read);
         if (process_packet_buffer_(bank)) {
           request_in_progress_ = false; // Release lock
-          current_bank_ = (current_bank_ + 1) % 5; // Move to next bank
+          next_bank_index_ = (next_bank_index_ + 1) % 5; // Move to next bank
           return true;
         }
       }
@@ -267,75 +301,124 @@ void LuxpowerSNAComponent::safe_disconnect_() {
   request_in_progress_ = false; // Release lock
 }
 
+void LuxpowerSNAComponent::publish_sensor_(sensor::Sensor *sensor, float value) {
+  if (sensor != nullptr) {
+    sensor->publish_state(value);
+  }
+}
+
+void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value) {
+  if (sensor != nullptr) {
+    sensor->publish_state(value);
+  }
+}
+
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
-  if (this->pv_power_1_ != nullptr)
-    this->pv_power_1_->publish_state(data.pvPower1);
-  if (this->pv_power_2_ != nullptr)
-    this->pv_power_2_->publish_state(data.pvPower2);
-  if (this->battery_power_ != nullptr)
-    this->battery_power_->publish_state(data.batteryPower);
-  if (this->soc_ != nullptr)
-    this->soc_->publish_state(data.SOC);
-  if (this->grid_power_ != nullptr)
-    this->grid_power_->publish_state(data.gridPower);
-  if (this->load_power_ != nullptr)
-    this->load_power_->publish_state(data.loadPower);
+  publish_sensor_(lux_status_text_sensor_, STATUS_TEXTS[std::min(data.status, static_cast<uint16_t>(192))]);
+  publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
+  publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
+  publish_sensor_(lux_current_solar_voltage_3_sensor_, data.v_pv_3 / 10.0f);
+  publish_sensor_(lux_battery_voltage_sensor_, data.v_bat / 10.0f);
+  publish_sensor_(lux_battery_percent_sensor_, data.soc);
+  publish_sensor_(soh_sensor_, data.soh);
+  publish_sensor_(lux_internal_fault_sensor_, data.internal_fault);
+  publish_sensor_(lux_current_solar_output_1_sensor_, data.p_pv_1);
+  publish_sensor_(lux_current_solar_output_2_sensor_, data.p_pv_2);
+  publish_sensor_(lux_current_solar_output_3_sensor_, data.p_pv_3);
+  publish_sensor_(lux_battery_charge_sensor_, data.p_charge);
+  publish_sensor_(lux_battery_discharge_sensor_, data.p_discharge);
+  publish_sensor_(lux_grid_voltage_r_sensor_, data.v_ac_r / 10.0f);
+  publish_sensor_(lux_grid_voltage_s_sensor_, data.v_ac_s / 10.0f);
+  publish_sensor_(lux_grid_voltage_t_sensor_, data.v_ac_t / 10.0f);
+  publish_sensor_(lux_grid_frequency_live_sensor_, data.f_ac / 100.0f);
+  publish_sensor_(lux_power_from_inverter_live_sensor_, data.p_inv);
+  publish_sensor_(lux_power_to_inverter_live_sensor_, data.p_rec);
+  publish_sensor_(lux_power_current_clamp_sensor_, data.rms_current / 10.0f);
+  publish_sensor_(grid_power_factor_sensor_, data.pf / 1000.0f);
+  publish_sensor_(eps_voltage_r_sensor_, data.v_eps_r / 10.0f);
+  publish_sensor_(eps_voltage_s_sensor_, data.v_eps_s / 10.0f);
+  publish_sensor_(eps_voltage_t_sensor_, data.v_eps_t / 10.0f);
+  publish_sensor_(eps_frequency_sensor_, data.f_eps / 100.0f);
+  publish_sensor_(lux_power_to_eps_sensor_, data.p_to_eps);
+  publish_sensor_(lux_power_to_grid_live_sensor_, data.p_to_grid);
+  publish_sensor_(lux_power_from_grid_live_sensor_, data.p_to_user);
+  publish_sensor_(lux_daily_solar_array_1_sensor_, data.e_pv_1_day / 10.0f);
+  publish_sensor_(lux_daily_solar_array_2_sensor_, data.e_pv_2_day / 10.0f);
+  publish_sensor_(lux_daily_solar_array_3_sensor_, data.e_pv_3_day / 10.0f);
+  publish_sensor_(lux_power_from_inverter_daily_sensor_, data.e_inv_day / 10.0f);
+  publish_sensor_(lux_power_to_inverter_daily_sensor_, data.e_rec_day / 10.0f);
+  publish_sensor_(lux_daily_battery_charge_sensor_, data.e_chg_day / 10.0f);
+  publish_sensor_(lux_daily_battery_discharge_sensor_, data.e_dischg_day / 10.0f);
+  publish_sensor_(lux_power_to_eps_daily_sensor_, data.e_eps_day / 10.0f);
+  publish_sensor_(lux_power_to_grid_daily_sensor_, data.e_to_grid_day / 10.0f);
+  publish_sensor_(lux_power_from_grid_daily_sensor_, data.e_to_user_day / 10.0f);
+  publish_sensor_(bus1_voltage_sensor_, data.v_bus_1 / 10.0f);
+  publish_sensor_(bus2_voltage_sensor_, data.v_bus_2 / 10.0f);
+  publish_sensor_(lux_current_solar_output_sensor_, data.p_pv_1 + data.p_pv_2 + data.p_pv_3);
+  publish_sensor_(lux_daily_solar_sensor_, (data.e_pv_1_day + data.e_pv_2_day + data.e_pv_3_day) / 10.0f);
+  publish_sensor_(lux_power_to_home_sensor_, data.p_to_user);
+  publish_sensor_(lux_battery_flow_sensor_, data.p_charge - data.p_discharge);
+  publish_sensor_(lux_grid_flow_sensor_, data.p_to_grid - data.p_to_user);
+  publish_sensor_(lux_home_consumption_live_sensor_, data.p_to_user + data.p_inv);
+  publish_sensor_(lux_home_consumption_sensor_, data.e_to_user_day / 10.0f);
 }
 
 void LuxpowerSNAComponent::process_section2_(const LuxLogDataRawSection2 &data) {
-  if (this->pv_voltage_1_ != nullptr)
-    this->pv_voltage_1_->publish_state(data.pvVoltage1 / 10.0f);
-  if (this->pv_voltage_2_ != nullptr)
-    this->pv_voltage_2_->publish_state(data.pvVoltage2 / 10.0f);
-  if (this->pv_current_1_ != nullptr)
-    this->pv_current_1_->publish_state(data.pvCurrent1 / 10.0f);
-  if (this->pv_current_2_ != nullptr)
-    this->pv_current_2_->publish_state(data.pvCurrent2 / 10.0f);
-  if (this->battery_voltage_ != nullptr)
-    this->battery_voltage_->publish_state(data.batteryVoltage / 10.0f);
-  if (this->battery_current_ != nullptr)
-    this->battery_current_->publish_state(data.batteryCurrent / 10.0f);
-  if (this->battery_temp_ != nullptr)
-    this->battery_temp_->publish_state(data.batteryTemp / 10.0f);
+  publish_sensor_(lux_total_solar_array_1_sensor_, data.e_pv_1_all / 10.0f);
+  publish_sensor_(lux_total_solar_array_2_sensor_, data.e_pv_2_all / 10.0f);
+  publish_sensor_(lux_total_solar_array_3_sensor_, data.e_pv_3_all / 10.0f);
+  publish_sensor_(lux_power_from_inverter_total_sensor_, data.e_inv_all / 10.0f);
+  publish_sensor_(lux_power_to_inverter_total_sensor_, data.e_rec_all / 10.0f);
+  publish_sensor_(lux_total_battery_charge_sensor_, data.e_chg_all / 10.0f);
+  publish_sensor_(lux_total_battery_discharge_sensor_, data.e_dischg_all / 10.0f);
+  publish_sensor_(lux_power_to_eps_total_sensor_, data.e_eps_all / 10.0f);
+  publish_sensor_(lux_power_to_grid_total_sensor_, data.e_to_grid_all / 10.0f);
+  publish_sensor_(lux_power_from_grid_total_sensor_, data.e_to_user_all / 10.0f);
+  publish_sensor_(lux_fault_code_sensor_, data.fault_code);
+  publish_sensor_(lux_warning_code_sensor_, data.warning_code);
+  publish_sensor_(lux_internal_temp_sensor_, data.t_inner / 10.0f);
+  publish_sensor_(lux_radiator1_temp_sensor_, data.t_rad_1 / 10.0f);
+  publish_sensor_(lux_radiator2_temp_sensor_, data.t_rad_2 / 10.0f);
+  publish_sensor_(lux_battery_temperature_live_sensor_, data.t_bat / 10.0f);
+  publish_sensor_(lux_uptime_sensor_, data.uptime);
+  publish_sensor_(lux_total_solar_sensor_, (data.e_pv_1_all + data.e_pv_2_all + data.e_pv_3_all) / 10.0f);
+  publish_sensor_(lux_home_consumption_total_sensor_, data.e_to_user_all / 10.0f);
 }
 
 void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) {
-  if (this->grid_voltage_ != nullptr)
-    this->grid_voltage_->publish_state(data.gridVoltage / 10.0f);
-  if (this->grid_current_ != nullptr)
-    this->grid_current_->publish_state(data.gridCurrent / 10.0f);
-  if (this->grid_freq_ != nullptr)
-    this->grid_freq_->publish_state(data.gridFreq / 100.0f);
-  if (this->load_voltage_ != nullptr)
-    this->load_voltage_->publish_state(data.loadVoltage / 10.0f);
-  if (this->load_current_ != nullptr)
-    this->load_current_->publish_state(data.loadCurrent / 10.0f);
-  if (this->load_freq_ != nullptr)
-    this->load_freq_->publish_state(data.loadFreq / 100.0f);
+  publish_sensor_(lux_bms_limit_charge_sensor_, data.max_chg_curr / 10.0f);
+  publish_sensor_(lux_bms_limit_discharge_sensor_, data.max_dischg_curr / 10.0f);
+  publish_sensor_(charge_voltage_ref_sensor_, data.charge_volt_ref / 10.0f);
+  publish_sensor_(discharge_cutoff_voltage_sensor_, data.dischg_cut_volt / 10.0f);
+  publish_sensor_(battery_status_inv_sensor_, data.bat_status_inv);
+  publish_sensor_(lux_battery_count_sensor_, data.bat_count);
+  publish_sensor_(lux_battery_capacity_ah_sensor_, data.bat_capacity);
+  publish_sensor_(lux_battery_current_sensor_, data.bat_current / 10.0f);
+  publish_sensor_(max_cell_volt_sensor_, data.max_cell_volt / 1000.0f);
+  publish_sensor_(min_cell_volt_sensor_, data.min_cell_volt / 1000.0f);
+  publish_sensor_(max_cell_temp_sensor_, data.max_cell_temp / 10.0f);
+  publish_sensor_(min_cell_temp_sensor_, data.min_cell_temp / 10.0f);
+  publish_sensor_(lux_battery_cycle_count_sensor_, data.bat_cycle_count);
+  publish_sensor_(lux_home_consumption_2_live_sensor_, data.p_load2);
+  publish_text_sensor_(lux_battery_status_text_sensor_, BATTERY_STATUS_TEXTS[std::min(data.bat_status_inv, 16)]);
 }
 
 void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) {
-  if (this->inverter_temp_ != nullptr)
-    this->inverter_temp_->publish_state(data.inverterTemp / 10.0f);
-  if (this->inverter_status_ != nullptr)
-    this->inverter_status_->publish_state(data.inverterStatus);
+  publish_sensor_(lux_current_generator_voltage_sensor_, data.gen_input_volt / 10.0f);
+  publish_sensor_(lux_current_generator_frequency_sensor_, data.gen_input_freq / 10.0f);
+  publish_sensor_(lux_current_generator_power_sensor_, data.gen_power_watt);
+  publish_sensor_(lux_current_generator_power_daily_sensor_, data.gen_power_day / 10.0f);
+  publish_sensor_(lux_current_generator_power_all_sensor_, data.gen_power_all / 10.0f);
+  publish_sensor_(lux_current_eps_L1_voltage_sensor_, data.eps_L1_volt / 10.0f);
+  publish_sensor_(lux_current_eps_L2_voltage_sensor_, data.eps_L2_volt / 10.0f);
+  publish_sensor_(lux_current_eps_L1_watt_sensor_, data.eps_L1_watt);
+  publish_sensor_(lux_current_eps_L2_watt_sensor_, data.eps_L2_watt);
 }
 
 void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) {
-  if (this->pv_energy_1_ != nullptr)
-    this->pv_energy_1_->publish_state(data.pvEnergy1);
-  if (this->pv_energy_2_ != nullptr)
-    this->pv_energy_2_->publish_state(data.pvEnergy2);
-  if (this->battery_charge_energy_ != nullptr)
-    this->battery_charge_energy_->publish_state(data.batteryChargeEnergy);
-  if (this->battery_discharge_energy_ != nullptr)
-    this->battery_discharge_energy_->publish_state(data.batteryDischargeEnergy);
-  if (this->grid_import_energy_ != nullptr)
-    this->grid_import_energy_->publish_state(data.gridImportEnergy);
-  if (this->grid_export_energy_ != nullptr)
-    this->grid_export_energy_->publish_state(data.gridExportEnergy);
-  if (this->load_energy_ != nullptr)
-    this->load_energy_->publish_state(data.loadEnergy);
+  publish_sensor_(p_load_ongrid_sensor_, data.p_load_ongrid);
+  publish_sensor_(e_load_day_sensor_, data.e_load_day / 10.0f);
+  publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
 }
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
@@ -356,4 +439,3 @@ uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
 
 }  // namespace luxpower_sna
 }  // namespace esphome
-```
