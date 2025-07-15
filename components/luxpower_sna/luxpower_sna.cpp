@@ -1,3 +1,4 @@
+```cpp
 #include "luxpower_sna.h"
 #include "esphome/core/log.h"
 #include <algorithm>
@@ -5,10 +6,7 @@
 namespace esphome {
 namespace luxpower_sna {
 
-static const char *const TAG = "luxpower_sna";
-
 void LuxpowerSNAComponent::setup() {
-  this->banks_ = {0, 40, 80, 120, 160};
   this->current_bank_ = 0;
   this->connected_ = false;
   this->last_request_ = 0;
@@ -161,35 +159,35 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
     switch (bank) {
       case 0:
         if (payload_size >= sizeof(LuxLogDataRawSection1)) {
-          process_section1_(*reinterpret_cast<LuxLogDataRawSection1*>(payload));
+          process_section1_(*reinterpret_cast<const LuxLogDataRawSection1*>(payload));
         } else {
           ESP_LOGE(TAG, "Payload too small for bank 0: %zu bytes", payload_size);
         }
         break;
       case 40:
         if (payload_size >= sizeof(LuxLogDataRawSection2)) {
-          process_section2_(*reinterpret_cast<LuxLogDataRawSection2*>(payload));
+          process_section2_(*reinterpret_cast<const LuxLogDataRawSection2*>(payload));
         } else {
           ESP_LOGE(TAG, "Payload too small for bank 40: %zu bytes", payload_size);
         }
         break;
       case 80:
         if (payload_size >= sizeof(LuxLogDataRawSection3)) {
-          process_section3_(*reinterpret_cast<LuxLogDataRawSection3*>(payload));
+          process_section3_(*reinterpret_cast<const LuxLogDataRawSection3*>(payload));
         } else {
           ESP_LOGE(TAG, "Payload too small for bank 80: %zu bytes", payload_size);
         }
         break;
       case 120:
         if (payload_size >= sizeof(LuxLogDataRawSection4)) {
-          process_section4_(*reinterpret_cast<LuxLogDataRawSection4*>(payload));
+          process_section4_(*reinterpret_cast<const LuxLogDataRawSection4*>(payload));
         } else {
           ESP_LOGE(TAG, "Payload too small for bank 120: %zu bytes", payload_size);
         }
         break;
       case 160:
         if (payload_size >= sizeof(LuxLogDataRawSection5)) {
-          process_section5_(*reinterpret_cast<LuxLogDataRawSection5*>(payload));
+          process_section5_(*reinterpret_cast<const LuxLogDataRawSection5*>(payload));
         } else {
           ESP_LOGE(TAG, "Payload too small for bank 160: %zu bytes", payload_size);
         }
@@ -269,7 +267,7 @@ void LuxpowerSNAComponent::safe_disconnect_() {
   request_in_progress_ = false; // Release lock
 }
 
-void LuxpowerSNAComponent::process_section1_(LuxLogDataRawSection1 &data) {
+void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
   if (this->pv_power_1_ != nullptr)
     this->pv_power_1_->publish_state(data.pvPower1);
   if (this->pv_power_2_ != nullptr)
@@ -284,7 +282,7 @@ void LuxpowerSNAComponent::process_section1_(LuxLogDataRawSection1 &data) {
     this->load_power_->publish_state(data.loadPower);
 }
 
-void LuxpowerSNAComponent::process_section2_(LuxLogDataRawSection2 &data) {
+void LuxpowerSNAComponent::process_section2_(const LuxLogDataRawSection2 &data) {
   if (this->pv_voltage_1_ != nullptr)
     this->pv_voltage_1_->publish_state(data.pvVoltage1 / 10.0f);
   if (this->pv_voltage_2_ != nullptr)
@@ -301,7 +299,7 @@ void LuxpowerSNAComponent::process_section2_(LuxLogDataRawSection2 &data) {
     this->battery_temp_->publish_state(data.batteryTemp / 10.0f);
 }
 
-void LuxpowerSNAComponent::process_section3_(LuxLogDataRawSection3 &data) {
+void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) {
   if (this->grid_voltage_ != nullptr)
     this->grid_voltage_->publish_state(data.gridVoltage / 10.0f);
   if (this->grid_current_ != nullptr)
@@ -316,14 +314,14 @@ void LuxpowerSNAComponent::process_section3_(LuxLogDataRawSection3 &data) {
     this->load_freq_->publish_state(data.loadFreq / 100.0f);
 }
 
-void LuxpowerSNAComponent::process_section4_(LuxLogDataRawSection4 &data) {
+void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) {
   if (this->inverter_temp_ != nullptr)
     this->inverter_temp_->publish_state(data.inverterTemp / 10.0f);
   if (this->inverter_status_ != nullptr)
     this->inverter_status_->publish_state(data.inverterStatus);
 }
 
-void LuxpowerSNAComponent::process_section5_(LuxLogDataRawSection5 &data) {
+void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) {
   if (this->pv_energy_1_ != nullptr)
     this->pv_energy_1_->publish_state(data.pvEnergy1);
   if (this->pv_energy_2_ != nullptr)
@@ -340,9 +338,9 @@ void LuxpowerSNAComponent::process_section5_(LuxLogDataRawSection5 &data) {
     this->load_energy_->publish_state(data.loadEnergy);
 }
 
-uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, uint16_t len) {
+uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
-  for (uint16_t pos = 0; pos < len; pos++) {
+  for (size_t pos = 0; pos < len; pos++) {
     crc ^= data[pos];
     for (uint8_t i = 8; i != 0; i--) {
       if ((crc & 0x0001) != 0) {
@@ -358,3 +356,4 @@ uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, uint16_t len)
 
 }  // namespace luxpower_sna
 }  // namespace esphome
+```
