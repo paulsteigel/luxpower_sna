@@ -147,6 +147,7 @@ struct LuxLogDataRawSection5 {
 class LuxpowerSNAComponent : public PollingComponent {
  public:
   void setup() override;
+  void loop() override;
   void dump_config() override;
   void update() override;
   
