@@ -26,14 +26,24 @@ void LuxpowerSNAComponent::setup() {
 }
 
 void LuxpowerSNAComponent::loop() {
-  // Handle incoming data in the main loop to process heartbeats and responses
+  // Handle incoming data non-blocking
   if (client_.available()) {
     uint8_t buffer[512];
     size_t bytes_read = client_.readBytes(buffer, sizeof(buffer));
     if (bytes_read > 0) {
       packet_buffer_.insert(packet_buffer_.end(), buffer, buffer + bytes_read);
-      process_packet_buffer_(current_bank_);
+      if (request_in_progress_) {
+        process_packet_buffer_(current_bank_);
+      }
     }
+  }
+
+  // Check for response timeout (15s)
+  if (request_in_progress_ && (millis() - last_request_ > 15000)) {
+    ESP_LOGE(TAG, "Timeout waiting for response for bank %d", current_bank_);
+    request_in_progress_ = false;
+    next_bank_index_ = (next_bank_index_ + 1) % 5;
+    packet_buffer_.clear();
   }
 }
 
@@ -94,37 +104,6 @@ void LuxpowerSNAComponent::handle_heartbeat_(const uint8_t *data, size_t len) {
   } else {
     ESP_LOGW(TAG, "Cannot respond to heartbeat: not connected");
   }
-}
-
-bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
-  uint8_t buffer[512];
-  uint32_t start = millis();
-  size_t total_read = 0;
-
-  // Wait up to 15 seconds for response (matches inverter's 10-15s prep time)
-  while (millis() - start < 15000) {
-    if (client_.available()) {
-      size_t bytes_read = client_.readBytes(buffer + total_read, sizeof(buffer) - total_read);
-      if (bytes_read > 0) {
-        total_read += bytes_read;
-        packet_buffer_.insert(packet_buffer_.end(), buffer, buffer + bytes_read);
-        if (process_packet_buffer_(bank)) {
-          request_in_progress_ = false; // Release lock
-          next_bank_index_ = (next_bank_index_ + 1) % 5; // Move to next bank
-          return true;
-        }
-      }
-    }
-    delay(10);
-  }
-
-  if (total_read == 0) {
-    ESP_LOGE(TAG, "No data received for bank %d after 15s", bank);
-    request_in_progress_ = false; // Release lock on timeout
-    return false;
-  }
-  request_in_progress_ = false; // Release lock
-  return false;
 }
 
 bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
@@ -243,6 +222,8 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
     }
 
     packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
+    request_in_progress_ = false; // Release lock
+    next_bank_index_ = (next_bank_index_ + 1) % 5; // Move to next bank
     return true;
   }
   return false;
@@ -315,12 +296,14 @@ void LuxpowerSNAComponent::safe_disconnect_() {
 
 void LuxpowerSNAComponent::publish_sensor_(sensor::Sensor *sensor, float value) {
   if (sensor != nullptr) {
+    ESP_LOGD(TAG, "Publishing sensor value: %.2f", value);
     sensor->publish_state(value);
   }
 }
 
 void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value) {
   if (sensor != nullptr) {
+    ESP_LOGD(TAG, "Publishing text sensor value: %s", value.c_str());
     sensor->publish_state(value);
   }
 }
