@@ -150,7 +150,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void loop() override;
   void dump_config() override;
   void update() override;
-  
+
   void set_host(const std::string &host) { host_ = host; }
   void set_port(uint16_t port) { port_ = port; }
   void set_dongle_serial(const std::string &serial) { dongle_serial_ = serial; }
@@ -276,6 +276,15 @@ class LuxpowerSNAComponent : public PollingComponent {
   uint8_t current_bank_{0};
   uint8_t banks_[5] = {0, 40, 80, 120, 160};
   std::vector<uint8_t> packet_buffer_;
+  uint32_t last_request_{0};
+  
+  // added 15/7
+  void check_connection_();
+  void safe_disconnect_();
+  void handle_heartbeat_(const uint8_t *data, size_t len);
+  bool is_heartbeat_packet_(const uint8_t *data);
+  bool process_packet_buffer_(uint8_t bank);
+
 
   void request_bank_(uint8_t bank);
   bool receive_response_(uint8_t bank);
