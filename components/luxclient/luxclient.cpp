@@ -1,127 +1,173 @@
 #include "luxclient.h"
-#include "crc.h"
-// This is the ONLY place where helpers.h should be included.
-#include "esphome/core/helpers.h"
 
 namespace esphome {
-namespace luxclient {
+namespace luxpower {
 
-static const char *const TAG = "luxclient";
+static const char *const TAG = "luxpower.client";
 
-static const uint8_t START_FLAG = 0xA8;
-static const uint8_t END_FLAG = 0x8A;
-static const uint8_t PROTOCOL_VERSION = 0x01;
-static const uint8_t PACKET_TYPE_TCP = 0x01;
-static const uint8_t FC_READ_HOLDING_REGISTERS = 0x03;
-static const uint8_t FC_WRITE_HOLDING_REGISTER = 0x06;
-
-void LuxClient::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up LuxClient (WiFi)...");
-  // Initialize the mutex pointer here.
-  this->client_mutex_ = make_unique<Mutex>();
+void LuxPowerClient::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up LuxPower Client");
+  lxp_packet_ = std::make_unique<LxpPacket>(false, dongle_serial_, inverter_serial_);
+  set_keepalive(15);  // 15s keepalive
 }
 
-void LuxClient::dump_config() {
-  ESP_LOGCONFIG(TAG, "LuxClient:");
-  ESP_LOGCONFIG(TAG, "  Host: %s:%u", this->host_.c_str(), this->port_);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", this->dongle_serial_.c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", this->inverter_serial_.c_str());
-  ESP_LOGCONFIG(TAG, "  Read Timeout: %ums", this->read_timeout_);
+void LuxPowerClient::on_connect() {
+  ESP_LOGI(TAG, "Connected to LuxPower server");
+  // Refresh data immediately after connection
+  request_data_bank(0);
+  request_hold_bank(0);
 }
 
-float LuxClient::get_setup_priority() const { return setup_priority::AFTER_WIFI; }
-
-std::vector<uint8_t> LuxClient::build_request_packet(uint8_t function_code, uint16_t start_reg,
-                                                     uint16_t reg_count_or_value) {
-  std::vector<uint8_t> packet;
-  packet.push_back(START_FLAG);
-  packet.push_back(PROTOCOL_VERSION);
-  packet.push_back(PACKET_TYPE_TCP);
-  packet.push_back(0);
-  packet.push_back(0);
-  for (int i = 0; i < 10; i++) packet.push_back(this->dongle_serial_[i]);
-  for (int i = 0; i < 10; i++) packet.push_back(this->inverter_serial_[i]);
-  packet.push_back(function_code);
-  packet.push_back(highByte(start_reg));
-  packet.push_back(lowByte(start_reg));
-  packet.push_back(highByte(reg_count_or_value));
-  packet.push_back(lowByte(reg_count_or_value));
-  uint16_t total_length = packet.size() - 1;
-  packet[3] = lowByte(total_length);
-  packet[4] = highByte(total_length);
-  uint16_t crc = crc16(packet.data() + 1, packet.size() - 1);
-  packet.push_back(lowByte(crc));
-  packet.push_back(highByte(crc));
-  packet.push_back(END_FLAG);
-  return packet;
+void LuxPowerClient::on_disconnect() {
+  ESP_LOGW(TAG, "Disconnected from LuxPower server");
 }
 
-std::optional<std::vector<uint8_t>> LuxClient::execute_transaction(const std::vector<uint8_t> &request) {
-  WiFiClient client;
-  if (!client.connect(this->host_.c_str(), this->port_)) {
-    ESP_LOGW(TAG, "Connection to %s:%d failed", this->host_.c_str(), this->port_);
-    return {};
-  }
-  ESP_LOGD(TAG, "Sending %d bytes: %s", request.size(), format_hex_pretty(request).c_str());
-  client.write(request.data(), request.size());
-  std::vector<uint8_t> response;
-  response.reserve(256);
-  uint32_t start_time = millis();
-  while (client.connected() && (millis() - start_time < this->read_timeout_)) {
-    while (client.available()) {
-      response.push_back(client.read());
-      if (response.back() == END_FLAG) {
-        goto response_received;
-      }
+void LuxPowerClient::on_data(std::vector<uint8_t> &data) {
+  parse_incoming_data(data);
+}
+
+void LuxPowerClient::parse_incoming_data(const std::vector<uint8_t> &data) {
+  size_t pos = 0;
+  while (pos < data.size()) {
+    // Check minimum packet size
+    if (data.size() - pos < 28) {
+      ESP_LOGW(TAG, "Incomplete packet received");
+      break;
     }
-    yield();
+
+    // Extract packet length (big-endian)
+    uint16_t pkt_len = (data[pos + 4] << 8) | data[pos + 5];
+    uint16_t full_len = pkt_len + 6;
+    
+    if (pos + full_len > data.size()) {
+      ESP_LOGW(TAG, "Partial packet received, waiting for more data");
+      break;
+    }
+    
+    // Extract complete packet
+    std::vector<uint8_t> packet(data.begin() + pos, data.begin() + pos + full_len);
+    pos += full_len;
+    
+    process_packet(packet);
   }
-response_received:
-  client.stop();
-  if (response.empty()) {
-    ESP_LOGW(TAG, "No response received from inverter (timeout).");
-    return {};
-  }
-  ESP_LOGD(TAG, "Received %d bytes: %s", response.size(), format_hex_pretty(response).c_str());
-  if (response.front() != START_FLAG || response.back() != END_FLAG) {
-    ESP_LOGW(TAG, "Invalid start/end flags in response.");
-    return {};
-  }
-  if (response.size() < 28) {
-    ESP_LOGW(TAG, "Response too short: %d bytes", response.size());
-    return {};
-  }
-  uint16_t received_crc = (uint16_t(response[response.size() - 2]) << 8) | response[response.size() - 3];
-  uint16_t calculated_crc = crc16(response.data() + 1, response.size() - 4);
-  if (received_crc != calculated_crc) {
-    ESP_LOGW(TAG, "CRC check failed! Received: 0x%04X, Calculated: 0x%04X", received_crc, calculated_crc);
-    return {};
-  }
-  if (response[25] & 0x80) {
-    ESP_LOGW(TAG, "Inverter returned an error frame. Function code: 0x%02X", response[25]);
-    return {};
-  }
-  uint8_t data_len = response[27];
-  if (response.size() < 28 + data_len) {
-    ESP_LOGW(TAG, "Response data length mismatch. Expected %d bytes, got less.", data_len);
-    return {};
-  }
-  std::vector<uint8_t> data_payload(response.begin() + 28, response.begin() + 28 + data_len);
-  return data_payload;
 }
 
-std::optional<std::vector<uint8_t>> LuxClient::read_holding_registers(uint16_t reg_address, uint8_t reg_count) {
-  esphome::MutexLock lock(*this->client_mutex_); // Added namespace
-  auto request = this->build_request_packet(FC_READ_HOLDING_REGISTERS, reg_address, reg_count);
-  return this->execute_transaction(request);
+void LuxPowerClient::process_packet(const std::vector<uint8_t> &packet) {
+  auto result = lxp_packet_->parse_packet(packet);
+  
+  if (result.packet_error) {
+    ESP_LOGW(TAG, "Invalid packet received");
+    return;
+  }
+  
+  // Handle different packet types
+  switch (result.tcp_function) {
+    case LxpPacket::HEARTBEAT:
+      if (respond_to_heartbeat_) {
+        send_packet(lxp_packet_->prepare_heartbeat_response(packet));
+      }
+      last_heartbeat_ = millis();
+      break;
+      
+    case LxpPacket::READ_INPUT:
+      // Process data registers
+      for (size_t i = 0; i < result.values.size(); i++) {
+        uint16_t reg = result.register_addr + i;
+        // Fire events or update sensors here
+        ESP_LOGD(TAG, "Data Register %d: %d", reg, result.values[i]);
+      }
+      break;
+      
+    case LxpPacket::READ_HOLD:
+    case LxpPacket::WRITE_SINGLE:
+      // Process holding registers
+      for (size_t i = 0; i < result.values.size(); i++) {
+        uint16_t reg = result.register_addr + i;
+        // Fire events or update sensors here
+        ESP_LOGD(TAG, "Holding Register %d: %d", reg, result.values[i]);
+      }
+      break;
+      
+    default:
+      ESP_LOGW(TAG, "Unknown function code: 0x%02X", result.tcp_function);
+  }
 }
 
-bool LuxClient::write_holding_register(uint16_t reg_address, uint16_t value) {
-  esphome::MutexLock lock(*this->client_mutex_); // Added namespace
-  auto request = this->build_request_packet(FC_WRITE_HOLDING_REGISTER, reg_address, value);
-  auto response = this->execute_transaction(request);
-  return response.has_value();
+void LuxPowerClient::send_packet(const std::vector<uint8_t> &packet) {
+  if (!is_connected()) {
+    ESP_LOGW(TAG, "Cannot send packet - not connected");
+    return;
+  }
+  
+  MutexLock lock(data_mutex_);
+  write(packet.data(), packet.size());
+  ESP_LOGD(TAG, "Sent %d bytes", packet.size());
 }
 
-}  // namespace luxclient
+void LuxPowerClient::loop() {
+  AsyncTCPClient::loop();  // Handle base class operations
+  
+  // Periodic tasks
+  uint32_t now = millis();
+  
+  // Refresh data registers every 60s
+  if (now - last_data_refresh_ > 60000) {
+    last_data_refresh_ = now;
+    for (uint8_t bank = 0; bank < 3; bank++) {
+      request_data_bank(bank);
+    }
+  }
+  
+  // Refresh holding registers every 300s
+  if (now - last_hold_refresh_ > 300000) {
+    last_hold_refresh_ = now;
+    for (uint8_t bank = 0; bank < 5; bank++) {
+      request_hold_bank(bank);
+    }
+  }
+  
+  // Heartbeat check
+  if (last_heartbeat_ > 0 && now - last_heartbeat_ > 90000) {
+    ESP_LOGW(TAG, "No heartbeat for 90s, reconnecting");
+    disconnect();
+  }
+}
+
+void LuxPowerClient::request_data_bank(uint8_t bank) {
+  uint16_t start_reg = bank * 40;
+  auto packet = lxp_packet_->prepare_read_packet(start_reg, 40, LxpPacket::READ_INPUT);
+  send_packet(packet);
+}
+
+void LuxPowerClient::request_hold_bank(uint8_t bank) {
+  uint16_t start_reg = bank * 40;
+  if (bank == 5) start_reg = 200;
+  if (bank == 6) start_reg = 560;
+  
+  auto packet = lxp_packet_->prepare_read_packet(start_reg, 40, LxpPacket::READ_HOLD);
+  send_packet(packet);
+}
+
+bool LuxPowerClient::write_holding_register(uint16_t reg, uint16_t value) {
+  auto packet = lxp_packet_->prepare_write_packet(reg, value);
+  send_packet(packet);
+  return true;
+}
+
+void LuxPowerClient::restart_inverter() {
+  write_holding_register(11, 128);
+  disconnect();
+}
+
+void LuxPowerClient::reset_settings() {
+  write_holding_register(11, 2);
+  disconnect();
+}
+
+void LuxPowerClient::sync_time(bool force) {
+  // Time sync implementation similar to Python version
+  // Would read current time registers and compare with system time
+}
+
+}  // namespace luxpower
 }  // namespace esphome
