@@ -3,14 +3,6 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
-from esphome.const import CONF_ID
-
-#ifdef USE_ESP32
-#include <WiFi.h>
-#elif USE_ESP8266
-#include <ESP8266WiFi.h>
-#endif
-#include <WiFiClient.h>
 
 #include <vector>
 #include <string>
@@ -40,14 +32,13 @@ class LuxClient : public Component {
   std::optional<std::vector<uint8_t>> execute_transaction(const std::vector<uint8_t> &request);
 
   std::string host_;
-  uint16_t port_{4321};
+  uint16_t port_{8000}; // Default port updated here as well for consistency
   std::string dongle_serial_;
   std::string inverter_serial_;
-  uint32_t read_timeout_{1000};  // 1 second timeout for reads
+  uint32_t read_timeout_{1000};
 
   Mutex client_mutex_;
 };
 
 }  // namespace luxclient
 }  // namespace esphome
-
