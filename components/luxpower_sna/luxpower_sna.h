@@ -1,4 +1,3 @@
-```cpp
 // luxpower_sna.h
 #pragma once
 
