@@ -134,7 +134,7 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
       ESP_LOGD(TAG, "Byte %zu: 0x%02X", i, packet_buffer_[i]);
     }
 
-    // Relax protocol version check to allow 0x0005 temporarily
+    // Relax protocol version check to allow 0x0005
     if (header->protocolVersion != 2 && header->protocolVersion != 5) {
       ESP_LOGE(TAG, "Unsupported protocol version: 0x%04X (expected 0x0002 or 0x0005)", header->protocolVersion);
       packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
@@ -176,45 +176,57 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
       continue;
     }
 
-    // Process data packet
+    // Log payload size and structure
     size_t data_offset = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
     uint8_t* payload = packet_buffer_.data() + data_offset;
     size_t payload_size = total_length - data_offset - 2;
+    ESP_LOGD(TAG, "Processing bank %d, payload size=%zu bytes, expected size for section=%zu bytes", 
+             bank, payload_size, sizeof(LuxLogDataRawSection1));
+
+    // Log raw payload bytes
+    for (size_t i = 0; i < std::min(payload_size, static_cast<size_t>(64)); i++) {
+      ESP_LOGD(TAG, "Payload byte %zu: 0x%02X", i, payload[i]);
+    }
 
     switch (bank) {
       case 0:
         if (payload_size >= sizeof(LuxLogDataRawSection1)) {
           process_section1_(*reinterpret_cast<const LuxLogDataRawSection1*>(payload));
         } else {
-          ESP_LOGE(TAG, "Payload too small for bank 0: %zu bytes", payload_size);
+          ESP_LOGE(TAG, "Payload too small for bank 0: %zu bytes, expected %zu bytes", 
+                   payload_size, sizeof(LuxLogDataRawSection1));
         }
         break;
       case 40:
         if (payload_size >= sizeof(LuxLogDataRawSection2)) {
           process_section2_(*reinterpret_cast<const LuxLogDataRawSection2*>(payload));
         } else {
-          ESP_LOGE(TAG, "Payload too small for bank 40: %zu bytes", payload_size);
+          ESP_LOGE(TAG, "Payload too small for bank 40: %zu bytes, expected %zu bytes", 
+                   payload_size, sizeof(LuxLogDataRawSection2));
         }
         break;
       case 80:
         if (payload_size >= sizeof(LuxLogDataRawSection3)) {
           process_section3_(*reinterpret_cast<const LuxLogDataRawSection3*>(payload));
         } else {
-          ESP_LOGE(TAG, "Payload too small for bank 80: %zu bytes", payload_size);
+          ESP_LOGE(TAG, "Payload too small for bank 80: %zu bytes, expected %zu bytes", 
+                   payload_size, sizeof(LuxLogDataRawSection3));
         }
         break;
       case 120:
         if (payload_size >= sizeof(LuxLogDataRawSection4)) {
           process_section4_(*reinterpret_cast<const LuxLogDataRawSection4*>(payload));
         } else {
-          ESP_LOGE(TAG, "Payload too small for bank 120: %zu bytes", payload_size);
+          ESP_LOGE(TAG, "Payload too small for bank 120: %zu bytes, expected %zu bytes", 
+                   payload_size, sizeof(LuxLogDataRawSection4));
         }
         break;
       case 160:
         if (payload_size >= sizeof(LuxLogDataRawSection5)) {
           process_section5_(*reinterpret_cast<const LuxLogDataRawSection5*>(payload));
         } else {
-          ESP_LOGE(TAG, "Payload too small for bank 160: %zu bytes", payload_size);
+          ESP_LOGE(TAG, "Payload too small for bank 160: %zu bytes, expected %zu bytes", 
+                   payload_size, sizeof(LuxLogDataRawSection5));
         }
         break;
       default:
@@ -238,7 +250,7 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
 
   uint8_t pkt[38] = {
     0xA1, 0x1A,       // Prefix
-    0x02, 0x00,       // Protocol version 2
+    0x05, 0x00,       // Protocol version 5 (updated to match inverter)
     0x20, 0x00,       // Frame length (32)
     0x01,             // Address
     0xC2,             // Function (TRANSLATED_DATA = 194)
@@ -309,6 +321,8 @@ void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor,
 }
 
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
+  ESP_LOGD(TAG, "Processing section 1: status=%u, v_pv_1=%u, soc=%u, p_to_grid=%d", 
+           data.status, data.v_pv_1, data.soc, data.p_to_grid);
   publish_text_sensor_(lux_status_text_sensor_, STATUS_TEXTS[std::min(data.status, static_cast<uint16_t>(192))]);
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
@@ -359,6 +373,7 @@ void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) 
 }
 
 void LuxpowerSNAComponent::process_section2_(const LuxLogDataRawSection2 &data) {
+  ESP_LOGD(TAG, "Processing section 2: e_pv_1_all=%u, fault_code=%u", data.e_pv_1_all, data.fault_code);
   publish_sensor_(lux_total_solar_array_1_sensor_, data.e_pv_1_all / 10.0f);
   publish_sensor_(lux_total_solar_array_2_sensor_, data.e_pv_2_all / 10.0f);
   publish_sensor_(lux_total_solar_array_3_sensor_, data.e_pv_3_all / 10.0f);
@@ -381,6 +396,7 @@ void LuxpowerSNAComponent::process_section2_(const LuxLogDataRawSection2 &data) 
 }
 
 void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) {
+  ESP_LOGD(TAG, "Processing section 3: bat_status_inv=%d, soc=%u", data.bat_status_inv, data.bat_capacity);
   publish_sensor_(lux_bms_limit_charge_sensor_, data.max_chg_curr / 10.0f);
   publish_sensor_(lux_bms_limit_discharge_sensor_, data.max_dischg_curr / 10.0f);
   publish_sensor_(charge_voltage_ref_sensor_, data.charge_volt_ref / 10.0f);
@@ -399,6 +415,7 @@ void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) 
 }
 
 void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) {
+  ESP_LOGD(TAG, "Processing section 4: gen_power_watt=%u", data.gen_power_watt);
   publish_sensor_(lux_current_generator_voltage_sensor_, data.gen_input_volt / 10.0f);
   publish_sensor_(lux_current_generator_frequency_sensor_, data.gen_input_freq / 10.0f);
   publish_sensor_(lux_current_generator_power_sensor_, data.gen_power_watt);
@@ -411,6 +428,7 @@ void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) 
 }
 
 void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) {
+  ESP_LOGD(TAG, "Processing section 5: p_load_ongrid=%u", data.p_load_ongrid);
   publish_sensor_(p_load_ongrid_sensor_, data.p_load_ongrid);
   publish_sensor_(e_load_day_sensor_, data.e_load_day / 10.0f);
   publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
