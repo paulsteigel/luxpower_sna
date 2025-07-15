@@ -124,10 +124,8 @@ response_received:
     ESP_LOGW(TAG, "Response too short: %d bytes", response.size());
     return {};
   }
-  // --- START OF FIX ---
-  // CRC is LSB first, then MSB.
+  // CRC is LSB first, then MSB. So received_crc = (MSB << 8) | LSB
   uint16_t received_crc = (uint16_t(response[response.size() - 2]) << 8) | response[response.size() - 3];
-  // --- END OF FIX ---
   uint16_t calculated_crc = crc16(response.data() + 1, response.size() - 4);
   if (received_crc != calculated_crc) {
     ESP_LOGW(TAG, "CRC check failed! Received: 0x%04X, Calculated: 0x%04X", received_crc, calculated_crc);
@@ -149,17 +147,13 @@ response_received:
 }
 
 std::optional<std::vector<uint8_t>> LuxClient::read_holding_registers(uint16_t reg_address, uint8_t reg_count) {
-  // --- START OF FIX ---
   MutexLock lock(this->client_mutex_);
-  // --- END OF FIX ---
   auto request = this->build_request_packet(FC_READ_HOLDING_REGISTERS, reg_address, reg_count);
   return this->execute_transaction(request);
 }
 
 bool LuxClient::write_holding_register(uint16_t reg_address, uint16_t value) {
-  // --- START OF FIX ---
   MutexLock lock(this->client_mutex_);
-  // --- END OF FIX ---
   auto request = this->build_request_packet(FC_WRITE_HOLDING_REGISTER, reg_address, value);
   auto response = this->execute_transaction(request);
 
