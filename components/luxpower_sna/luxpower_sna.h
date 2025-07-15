@@ -30,22 +30,24 @@ enum ConnectionState {
 #pragma pack(push, 1)
 // Các struct của bạn (LuxHeader, LuxLogDataRawSection1-5, etc.) được giữ nguyên
 // vì chúng đã chính xác. Tôi sẽ không lặp lại chúng ở đây để tiết kiệm không gian.
+// Header chính xác, kích thước 20 bytes
 struct LuxHeader {
-  uint16_t prefix;
-  uint16_t protocolVersion;
-  uint16_t packetLength;
-  uint8_t address;
-  uint8_t function;
-  char serialNumber[10];
-  uint16_t dataLength;
+  uint16_t prefix;          // 0x55AA
+  uint16_t protocolVersion; // 0x0101
+  uint16_t packetLength;    // Tổng chiều dài gói tin
+  uint8_t  address;         // Thường là 1
+  uint8_t  function;        // 130 (yêu cầu) hoặc 193 (heartbeat)
+  char     serialNumber[10];// Serial của Dongle
+  uint16_t dataLength;      // Chiều dài của phần dữ liệu sau header
 };
 
-struct LuxTranslatedData {
-  uint8_t address;
-  uint8_t deviceFunction;
-  char serialNumber[10];
+// Struct này chỉ mô tả phần đầu của payload DỮ LIỆU trong một gói tin PHẢN HỒI
+struct LuxResponseDataHeader {
+  uint8_t  address;
+  uint8_t  deviceFunction;
+  char     serialNumber[10];
   uint16_t registerStart;
-  uint8_t dataFieldLength;
+  uint8_t  dataFieldLength;
 };
 
 struct LuxLogDataRawSection1 {
