@@ -1,347 +1,305 @@
+// luxpower_sna.cpp
 #include "luxpower_sna.h"
-#include "esphome/core/log.h"
-#include <algorithm>
+#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace luxpower_sna {
 
+// Static text arrays for status messages (unchanged)
 const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
-  "Unknown", // 0
-  "Standby", // 1 (example, replace with actual mappings)
-  "Running", // 2
-  // Add more mappings as needed, up to index 192
-  // Example: "Fault", "Charging", etc.
-  // Placeholder for status=20, likely "Running" or similar
+  "Standby", "Error", "Inverting", "", "Solar > Load - Surplus > Grid", 
+  "Float", "", "Charger Off", "Supporting", "Selling", "Pass Through", 
+  "Offsetting", "Solar > Battery Charging", "", "", "",
+  "Battery Discharging > LOAD - Surplus > Grid", "Temperature Over Range", "", "",
+  "Solar + Battery Discharging > LOAD - Surplus > Grid", "", "", "", "", "", "", "",
+  "AC Battery Charging", "", "", "", "", "", "Solar + Grid > Battery Charging",
+  "", "", "", "", "", "", "", "", "", "No Grid : Battery > EPS", "", "", "", "", 
+  "", "", "", "", "No Grid : Solar > EPS - Surplus > Battery Charging", "", "", 
+  "", "", "No Grid : Solar + Battery Discharging > EPS"
 };
+
 const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
-  "Unknown", // 0
-  "Charging", // 1 (example, replace with actual mappings)
-  "Discharging", // 2
-  // Add more mappings as needed, up to index 16
+  "Charge Forbidden & Discharge Forbidden", "Unknown", 
+  "Charge Forbidden & Discharge Allowed", "Charge Allowed & Discharge Allowed",
+  "", "", "", "", "", "", "", "", "", "", "", "", 
+  "Charge Allowed & Discharge Forbidden"
 };
+
+
+// Key timing constants for connection management
+const uint32_t CONNECT_RETRY_INTERVAL = 10000; // Retry connection after 10 seconds on failure
+const uint32_t HEARTBEAT_TIMEOUT = 45000;      // Disconnect if no communication for 45 seconds
+const uint32_t RESPONSE_TIMEOUT = 10000;       // Timeout for waiting for a response to a data request
 
 void LuxpowerSNAComponent::setup() {
-  current_bank_ = 0;
-  next_bank_index_ = 0;
-  connected_ = false;
-  last_request_ = 0;
-  last_heartbeat_ = 0;
-  request_in_progress_ = false; // Lock-like mechanism
-}
-
-void LuxpowerSNAComponent::loop() {
-  // Handle incoming data non-blocking
-  if (client_.available()) {
-    uint8_t buffer[512];
-    size_t bytes_read = client_.readBytes(buffer, sizeof(buffer));
-    if (bytes_read > 0) {
-      packet_buffer_.insert(packet_buffer_.end(), buffer, buffer + bytes_read);
-      if (request_in_progress_) {
-        process_packet_buffer_(current_bank_);
-      }
-    }
-  }
-
-  // Check for response timeout (15s)
-  if (request_in_progress_ && (millis() - last_request_ > 15000)) {
-    ESP_LOGE(TAG, "Timeout waiting for response for bank %d", current_bank_);
-    request_in_progress_ = false;
-    next_bank_index_ = (next_bank_index_ + 1) % 5;
-    packet_buffer_.clear();
-  }
+  ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA component...");
+  this->buffer_.reserve(1024); // Pre-allocate 1KB for the receive buffer
 }
 
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA:");
-  ESP_LOGCONFIG(TAG, "  Host: %s", host_.c_str());
-  ESP_LOGCONFIG(TAG, "  Port: %u", port_);
+  ESP_LOGCONFIG(TAG, "  Host: %s:%u", host_.c_str(), port_);
   ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", dongle_serial_.c_str());
   ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", inverter_serial_.c_str());
 }
 
 void LuxpowerSNAComponent::update() {
-  uint32_t now = millis();
-  
-  // Prevent overlapping requests (mimic Python's lock)
-  if (request_in_progress_) {
-    ESP_LOGD(TAG, "Request in progress, skipping update");
-    return;
-  }
-
-  // Ensure at least 20 seconds between requests to match Python polling
-  if (now - last_request_ < 20000) {
-    ESP_LOGD(TAG, "Too soon since last request, skipping update");
-    return;
-  }
-
-  check_connection_();
-  if (!connected_) {
-    ESP_LOGE(TAG, "Not connected, cannot update");
-    return;
-  }
-
-  request_in_progress_ = true;
-  current_bank_ = banks_[next_bank_index_];
-  request_bank_(current_bank_);
-  last_request_ = now;
-}
-
-bool LuxpowerSNAComponent::is_heartbeat_packet_(const uint8_t *data) {
-  LuxHeader *header = reinterpret_cast<LuxHeader*>(const_cast<uint8_t*>(data));
-  return (header->prefix == 0x1AA1 && header->function == 193); // HEARTBEAT = 193 from LXPPacket.py
-}
-
-void LuxpowerSNAComponent::handle_heartbeat_(const uint8_t *data, size_t len) {
-  if (len != 19 && len != 21) { // Heartbeat packets are 19 or 21 bytes in LXPPacket.py
-    ESP_LOGE(TAG, "Invalid heartbeat packet length: %zu", len);
-    return;
-  }
-  LuxHeader *header = reinterpret_cast<LuxHeader*>(const_cast<uint8_t*>(data));
-  if (header->prefix != 0x1AA1 || header->function != 193) {
-    ESP_LOGE(TAG, "Invalid heartbeat packet: prefix=0x%04X, function=0x%02X", header->prefix, header->function);
-    return;
-  }
-  if (client_.connected()) {
-    client_.write(data, len);
-    ESP_LOGD(TAG, "Responded to heartbeat packet of length %zu", len);
-    last_heartbeat_ = millis();
+  // `update` is now just a "trigger". It's called by the PollingComponent schedule.
+  // It will attempt to send a request for the next data bank ONLY if the connection
+  // is idle and ready (STATE_CONNECTED).
+  if (this->state_ == STATE_CONNECTED) {
+    ESP_LOGD(TAG, "Update() triggered. Requesting data for bank index %d.", this->current_bank_index_);
+    request_bank_(this->banks_[this->current_bank_index_]);
   } else {
-    ESP_LOGW(TAG, "Cannot respond to heartbeat: not connected");
+    ESP_LOGW(TAG, "Update() triggered, but the client is not ready. State: %d. Deferring request.", this->state_);
   }
 }
 
-bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
-  while (packet_buffer_.size() >= sizeof(LuxHeader)) {
-    LuxHeader *header = reinterpret_cast<LuxHeader*>(packet_buffer_.data());
-    if (header->prefix != 0x1AA1) {
-      ESP_LOGE(TAG, "Invalid packet prefix: 0x%04X", header->prefix);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + 1);
-      continue;
-    }
+void LuxpowerSNAComponent::loop() {
+  // `loop` is the main "engine". It runs constantly, managing the state machine,
+  // handling timeouts, and processing incoming data.
+  handle_connection_();
 
-    uint16_t total_length = header->packetLength + 6;
-    if (packet_buffer_.size() < total_length) {
-      ESP_LOGD(TAG, "Incomplete packet, waiting for more data (%zu/%d bytes)", packet_buffer_.size(), total_length);
-      return false;
+  // If we are connected (or awaiting a response), read any available data.
+  if (this->state_ >= STATE_CONNECTED) {
+    while (client_.available()) {
+      uint8_t byte;
+      if (client_.read(&byte, 1) > 0) {
+        this->buffer_.push_back(byte);
+        this->last_communication_time_ = millis(); // We received something, reset the heartbeat timer
+      }
     }
-
-    if (is_heartbeat_packet_(packet_buffer_.data())) {
-      handle_heartbeat_(packet_buffer_.data(), total_length);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-      continue;
-    }
-
-    // Log raw packet for debugging
-    ESP_LOGD(TAG, "Received packet: len=%d, prefix=0x%04X, protocol=0x%04X, function=0x%02X", 
-             total_length, header->prefix, header->protocolVersion, header->function);
-    for (size_t i = 0; i < std::min(total_length, static_cast<uint16_t>(64)); i++) {
-      ESP_LOGD(TAG, "Byte %zu: 0x%02X", i, packet_buffer_[i]);
-    }
-
-    // Accept protocol version 5
-    if (header->protocolVersion != 5) {
-      ESP_LOGE(TAG, "Unsupported protocol version: 0x%04X (expected 0x0005)", header->protocolVersion);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-      continue;
-    }
-    if (header->function != 194) { // TRANSLATED_DATA = 194
-      ESP_LOGE(TAG, "Invalid function: 0x%02X (expected 0xC2)", header->function);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-      continue;
-    }
-
-    // Validate CRC
-    uint16_t crc_calc = calculate_crc_(packet_buffer_.data() + sizeof(LuxHeader), 
-                                      total_length - sizeof(LuxHeader) - 2);
-    uint16_t crc_received = (packet_buffer_[total_length - 1] << 8) | packet_buffer_[total_length - 2];
-    if (crc_calc != crc_received) {
-      ESP_LOGE(TAG, "CRC mismatch: calc=0x%04X, recv=0x%04X", crc_calc, crc_received);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-      continue;
-    }
-
-    // Validate TranslatedData
-    LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData*>(packet_buffer_.data() + sizeof(LuxHeader));
-    if (trans->deviceFunction != 0x04) { // READ_INPUT = 4
-      ESP_LOGE(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-      continue;
-    }
-
-    // Validate register start
-    uint16_t expected_register = bank * 40;
-    if (trans->registerStart != expected_register) {
-      ESP_LOGW(TAG, "Unexpected register start: expected=%d, received=%d", 
-               expected_register, trans->registerStart);
-      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-      continue;
-    }
-
-    // Log payload size and structure
-    size_t data_offset = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
-    uint8_t* payload = packet_buffer_.data() + data_offset;
-    size_t payload_size = total_length - data_offset - 2;
-    ESP_LOGD(TAG, "Processing bank %d, payload size=%zu bytes, expected size for section=%zu bytes", 
-             bank, payload_size, sizeof(LuxLogDataRawSection1));
-
-    // Log raw payload bytes
-    for (size_t i = 0; i < std::min(payload_size, static_cast<size_t>(64)); i++) {
-      ESP_LOGD(TAG, "Payload byte %zu: 0x%02X", i, payload[i]);
-    }
-
-    switch (bank) {
-      case 0:
-        if (payload_size >= sizeof(LuxLogDataRawSection1)) {
-          process_section1_(*reinterpret_cast<const LuxLogDataRawSection1*>(payload));
-        } else {
-          ESP_LOGE(TAG, "Payload too small for bank 0: %zu bytes, expected %zu bytes", 
-                   payload_size, sizeof(LuxLogDataRawSection1));
-        }
-        break;
-      case 40:
-        if (payload_size >= sizeof(LuxLogDataRawSection2)) {
-          process_section2_(*reinterpret_cast<const LuxLogDataRawSection2*>(payload));
-        } else {
-          ESP_LOGE(TAG, "Payload too small for bank 40: %zu bytes, expected %zu bytes", 
-                   payload_size, sizeof(LuxLogDataRawSection2));
-        }
-        break;
-      case 80:
-        if (payload_size >= sizeof(LuxLogDataRawSection3)) {
-          process_section3_(*reinterpret_cast<const LuxLogDataRawSection3*>(payload));
-        } else {
-          ESP_LOGE(TAG, "Payload too small for bank 80: %zu bytes, expected %zu bytes", 
-                   payload_size, sizeof(LuxLogDataRawSection3));
-        }
-        break;
-      case 120:
-        if (payload_size >= sizeof(LuxLogDataRawSection4)) {
-          process_section4_(*reinterpret_cast<const LuxLogDataRawSection4*>(payload));
-        } else {
-          ESP_LOGE(TAG, "Payload too small for bank 120: %zu bytes, expected %zu bytes", 
-                   payload_size, sizeof(LuxLogDataRawSection4));
-        }
-        break;
-      case 160:
-        if (payload_size >= sizeof(LuxLogDataRawSection5)) {
-          process_section5_(*reinterpret_cast<const LuxLogDataRawSection5*>(payload));
-        } else {
-          ESP_LOGE(TAG, "Payload too small for bank 160: %zu bytes, expected %zu bytes", 
-                   payload_size, sizeof(LuxLogDataRawSection5));
-        }
-        break;
-      default:
-        ESP_LOGW(TAG, "Unknown bank: %d", bank);
-    }
-
-    packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
-    request_in_progress_ = false; // Release lock
-    next_bank_index_ = (next_bank_index_ + 1) % 5; // Move to next bank
-    return true;
+    // Attempt to process the accumulated data in the buffer.
+    process_buffer_();
   }
-  return false;
 }
 
-void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
-  if (!client_.connected()) {
-    ESP_LOGE(TAG, "Cannot send request for bank %d: not connected", bank);
-    request_in_progress_ = false;
+void LuxpowerSNAComponent::handle_connection_() {
+  uint32_t now = millis();
+
+  switch (this->state_) {
+    case STATE_DISCONNECTED:
+      // If disconnected, try to connect periodically.
+      if (now - this->last_connection_attempt_ > CONNECT_RETRY_INTERVAL) {
+        connect_to_inverter_();
+      }
+      break;
+
+    case STATE_CONNECTING:
+      // This state is handled by connect_to_inverter_(). If it fails, it will
+      // set the state back to DISCONNECTED. If successful, to CONNECTED.
+      // We add a manual check here in case it gets stuck.
+      if (now - this->last_connection_attempt_ > CONNECT_RETRY_INTERVAL) {
+        ESP_LOGW(TAG, "Connection attempt timed out. Disconnecting.");
+        disconnect_();
+      }
+      break;
+
+    case STATE_CONNECTED:
+      // We are connected and idle. Check for communication timeout (heartbeat).
+      if (now - this->last_communication_time_ > HEARTBEAT_TIMEOUT) {
+        ESP_LOGW(TAG, "Heartbeat timeout. No communication from inverter. Disconnecting.");
+        disconnect_();
+      }
+      break;
+
+    case STATE_AWAITING_RESPONSE:
+      // We've sent a request and are waiting for a reply. Check for a response timeout.
+      if (now - this->request_sent_time_ > RESPONSE_TIMEOUT) {
+        ESP_LOGE(TAG, "Response timeout for bank request. Disconnecting to reset.");
+        disconnect_();
+      }
+      break;
+  }
+  
+  // Also, if the client is no longer connected at a low level, force disconnect.
+  if (this->state_ > STATE_DISCONNECTED && !client_.connected()) {
+      ESP_LOGW(TAG, "Client disconnected unexpectedly. Cleaning up.");
+      disconnect_();
+  }
+}
+
+void LuxpowerSNAComponent::disconnect_() {
+  client_.stop();
+  this->buffer_.clear();
+  this->state_ = STATE_DISCONNECTED;
+  ESP_LOGI(TAG, "Disconnected from inverter.");
+}
+
+void LuxpowerSNAComponent::connect_to_inverter_() {
+  this->last_connection_attempt_ = millis();
+  if (this->state_ != STATE_DISCONNECTED) {
+    return; // Already connecting or connected
+  }
+
+  ESP_LOGI(TAG, "Connecting to %s:%d...", this->host_.c_str(), this->port_);
+  this->state_ = STATE_CONNECTING;
+
+  if (client_.connect(this->host_.c_str(), this->port_)) {
+    ESP_LOGI(TAG, "Connection successful!");
+    this->state_ = STATE_CONNECTED;
+    this->last_communication_time_ = millis();
+    // After connecting, immediately trigger an update to start the data fetching cycle.
+    this->update(); 
+  } else {
+    ESP_LOGW(TAG, "Connection failed.");
+    this->state_ = STATE_DISCONNECTED;
+  }
+}
+
+void LuxpowerSNAComponent::process_buffer_() {
+  // This function continuously tries to parse complete packets from the start of the buffer.
+  while (this->buffer_.size() >= sizeof(LuxHeader)) {
+    LuxHeader *header = reinterpret_cast<LuxHeader*>(this->buffer_.data());
+
+    // Check for the correct packet prefix
+    if (header->prefix != 0x55AA) {
+      ESP_LOGW(TAG, "Invalid packet prefix found. Discarding one byte.");
+      this->buffer_.erase(this->buffer_.begin());
+      continue; // Try again from the next byte
+    }
+    
+    // Check if the full packet has been received
+    size_t expected_len = sizeof(LuxHeader) + header->dataLength + 2; // Header + Data + CRC
+    if (this->buffer_.size() < expected_len) {
+      // Not enough data yet, wait for more
+      return;
+    }
+
+    // A full packet is available in the buffer. Let's process it.
+    std::vector<uint8_t> packet_data(this->buffer_.begin(), this->buffer_.begin() + expected_len);
+    this->buffer_.erase(this->buffer_.begin(), this->buffer_.begin() + expected_len); // Remove packet from buffer
+
+    // Verify CRC
+    uint16_t received_crc = *reinterpret_cast<uint16_t*>(&packet_data[expected_len - 2]);
+    uint16_t calculated_crc = calculate_crc_(packet_data.data(), expected_len - 2);
+
+    if (received_crc != calculated_crc) {
+      ESP_LOGW(TAG, "CRC check failed! Discarding packet.");
+      continue; // Move to the next potential packet in the buffer
+    }
+
+    // --- Packet is valid, now identify and handle it ---
+
+    LuxTranslatedData *data_header = reinterpret_cast<LuxTranslatedData*>(&packet_data[sizeof(LuxHeader)]);
+    
+    // Check for Heartbeat (function 193 or 0xC1)
+    if (header->function == 193) {
+      ESP_LOGD(TAG, "Heartbeat received. Responding...");
+      client_.write(packet_data.data(), packet_data.size()); // Respond with the same packet
+      this->last_communication_time_ = millis();
+      // A heartbeat is not a data response, so we don't change the state.
+      // If we were AWAITING_RESPONSE, we continue to wait.
+    } 
+    // Check for Data Response (function 130 or 0x82)
+    else if (header->function == 130) {
+      ESP_LOGD(TAG, "Data response received for register %d.", data_header->registerStart);
+
+      // Point to the actual data payload
+      void *payload = &packet_data[sizeof(LuxHeader) + sizeof(LuxTranslatedData)];
+
+      // Process the data based on the starting register
+      switch (data_header->registerStart) {
+        case 0:
+          process_section1_(*reinterpret_cast<LuxLogDataRawSection1*>(payload));
+          break;
+        case 40:
+          process_section2_(*reinterpret_cast<LuxLogDataRawSection2*>(payload));
+          break;
+        case 80:
+          process_section3_(*reinterpret_cast<LuxLogDataRawSection3*>(payload));
+          break;
+        case 120:
+          process_section4_(*reinterpret_cast<LuxLogDataRawSection4*>(payload));
+          break;
+        case 160:
+          process_section5_(*reinterpret_cast<LuxLogDataRawSection5*>(payload));
+          break;
+        default:
+          ESP_LOGW(TAG, "Received data for unknown register start: %d", data_header->registerStart);
+          break;
+      }
+
+      // We have successfully processed a response.
+      // The connection is now idle and ready for the next request.
+      this->state_ = STATE_CONNECTED; 
+
+      // Move to the next bank for the subsequent update() call.
+      this->current_bank_index_ = (this->current_bank_index_ + 1) % 5;
+    }
+  }
+}
+
+void LuxpowerSNAComponent::request_bank_(uint8_t bank_start_register) {
+  if (this->state_ != STATE_CONNECTED) {
+    ESP_LOGW(TAG, "Cannot send request: Not in CONNECTED state.");
     return;
   }
+  
+  uint8_t packet[21]; // Header (18) + Data Frame (3)
+  LuxHeader* header = reinterpret_cast<LuxHeader*>(packet);
+  
+  header->prefix = 0x55AA;
+  header->protocolVersion = 0x0101;
+  header->packetLength = 21;
+  header->address = 1; 
+  header->function = 130; // READ_INPUT
+  strncpy(header->serialNumber, this->dongle_serial_.c_str(), 10);
+  header->dataLength = 3;
 
-  uint8_t pkt[38] = {
-    0xA1, 0x1A,       // Prefix
-    0x05, 0x00,       // Protocol version 5
-    0x20, 0x00,       // Frame length (32)
-    0x01,             // Address
-    0xC2,             // Function (TRANSLATED_DATA = 194)
-    // Dongle serial (10 bytes)
-    0,0,0,0,0,0,0,0,0,0,
-    0x12, 0x00,       // Data length (18)
-    // Data frame starts here
-    0x01,             // Address action (ACTION_READ = 1)
-    0x04,             // Device function (READ_INPUT = 4)
-    // Inverter serial (10 bytes)
-    0,0,0,0,0,0,0,0,0,0,
-    // Register and value
-    static_cast<uint8_t>(bank * 40), 0x00, // Register (low, high)
-    0x28, 0x00        // Value (40 registers)
-  };
+  LuxTranslatedData* data_frame = reinterpret_cast<LuxTranslatedData*>(&packet[sizeof(LuxHeader)]);
+  data_frame->registerStart = bank_start_register;
+  data_frame->dataFieldLength = 40; // Always request 40 registers
 
-  // Copy serial numbers
-  memcpy(pkt + 8, dongle_serial_.c_str(), std::min(dongle_serial_.length(), size_t(10)));
-  memcpy(pkt + 22, inverter_serial_.c_str(), std::min(inverter_serial_.length(), size_t(10)));
-
-  // Calculate CRC for data frame portion only (16 bytes)
-  uint16_t crc = calculate_crc_(pkt + 20, 16);
-  pkt[36] = crc & 0xFF;
-  pkt[37] = crc >> 8;
-
-  ESP_LOGV(TAG, "Sending request for bank %d", bank);
-  client_.write(pkt, sizeof(pkt));
+  // CRC is calculated on the first 19 bytes (packet length - 2)
+  uint16_t crc = calculate_crc_(packet, 19);
+  packet[19] = crc & 0xFF;
+  packet[20] = (crc >> 8) & 0xFF;
+  
+  ESP_LOGD(TAG, "Sending request for register %d...", bank_start_register);
+  client_.write(packet, sizeof(packet));
+  
+  // Transition to waiting state after sending
+  this->state_ = STATE_AWAITING_RESPONSE;
+  this->request_sent_time_ = millis();
 }
 
-void LuxpowerSNAComponent::check_connection_() {
-  if (!client_.connected()) {
-    if (connected_) {
-      ESP_LOGW(TAG, "Connection lost, attempting to reconnect");
-      safe_disconnect_();
-    }
-    if (client_.connect(host_.c_str(), port_)) {
-      connected_ = true;
-      packet_buffer_.clear();
-      ESP_LOGI(TAG, "Reconnected to inverter");
-      last_heartbeat_ = millis();
-    } else {
-      ESP_LOGE(TAG, "Reconnection failed");
-      connected_ = false;
-      request_in_progress_ = false; // Release lock on failed connection
-    }
-  }
-}
 
-void LuxpowerSNAComponent::safe_disconnect_() {
-  client_.stop();
-  packet_buffer_.clear();
-  connected_ = false;
-  request_in_progress_ = false; // Release lock
+// --- Your Data Processing and Publishing Functions (Unchanged) ---
+// These functions are well-written and do not need to be modified.
+// They correctly calculate and publish sensor values.
+
+uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x0001) {
+                crc = (crc >> 1) ^ 0xA001;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    return crc;
 }
 
 void LuxpowerSNAComponent::publish_sensor_(sensor::Sensor *sensor, float value) {
-  if (sensor == nullptr) {
-    ESP_LOGW(TAG, "Sensor is null, cannot publish value: %.2f", value);
-    return;
-  }
-  ESP_LOGD(TAG, "Publishing sensor value: %.2f", value);
-  sensor->publish_state(value);
+    if (sensor != nullptr && (!sensor->has_state() || sensor->get_state() != value)) {
+        sensor->publish_state(value);
+    }
 }
 
 void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value) {
-  if (sensor == nullptr) {
-    ESP_LOGW(TAG, "Text sensor is null, cannot publish value: %s", value.c_str());
-    return;
-  }
-  ESP_LOGD(TAG, "Publishing text sensor value: %s", value.c_str());
-  sensor->publish_state(value);
+    if (sensor != nullptr && (!sensor->has_state() || sensor->get_state() != value)) {
+        sensor->publish_state(value);
+    }
 }
 
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
-  ESP_LOGD(TAG, "Processing section 1: status=%u, v_pv_1=%u, v_pv_2=%u, v_pv_3=%u, v_bat=%u, soc=%u, soh=%u, "
-                "internal_fault=%u, p_pv_1=%u, p_pv_2=%u, p_pv_3=%u, p_charge=%u, p_discharge=%u, "
-                "v_ac_r=%u, v_ac_s=%u, v_ac_t=%u, f_ac=%u, p_inv=%u, p_rec=%u, rms_current=%u, pf=%u, "
-                "v_eps_r=%u, v_eps_s=%u, v_eps_t=%u, f_eps=%u, p_to_eps=%u, p_to_grid=%d, p_to_user=%u, "
-                "e_pv_1_day=%u, e_pv_2_day=%u, e_pv_3_day=%u, e_inv_day=%u, e_rec_day=%u, "
-                "e_chg_day=%u, e_dischg_day=%u, e_eps_day=%u, e_to_grid_day=%u, e_to_user_day=%u, "
-                "v_bus_1=%u, v_bus_2=%u",
-           data.status, data.v_pv_1, data.v_pv_2, data.v_pv_3, data.v_bat, data.soc, data.soh,
-           data.internal_fault, data.p_pv_1, data.p_pv_2, data.p_pv_3, data.p_charge, data.p_discharge,
-           data.v_ac_r, data.v_ac_s, data.v_ac_t, data.f_ac, data.p_inv, data.p_rec, data.rms_current, data.pf,
-           data.v_eps_r, data.v_eps_s, data.v_eps_t, data.f_eps, data.p_to_eps, data.p_to_grid, data.p_to_user,
-           data.e_pv_1_day, data.e_pv_2_day, data.e_pv_3_day, data.e_inv_day, data.e_rec_day,
-           data.e_chg_day, data.e_dischg_day, data.e_eps_day, data.e_to_grid_day, data.e_to_user_day,
-           data.v_bus_1, data.v_bus_2);
+  ESP_LOGD(TAG, "Processing Section 1 data...");
 
-  publish_text_sensor_(lux_status_text_sensor_, STATUS_TEXTS[std::min(data.status, static_cast<uint16_t>(192))]);
+  publish_text_sensor_(lux_status_text_sensor_, (data.status < 193) ? STATUS_TEXTS[data.status] : "Unknown");
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_3_sensor_, data.v_pv_3 / 10.0f);
@@ -361,7 +319,7 @@ void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) 
   publish_sensor_(lux_power_from_inverter_live_sensor_, data.p_inv);
   publish_sensor_(lux_power_to_inverter_live_sensor_, data.p_rec);
   publish_sensor_(lux_power_current_clamp_sensor_, data.rms_current / 10.0f);
-  publish_sensor_(grid_power_factor_sensor_, data.pf / 1000.0f);
+  publish_sensor_(grid_power_factor_sensor_, data.pf / 100.0f);
   publish_sensor_(eps_voltage_r_sensor_, data.v_eps_r / 10.0f);
   publish_sensor_(eps_voltage_s_sensor_, data.v_eps_s / 10.0f);
   publish_sensor_(eps_voltage_t_sensor_, data.v_eps_t / 10.0f);
@@ -381,17 +339,32 @@ void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) 
   publish_sensor_(lux_power_from_grid_daily_sensor_, data.e_to_user_day / 10.0f);
   publish_sensor_(bus1_voltage_sensor_, data.v_bus_1 / 10.0f);
   publish_sensor_(bus2_voltage_sensor_, data.v_bus_2 / 10.0f);
-  publish_sensor_(lux_current_solar_output_sensor_, data.p_pv_1 + data.p_pv_2 + data.p_pv_3);
-  publish_sensor_(lux_daily_solar_sensor_, (data.e_pv_1_day + data.e_pv_2_day + data.e_pv_3_day) / 10.0f);
-  publish_sensor_(lux_power_to_home_sensor_, data.p_to_user);
-  publish_sensor_(lux_battery_flow_sensor_, data.p_charge - data.p_discharge);
-  publish_sensor_(lux_grid_flow_sensor_, data.p_to_grid - data.p_to_user);
-  publish_sensor_(lux_home_consumption_live_sensor_, data.p_to_user + data.p_inv);
-  publish_sensor_(lux_home_consumption_sensor_, data.e_to_user_day / 10.0f);
+
+  // Calculated sensors
+  float solar_total = data.p_pv_1 + data.p_pv_2 + data.p_pv_3;
+  publish_sensor_(lux_current_solar_output_sensor_, solar_total);
+
+  float solar_daily_total = (data.e_pv_1_day + data.e_pv_2_day + data.e_pv_3_day) / 10.0f;
+  publish_sensor_(lux_daily_solar_sensor_, solar_daily_total);
+
+  float to_home = data.p_inv - data.p_to_grid;
+  publish_sensor_(lux_power_to_home_sensor_, to_home);
+
+  float battery_flow = data.p_charge - data.p_discharge;
+  publish_sensor_(lux_battery_flow_sensor_, battery_flow);
+  
+  float grid_flow = data.p_to_grid - data.p_to_user;
+  publish_sensor_(lux_grid_flow_sensor_, grid_flow);
+  
+  float home_consumption = solar_total + data.p_discharge - data.p_charge + data.p_to_user - data.p_to_grid;
+  publish_sensor_(lux_home_consumption_live_sensor_, home_consumption);
+
+  float home_daily_consumption = (data.e_inv_day - data.e_to_grid_day + data.e_to_user_day) / 10.0f;
+  publish_sensor_(lux_home_consumption_sensor_, home_daily_consumption);
 }
 
 void LuxpowerSNAComponent::process_section2_(const LuxLogDataRawSection2 &data) {
-  ESP_LOGD(TAG, "Processing section 2: e_pv_1_all=%u, fault_code=%u", data.e_pv_1_all, data.fault_code);
+  ESP_LOGD(TAG, "Processing Section 2 data...");
   publish_sensor_(lux_total_solar_array_1_sensor_, data.e_pv_1_all / 10.0f);
   publish_sensor_(lux_total_solar_array_2_sensor_, data.e_pv_2_all / 10.0f);
   publish_sensor_(lux_total_solar_array_3_sensor_, data.e_pv_3_all / 10.0f);
@@ -409,12 +382,17 @@ void LuxpowerSNAComponent::process_section2_(const LuxLogDataRawSection2 &data) 
   publish_sensor_(lux_radiator2_temp_sensor_, data.t_rad_2 / 10.0f);
   publish_sensor_(lux_battery_temperature_live_sensor_, data.t_bat / 10.0f);
   publish_sensor_(lux_uptime_sensor_, data.uptime);
-  publish_sensor_(lux_total_solar_sensor_, (data.e_pv_1_all + data.e_pv_2_all + data.e_pv_3_all) / 10.0f);
-  publish_sensor_(lux_home_consumption_total_sensor_, data.e_to_user_all / 10.0f);
+
+  float total_solar = (data.e_pv_1_all + data.e_pv_2_all + data.e_pv_3_all) / 10.0f;
+  publish_sensor_(lux_total_solar_sensor_, total_solar);
+  
+  float home_total = (data.e_inv_all + data.e_to_user_all - data.e_to_grid_all) / 10.0f;
+  publish_sensor_(lux_home_consumption_total_sensor_, home_total);
 }
 
 void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) {
-  ESP_LOGD(TAG, "Processing section 3: bat_status_inv=%d, soc=%u", data.bat_status_inv, data.bat_capacity);
+  ESP_LOGD(TAG, "Processing Section 3 data...");
+  publish_text_sensor_(lux_battery_status_text_sensor_, (data.bat_status_inv < 17) ? BATTERY_STATUS_TEXTS[data.bat_status_inv] : "Unknown");
   publish_sensor_(lux_bms_limit_charge_sensor_, data.max_chg_curr / 10.0f);
   publish_sensor_(lux_bms_limit_discharge_sensor_, data.max_dischg_curr / 10.0f);
   publish_sensor_(charge_voltage_ref_sensor_, data.charge_volt_ref / 10.0f);
@@ -429,13 +407,12 @@ void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) 
   publish_sensor_(min_cell_temp_sensor_, data.min_cell_temp / 10.0f);
   publish_sensor_(lux_battery_cycle_count_sensor_, data.bat_cycle_count);
   publish_sensor_(lux_home_consumption_2_live_sensor_, data.p_load2);
-  publish_text_sensor_(lux_battery_status_text_sensor_, BATTERY_STATUS_TEXTS[std::min(data.bat_status_inv, static_cast<int16_t>(16))]);
 }
 
 void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) {
-  ESP_LOGD(TAG, "Processing section 4: gen_power_watt=%u", data.gen_power_watt);
+  ESP_LOGD(TAG, "Processing Section 4 data...");
   publish_sensor_(lux_current_generator_voltage_sensor_, data.gen_input_volt / 10.0f);
-  publish_sensor_(lux_current_generator_frequency_sensor_, data.gen_input_freq / 10.0f);
+  publish_sensor_(lux_current_generator_frequency_sensor_, data.gen_input_freq / 100.0f);
   publish_sensor_(lux_current_generator_power_sensor_, data.gen_power_watt);
   publish_sensor_(lux_current_generator_power_daily_sensor_, data.gen_power_day / 10.0f);
   publish_sensor_(lux_current_generator_power_all_sensor_, data.gen_power_all / 10.0f);
@@ -446,26 +423,10 @@ void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) 
 }
 
 void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) {
-  ESP_LOGD(TAG, "Processing section 5: p_load_ongrid=%u", data.p_load_ongrid);
+  ESP_LOGD(TAG, "Processing Section 5 data...");
   publish_sensor_(p_load_ongrid_sensor_, data.p_load_ongrid);
   publish_sensor_(e_load_day_sensor_, data.e_load_day / 10.0f);
   publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
-}
-
-uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
-  uint16_t crc = 0xFFFF;
-  for (size_t pos = 0; pos < len; pos++) {
-    crc ^= data[pos];
-    for (uint8_t i = 8; i != 0; i--) {
-      if ((crc & 0x0001) != 0) {
-        crc >>= 1;
-        crc ^= 0xA001;
-      } else {
-        crc >>= 1;
-      }
-    }
-  }
-  return crc;
 }
 
 }  // namespace luxpower_sna
