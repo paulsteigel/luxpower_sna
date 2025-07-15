@@ -180,8 +180,7 @@ void LuxpowerSNAComponent::process_buffer_() {
     }
     
     // --- Packet is valid, now identify and handle it ---
-
-    LuxTranslatedData *data_header = reinterpret_cast<LuxTranslatedData*>(&packet_data[sizeof(LuxHeader)]);
+    LuxResponseDataHeader *data_header = reinterpret_cast<LuxResponseDataHeader*>(&packet_data[sizeof(LuxHeader)]);
     
     // Check for Heartbeat (function 193 or 0xC1)
     if (header->function == 193) {
