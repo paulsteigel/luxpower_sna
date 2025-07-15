@@ -6,14 +6,18 @@ namespace esphome {
 namespace luxpower_sna {
 
 const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
-  "Unknown", // Placeholder for index 0
-  // Add actual status text mappings here (up to 193 entries)
-  // Example: "Standby", "Running", etc.
+  "Unknown", // 0
+  "Standby", // 1 (example, replace with actual mappings)
+  "Running", // 2
+  // Add more mappings as needed, up to index 192
+  // Example: "Fault", "Charging", etc.
+  // Placeholder for status=20, likely "Running" or similar
 };
 const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
-  "Unknown", // Placeholder for index 0
-  // Add actual battery status text mappings here (up to 17 entries)
-  // Example: "Charging", "Discharging", etc.
+  "Unknown", // 0
+  "Charging", // 1 (example, replace with actual mappings)
+  "Discharging", // 2
+  // Add more mappings as needed, up to index 16
 };
 
 void LuxpowerSNAComponent::setup() {
@@ -134,9 +138,9 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
       ESP_LOGD(TAG, "Byte %zu: 0x%02X", i, packet_buffer_[i]);
     }
 
-    // Relax protocol version check to allow 0x0005
-    if (header->protocolVersion != 2 && header->protocolVersion != 5) {
-      ESP_LOGE(TAG, "Unsupported protocol version: 0x%04X (expected 0x0002 or 0x0005)", header->protocolVersion);
+    // Accept protocol version 5
+    if (header->protocolVersion != 5) {
+      ESP_LOGE(TAG, "Unsupported protocol version: 0x%04X (expected 0x0005)", header->protocolVersion);
       packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
       continue;
     }
@@ -144,9 +148,6 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
       ESP_LOGE(TAG, "Invalid function: 0x%02X (expected 0xC2)", header->function);
       packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
       continue;
-    }
-    if (header->protocolVersion == 5) {
-      ESP_LOGW(TAG, "Received protocol version 0x0005 instead of expected 0x0002, proceeding with caution");
     }
 
     // Validate CRC
@@ -250,7 +251,7 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
 
   uint8_t pkt[38] = {
     0xA1, 0x1A,       // Prefix
-    0x05, 0x00,       // Protocol version 5 (updated to match inverter)
+    0x05, 0x00,       // Protocol version 5
     0x20, 0x00,       // Frame length (32)
     0x01,             // Address
     0xC2,             // Function (TRANSLATED_DATA = 194)
@@ -307,22 +308,39 @@ void LuxpowerSNAComponent::safe_disconnect_() {
 }
 
 void LuxpowerSNAComponent::publish_sensor_(sensor::Sensor *sensor, float value) {
-  if (sensor != nullptr) {
-    ESP_LOGD(TAG, "Publishing sensor value: %.2f", value);
-    sensor->publish_state(value);
+  if (sensor == nullptr) {
+    ESP_LOGW(TAG, "Sensor is null, cannot publish value: %.2f", value);
+    return;
   }
+  ESP_LOGD(TAG, "Publishing sensor value: %.2f", value);
+  sensor->publish_state(value);
 }
 
 void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value) {
-  if (sensor != nullptr) {
-    ESP_LOGD(TAG, "Publishing text sensor value: %s", value.c_str());
-    sensor->publish_state(value);
+  if (sensor == nullptr) {
+    ESP_LOGW(TAG, "Text sensor is null, cannot publish value: %s", value.c_str());
+    return;
   }
+  ESP_LOGD(TAG, "Publishing text sensor value: %s", value.c_str());
+  sensor->publish_state(value);
 }
 
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
-  ESP_LOGD(TAG, "Processing section 1: status=%u, v_pv_1=%u, soc=%u, p_to_grid=%d", 
-           data.status, data.v_pv_1, data.soc, data.p_to_grid);
+  ESP_LOGD(TAG, "Processing section 1: status=%u, v_pv_1=%u, v_pv_2=%u, v_pv_3=%u, v_bat=%u, soc=%u, soh=%u, "
+                "internal_fault=%u, p_pv_1=%u, p_pv_2=%u, p_pv_3=%u, p_charge=%u, p_discharge=%u, "
+                "v_ac_r=%u, v_ac_s=%u, v_ac_t=%u, f_ac=%u, p_inv=%u, p_rec=%u, rms_current=%u, pf=%u, "
+                "v_eps_r=%u, v_eps_s=%u, v_eps_t=%u, f_eps=%u, p_to_eps=%u, p_to_grid=%d, p_to_user=%u, "
+                "e_pv_1_day=%u, e_pv_2_day=%u, e_pv_3_day=%u, e_inv_day=%u, e_rec_day=%u, "
+                "e_chg_day=%u, e_dischg_day=%u, e_eps_day=%u, e_to_grid_day=%u, e_to_user_day=%u, "
+                "v_bus_1=%u, v_bus_2=%u",
+           data.status, data.v_pv_1, data.v_pv_2, data.v_pv_3, data.v_bat, data.soc, data.soh,
+           data.internal_fault, data.p_pv_1, data.p_pv_2, data.p_pv_3, data.p_charge, data.p_discharge,
+           data.v_ac_r, data.v_ac_s, data.v_ac_t, data.f_ac, data.p_inv, data.p_rec, data.rms_current, data.pf,
+           data.v_eps_r, data.v_eps_s, data.v_eps_t, data.f_eps, data.p_to_eps, data.p_to_grid, data.p_to_user,
+           data.e_pv_1_day, data.e_pv_2_day, data.e_pv_3_day, data.e_inv_day, data.e_rec_day,
+           data.e_chg_day, data.e_dischg_day, data.e_eps_day, data.e_to_grid_day, data.e_to_user_day,
+           data.v_bus_1, data.v_bus_2);
+
   publish_text_sensor_(lux_status_text_sensor_, STATUS_TEXTS[std::min(data.status, static_cast<uint16_t>(192))]);
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
