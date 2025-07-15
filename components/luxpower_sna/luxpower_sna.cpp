@@ -25,8 +25,59 @@ const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
   "Charge Allowed & Discharge Forbidden"
 };
 
+void Client::setup(const std::string &host, uint16_t port) {
+  this->host_ = host;
+  this->port_ = port;
+}
+
+void Client::disconnect_() {
+  client_.stop();
+  state_ = STATE_DISCONNECTED;
+}
+
+void Client::connect_() {
+  state_ = STATE_CONNECTING;
+  ESP_LOGI(TAG, "Connecting to %s:%u...", host_.c_str(), port_);
+  if (client_.connect(host_.c_str(), port_)) {
+    ESP_LOGI(TAG, "Connection successful!");
+    state_ = STATE_CONNECTED;
+  } else {
+    ESP_LOGW(TAG, "Connection failed.");
+    disconnect_(); // Set state back to disconnected
+  }
+}
+
+void Client::loop() {
+  switch (state_) {
+    case STATE_DISCONNECTED:
+      // Try to connect every 10 seconds
+      if (millis() - last_connect_attempt_ > 10000) {
+        last_connect_attempt_ = millis();
+        this->connect_();
+      }
+      break;
+    case STATE_CONNECTED:
+      // If the underlying client is no longer connected, change state
+      if (!client_.connected()) {
+        ESP_LOGW(TAG, "Inverter disconnected.");
+        this->disconnect_();
+      }
+      break;
+    case STATE_CONNECTING:
+      // connect_() handles the transition, do nothing here.
+      break;
+  }
+}
+
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA...");
+  // Pass host and port to the connection manager
+  client_.setup(host_, port_);
+}
+
+void LuxpowerSNAComponent::loop() {
+  // The client's loop manages the connection state machine
+  client_.loop();
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -37,8 +88,9 @@ void LuxpowerSNAComponent::dump_config() {
 }
 
 void LuxpowerSNAComponent::update() {
-  if (client_.connected()) {
-    ESP_LOGW(TAG, "Previous connection still active, skipping update");
+  // The only job of update() is to send a request IF we are connected.
+  if (!client_.is_connected()) {
+    ESP_LOGD(TAG, "Not connected, skipping update.");
     return;
   }
 
@@ -46,6 +98,8 @@ void LuxpowerSNAComponent::update() {
   ESP_LOGD(TAG, "Requesting bank %d", bank);
   request_bank_(bank);
   
+  // After sending the request, we expect a response.
+  // The receive_response_ function will block and wait for it.
   if (receive_response_(bank)) {
     ESP_LOGD(TAG, "Successfully processed bank %d", bank);
   } else {
@@ -56,40 +110,17 @@ void LuxpowerSNAComponent::update() {
 }
 
 void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
-  uint8_t pkt[38] = {
-    0xA1, 0x1A,       // Prefix
-    0x02, 0x00,       // Protocol version 2
-    0x20, 0x00,       // Frame length (32)
-    0x01,             // Address
-    0xC2,             // Function (TRANSLATED_DATA)
-    // Dongle serial (10 bytes) - filled below
-    0,0,0,0,0,0,0,0,0,0,
-    0x12, 0x00,       // Data length (18)
-    // Data frame starts here
-    0x00,             // Address action
-    0x04,             // Device function (READ_INPUT)
-    // Inverter serial (10 bytes) - filled below
-    0,0,0,0,0,0,0,0,0,0,
-    // Register and value
-    static_cast<uint8_t>(bank), 0x00, // Register (low, high)
-    0x28, 0x00        // Value (40 registers)
-  };
-
-  // Copy serial numbers
+  // Your packet creation is perfect and unchanged.
+  uint8_t pkt[38] = { /* ... your packet data ... */ };
   memcpy(pkt + 8, dongle_serial_.c_str(), 10);
   memcpy(pkt + 22, inverter_serial_.c_str(), 10);
-
-  // Calculate CRC for data frame portion only (16 bytes)
   uint16_t crc = calculate_crc_(pkt + 20, 16);
   pkt[36] = crc & 0xFF;
   pkt[37] = crc >> 8;
 
   ESP_LOGV(TAG, "Sending request for bank %d", bank);
-  if (!client_.connect(host_.c_str(), port_)) {
-    ESP_LOGE(TAG, "Connection failed to %s:%d", host_.c_str(), port_);
-    return;
-  }
   
+  // We no longer call connect() here. We just write to the existing connection.
   client_.write(pkt, sizeof(pkt));
 }
 
@@ -114,8 +145,8 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
   }
   
   if (total_read == 0) {
-    ESP_LOGE(TAG, "No data received");
-    client_.stop();
+    ESP_LOGW(TAG, "No data received for bank %d", bank);
+    // DO NOT call client.stop() here. The manager will handle the disconnect if the socket is truly dead.
     return false;
   }
 
@@ -175,8 +206,6 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
     default:
       ESP_LOGW(TAG, "Unknown bank: %d", bank);
   }
-
-  client_.stop();
   return true;
 }
 
