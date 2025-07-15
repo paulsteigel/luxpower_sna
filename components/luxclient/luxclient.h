@@ -2,14 +2,18 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-// --- START OF FIX ---
-#include "esphome/core/mutex.h" // Specifically include for Mutex and MutexLock
-// "esphome/core/helpers.h" is removed to avoid conflicts
-// --- END OF FIX ---
 
 #include <vector>
 #include <string>
 #include <optional>
+#include <memory> // Required for std::unique_ptr
+
+// --- START OF FIX ---
+// Forward-declare the Mutex class to avoid including heavy headers.
+namespace esphome {
+class Mutex;
+}
+// --- END OF FIX ---
 
 namespace esphome {
 namespace luxclient {
@@ -39,7 +43,10 @@ class LuxClient : public Component {
   std::string inverter_serial_;
   uint32_t read_timeout_{1000};
 
-  Mutex client_mutex_;
+  // --- FIX ---
+  // Using a unique_ptr to the Mutex. This only requires the forward
+  // declaration above, keeping this header file clean.
+  std::unique_ptr<Mutex> client_mutex_;
 };
 
 }  // namespace luxclient
