@@ -111,13 +111,13 @@ response_received:
 }
 
 std::optional<std::vector<uint8_t>> LuxClient::read_holding_registers(uint16_t reg_address, uint8_t reg_count) {
-  MutexLock lock(*this->client_mutex_); // MutexLock will now be recognized
+  esphome::MutexLock lock(*this->client_mutex_); // Added namespace
   auto request = this->build_request_packet(FC_READ_HOLDING_REGISTERS, reg_address, reg_count);
   return this->execute_transaction(request);
 }
 
 bool LuxClient::write_holding_register(uint16_t reg_address, uint16_t value) {
-  MutexLock lock(*this->client_mutex_); // MutexLock will now be recognized
+  esphome::MutexLock lock(*this->client_mutex_); // Added namespace
   auto request = this->build_request_packet(FC_WRITE_HOLDING_REGISTER, reg_address, value);
   auto response = this->execute_transaction(request);
   return response.has_value();
