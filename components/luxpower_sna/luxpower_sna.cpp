@@ -178,7 +178,7 @@ void LuxpowerSNAComponent::process_buffer_() {
       ESP_LOGW(TAG, "CRC check failed! Discarding packet.");
       continue; // Move to the next potential packet in the buffer
     }
-
+    
     // --- Packet is valid, now identify and handle it ---
 
     LuxTranslatedData *data_header = reinterpret_cast<LuxTranslatedData*>(&packet_data[sizeof(LuxHeader)]);
@@ -196,8 +196,8 @@ void LuxpowerSNAComponent::process_buffer_() {
       ESP_LOGD(TAG, "Data response received for register %d.", data_header->registerStart);
 
       // Point to the actual data payload
-      void *payload = &packet_data[sizeof(LuxHeader) + sizeof(LuxTranslatedData)];
-
+      void *payload = &packet_data[sizeof(LuxHeader) + sizeof(LuxResponseDataHeader)];
+      
       // Process the data based on the starting register
       switch (data_header->registerStart) {
         case 0:
@@ -230,39 +230,51 @@ void LuxpowerSNAComponent::process_buffer_() {
   }
 }
 
+// Trong luxpower_sna.cpp
+
 void LuxpowerSNAComponent::request_bank_(uint8_t bank_start_register) {
   if (this->state_ != STATE_CONNECTED) {
     ESP_LOGW(TAG, "Cannot send request: Not in CONNECTED state.");
     return;
   }
   
-  uint8_t packet[21]; // Header (18) + Data Frame (3)
+  // Gói tin yêu cầu đúng có tổng chiều dài 23 bytes:
+  // Header (20 bytes) + Dữ liệu yêu cầu (3 bytes)
+  uint8_t packet[23];
   LuxHeader* header = reinterpret_cast<LuxHeader*>(packet);
   
   header->prefix = 0x55AA;
   header->protocolVersion = 0x0101;
-  header->packetLength = 21;
+  header->packetLength = 23; // Kích thước tổng thể
   header->address = 1; 
   header->function = 130; // READ_INPUT
   strncpy(header->serialNumber, this->dongle_serial_.c_str(), 10);
-  header->dataLength = 3;
+  header->dataLength = 3; // Dữ liệu yêu cầu chỉ có 3 bytes
 
-  LuxTranslatedData* data_frame = reinterpret_cast<LuxTranslatedData*>(&packet[sizeof(LuxHeader)]);
-  data_frame->registerStart = bank_start_register;
-  data_frame->dataFieldLength = 40; // Always request 40 registers
+  // Xây dựng phần dữ liệu yêu cầu một cách thủ công (3 bytes)
+  // Vị trí bắt đầu: sau header (20 bytes)
+  // Byte 20, 21: registerStart (uint16_t)
+  // Byte 22:      dataFieldLength (uint8_t)
+  uint16_t reg_start = bank_start_register;
+  uint8_t reg_len = 40;
+  packet[20] = reg_start & 0xFF;
+  packet[21] = (reg_start >> 8) & 0xFF;
+  packet[22] = reg_len;
 
-  // CRC is calculated on the first 19 bytes (packet length - 2)
-  uint16_t crc = calculate_crc_(packet, 19);
-  packet[19] = crc & 0xFF;
-  packet[20] = (crc >> 8) & 0xFF;
+  // CRC được tính trên 21 bytes đầu tiên (tổng chiều dài - 2)
+  uint16_t crc = calculate_crc_(packet, 21);
+  // CRC được đặt ở cuối gói tin
+  packet[21] = crc & 0xFF;
+  packet[22] = (crc >> 8) & 0xFF;
   
   ESP_LOGD(TAG, "Sending request for register %d...", bank_start_register);
   client_.write(packet, sizeof(packet));
   
-  // Transition to waiting state after sending
+  // Chuyển sang trạng thái chờ sau khi gửi
   this->state_ = STATE_AWAITING_RESPONSE;
   this->request_sent_time_ = millis();
 }
+
 
 
 // --- Your Data Processing and Publishing Functions (Unchanged) ---
