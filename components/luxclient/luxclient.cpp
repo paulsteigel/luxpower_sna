@@ -3,13 +3,6 @@
 // This is the ONLY place where helpers.h should be included.
 #include "esphome/core/helpers.h"
 
-// Platform-specific WiFi includes
-#ifdef USE_ESP32
-#include <WiFi.h>
-#elif USE_ESP8266
-#include <ESP8266WiFi.h>
-#endif
-
 namespace esphome {
 namespace luxclient {
 
