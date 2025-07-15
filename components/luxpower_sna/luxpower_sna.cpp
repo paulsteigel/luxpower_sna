@@ -231,54 +231,59 @@ void LuxpowerSNAComponent::process_buffer_() {
 
 // Trong luxpower_sna.cpp
 
+// luxpower_sna.cpp
+
 void LuxpowerSNAComponent::request_bank_(uint8_t bank_start_register) {
   if (this->state_ != STATE_CONNECTED) {
     ESP_LOGW(TAG, "Cannot send request: Not in CONNECTED state.");
     return;
   }
+
+  // A valid request packet has a total size of 25 bytes:
+  // - Header: 20 bytes
+  // - Data Payload: 3 bytes (register start + register length)
+  // - CRC: 2 bytes
+  uint8_t packet[25];
   
-  // Gói tin yêu cầu đúng có tổng chiều dài 23 bytes:
-  // Header (20 bytes) + Dữ liệu yêu cầu (3 bytes)
-  uint8_t packet[23];
+  // 1. Fill the Header
   LuxHeader* header = reinterpret_cast<LuxHeader*>(packet);
-  
-  header->prefix = 0x55AA;
+  header->prefix = 0xAA55; // Corrected: In C++ on a little-endian system like ESP, this will be sent as 55 AA
   header->protocolVersion = 0x0101;
-  header->packetLength = 23; // Kích thước tổng thể
-  header->address = 1; 
+  header->packetLength = 25;       // Total size of the packet
+  header->address = 1;
   header->function = 130; // READ_INPUT
   strncpy(header->serialNumber, this->dongle_serial_.c_str(), 10);
-  header->dataLength = 3; // Dữ liệu yêu cầu chỉ có 3 bytes
+  header->dataLength = 3;          // The size of our data payload
 
-  // Xây dựng phần dữ liệu yêu cầu một cách thủ công (3 bytes)
-  // Vị trí bắt đầu: sau header (20 bytes)
-  // Byte 20, 21: registerStart (uint16_t)
-  // Byte 22:      dataFieldLength (uint8_t)
+  // 2. Fill the Data Payload (3 bytes, starting at index 20)
   uint16_t reg_start = bank_start_register;
-  uint8_t reg_len = 40;
-  packet[20] = reg_start & 0xFF;
-  packet[21] = (reg_start >> 8) & 0xFF;
-  packet[22] = reg_len;
+  uint8_t reg_len = 40; // We request 40 registers at a time
+  
+  // Place data payload *after* the 20-byte header
+  packet[20] = reg_start & 0xFF;         // Low byte of start register
+  packet[21] = (reg_start >> 8) & 0xFF;  // High byte of start register
+  packet[22] = reg_len;                  // Number of registers to read
 
-  // CRC được tính trên 21 bytes đầu tiên (tổng chiều dài - 2)
-  uint16_t crc = calculate_crc_(packet, 21);
-  // CRC được đặt ở cuối gói tin
-  packet[21] = crc & 0xFF;
-  packet[22] = (crc >> 8) & 0xFF;
+  // 3. Calculate CRC
+  // The CRC is calculated over the header and the data payload (23 bytes total)
+  uint16_t crc = calculate_crc_(packet, 23);
+
+  // 4. Place the CRC at the very end of the packet (2 bytes, starting at index 23)
+  // This is the critical step that was wrong before.
+  packet[23] = crc & 0xFF;        // Low byte of CRC
+  packet[24] = (crc >> 8) & 0xFF; // High byte of CRC
+
+  ESP_LOGD(TAG, "Sending request for register %d (Total Packet Size: %d bytes)", bank_start_register, sizeof(packet));
   
-  ESP_LOGD(TAG, "Sending request for register %d...", bank_start_register);
+  // Print the packet for debugging if needed
+  // ESP_LOGD(TAG, "Packet HEX: %s", format_hex_pretty(packet, sizeof(packet)).c_str());
+  
   client_.write(packet, sizeof(packet));
-  
-  // Chuyển sang trạng thái chờ sau khi gửi
+
+  // 5. Update state
   this->state_ = STATE_AWAITING_RESPONSE;
   this->request_sent_time_ = millis();
 }
-
-
-
-// --- Your Data Processing and Publishing Functions (Unchanged) ---
-// These functions are well-written and do not need to be modified.
-// They correctly calculate and publish sensor values.
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
     uint16_t crc = 0xFFFF;
