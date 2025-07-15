@@ -265,6 +265,17 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_e_load_all_l_sensor(sensor::Sensor *s) { e_load_all_l_sensor_ = s; }
 
  private:
+  WiFiClient client_;
+  uint8_t next_bank_index_{0};
+  //const uint8_t banks_[5] = {0, 40, 80, 120, 160};
+
+  // added 15/7 for connection handling
+  bool connected_{false};
+  uint32_t last_heartbeat_{0};
+  uint8_t current_bank_{0};
+  uint8_t banks_[5] = {0, 40, 80, 120, 160};
+  std::vector<uint8_t> packet_buffer_;
+
   void request_bank_(uint8_t bank);
   bool receive_response_(uint8_t bank);
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
@@ -281,10 +292,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::string dongle_serial_;
   std::string inverter_serial_;
   
-  WiFiClient client_;
-  uint8_t next_bank_index_{0};
-  const uint8_t banks_[5] = {0, 40, 80, 120, 160};
-
   // Status text mappings
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
