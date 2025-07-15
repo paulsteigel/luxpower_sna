@@ -9,7 +9,6 @@ const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
   "Unknown", // Placeholder for index 0
   // Add actual status text mappings here (up to 193 entries)
   // Example: "Standby", "Running", etc.
-  // For now, initialize with placeholders
 };
 const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
   "Unknown", // Placeholder for index 0
@@ -149,12 +148,26 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
       continue;
     }
 
-    // Validate packet fields
-    if (header->protocolVersion != 2 || header->function != 194) { // TRANSLATED_DATA = 194
-      ESP_LOGE(TAG, "Invalid protocol or function: protocol=0x%04X, function=0x%02X", 
-               header->protocolVersion, header->function);
+    // Log raw packet for debugging
+    ESP_LOGD(TAG, "Received packet: len=%d, prefix=0x%04X, protocol=0x%04X, function=0x%02X", 
+             total_length, header->prefix, header->protocolVersion, header->function);
+    for (size_t i = 0; i < std::min(total_length, static_cast<uint16_t>(64)); i++) {
+      ESP_LOGD(TAG, "Byte %zu: 0x%02X", i, packet_buffer_[i]);
+    }
+
+    // Relax protocol version check to allow 0x0005 temporarily
+    if (header->protocolVersion != 2 && header->protocolVersion != 5) {
+      ESP_LOGE(TAG, "Unsupported protocol version: 0x%04X (expected 0x0002 or 0x0005)", header->protocolVersion);
       packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
       continue;
+    }
+    if (header->function != 194) { // TRANSLATED_DATA = 194
+      ESP_LOGE(TAG, "Invalid function: 0x%02X (expected 0xC2)", header->function);
+      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
+      continue;
+    }
+    if (header->protocolVersion == 5) {
+      ESP_LOGW(TAG, "Received protocol version 0x0005 instead of expected 0x0002, proceeding with caution");
     }
 
     // Validate CRC
