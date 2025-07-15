@@ -1,6 +1,13 @@
 #include "luxclient.h"
 #include "crc.h"
 
+// Platform-specific WiFi includes
+#ifdef USE_ESP32
+#include <WiFi.h>
+#elif USE_ESP8266
+#include <ESP8266WiFi.h>
+#endif
+
 namespace esphome {
 namespace luxclient {
 
@@ -17,8 +24,7 @@ static const uint8_t FC_READ_HOLDING_REGISTERS = 0x03;
 static const uint8_t FC_WRITE_HOLDING_REGISTER = 0x06;
 
 void LuxClient::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up LuxClient...");
-  // Initial setup tasks can go here if needed
+  ESP_LOGCONFIG(TAG, "Setting up LuxClient (WiFi)...");
 }
 
 void LuxClient::dump_config() {
@@ -69,13 +75,8 @@ std::vector<uint8_t> LuxClient::build_request_packet(uint8_t function_code, uint
 }
 
 std::optional<std::vector<uint8_t>> LuxClient::execute_transaction(const std::vector<uint8_t> &request) {
-#ifdef USE_WIFI
+  // Simplified client creation for WiFi only
   WiFiClient client;
-#elif USE_ETHERNET
-  Client &client = *ETH.client();
-#else
-#error "This component requires either WiFi or Ethernet."
-#endif
 
   if (!client.connect(this->host_.c_str(), this->port_)) {
     ESP_LOGW(TAG, "Connection to %s:%d failed", this->host_.c_str(), this->port_);
