@@ -2,7 +2,10 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
+// --- START OF FIX ---
+#include "esphome/core/mutex.h" // Specifically for Mutex and MutexLock
+// "esphome/core/helpers.h" is removed to avoid conflicts
+// --- END OF FIX ---
 
 #include <vector>
 #include <string>
@@ -23,7 +26,6 @@ class LuxClient : public Component {
   void dump_config() override;
   float get_setup_priority() const override;
 
-  // The primary public methods for interacting with the inverter
   std::optional<std::vector<uint8_t>> read_holding_registers(uint16_t reg_address, uint8_t reg_count);
   bool write_holding_register(uint16_t reg_address, uint16_t value);
 
@@ -32,7 +34,7 @@ class LuxClient : public Component {
   std::optional<std::vector<uint8_t>> execute_transaction(const std::vector<uint8_t> &request);
 
   std::string host_;
-  uint16_t port_{8000}; // Default port updated here as well for consistency
+  uint16_t port_{8000};
   std::string dongle_serial_;
   std::string inverter_serial_;
   uint32_t read_timeout_{1000};
