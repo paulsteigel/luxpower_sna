@@ -3,13 +3,14 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+from esphome.const import CONF_ID
 
-#ifdef USE_WIFI
+#ifdef USE_ESP32
 #include <WiFi.h>
+#elif USE_ESP8266
+#include <ESP8266WiFi.h>
 #endif
-#ifdef USE_ETHERNET
-#include <ETH.h>
-#endif
+#include <WiFiClient.h>
 
 #include <vector>
 #include <string>
