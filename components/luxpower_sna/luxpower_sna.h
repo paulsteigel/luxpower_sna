@@ -5,7 +5,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/log.h"
-#include <vector>
+#include <cstring>
 
 #ifdef USE_ESP32
 #include <WiFi.h>
@@ -19,35 +19,23 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
-// *** THAY ĐỔI QUAN TRỌNG: ĐỊNH NGHĨA MÁY TRẠNG THÁI ***
-enum ConnectionState {
-  STATE_DISCONNECTED,
-  STATE_CONNECTING,
-  STATE_CONNECTED,          // Đã kết nối và đang rảnh
-  STATE_AWAITING_RESPONSE   // Đã gửi yêu cầu và đang chờ phản hồi
-};
-
 #pragma pack(push, 1)
-// Các struct của bạn (LuxHeader, LuxLogDataRawSection1-5, etc.) được giữ nguyên
-// vì chúng đã chính xác. Tôi sẽ không lặp lại chúng ở đây để tiết kiệm không gian.
-// Header chính xác, kích thước 20 bytes
 struct LuxHeader {
-  uint16_t prefix;          // 0x55AA
-  uint16_t protocolVersion; // 0x0101
-  uint16_t packetLength;    // Tổng chiều dài gói tin
-  uint8_t  address;         // Thường là 1
-  uint8_t  function;        // 130 (yêu cầu) hoặc 193 (heartbeat)
-  char     serialNumber[10];// Serial của Dongle
-  uint16_t dataLength;      // Chiều dài của phần dữ liệu sau header
+  uint16_t prefix;
+  uint16_t protocolVersion;
+  uint16_t packetLength;
+  uint8_t address;
+  uint8_t function;
+  char serialNumber[10];
+  uint16_t dataLength;
 };
 
-// Struct này chỉ mô tả phần đầu của payload DỮ LIỆU trong một gói tin PHẢN HỒI
-struct LuxResponseDataHeader {
-  uint8_t  address;
-  uint8_t  deviceFunction;
-  char     serialNumber[10];
+struct LuxTranslatedData {
+  uint8_t address;
+  uint8_t deviceFunction;
+  char serialNumber[10];
   uint16_t registerStart;
-  uint8_t  dataFieldLength;
+  uint8_t dataFieldLength;
 };
 
 struct LuxLogDataRawSection1 {
@@ -169,17 +157,17 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
 
-  // Các hàm set_... của bạn được giữ nguyên
   void set_host(const std::string &host) { host_ = host; }
   void set_port(uint16_t port) { port_ = port; }
   void set_dongle_serial(const std::string &serial) { dongle_serial_ = serial; }
   void set_inverter_serial(const std::string &serial) { inverter_serial_ = serial; }
-  // ... tất cả các hàm set_..._sensor khác cũng giữ nguyên ...
+
   // System Sensor Setters
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
   void set_lux_battery_status_text_sensor(text_sensor::TextSensor *s) { lux_battery_status_text_sensor_ = s; }
+  //void set_inverter_serial_number_sensor(text_sensor::TextSensor *s) { inverter_serial_number_sensor_ = s; }
 
   // Section1 Sensor Setters
   void set_lux_current_solar_voltage_1_sensor(sensor::Sensor *s) { lux_current_solar_voltage_1_sensor_ = s; }
@@ -284,26 +272,28 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_e_load_all_l_sensor(sensor::Sensor *s) { e_load_all_l_sensor_ = s; }
 
  private:
-  // *** THAY ĐỔI QUAN TRỌNG: CÁC BIẾN QUẢN LÝ KẾT NỐI MỚI ***
   WiFiClient client_;
-  std::vector<uint8_t> buffer_;
-  ConnectionState state_ = STATE_DISCONNECTED;
-  uint32_t last_communication_time_ = 0;
-  uint32_t last_connection_attempt_ = 0;
-  uint32_t request_sent_time_ = 0;
+  uint8_t next_bank_index_{0};
+  //const uint8_t banks_[5] = {0, 40, 80, 120, 160};
 
-  uint8_t current_bank_index_ = 0;
-  const uint8_t banks_[5] = {0, 40, 80, 120, 160};
+  // added 15/7 for connection handling
+  bool connected_{false};
+  uint32_t last_heartbeat_{0};
+  uint8_t current_bank_{0};
+  uint8_t banks_[5] = {0, 40, 80, 120, 160};
+  std::vector<uint8_t> packet_buffer_;
+  uint32_t last_request_{0};
+  
+  // added 15/7
+  void check_connection_();
+  void safe_disconnect_();
+  void handle_heartbeat_(const uint8_t *data, size_t len);
+  bool is_heartbeat_packet_(const uint8_t *data);
+  bool process_packet_buffer_(uint8_t bank);
 
-  // *** THAY ĐỔI QUAN TRỌNG: CÁC HÀM HELPER MỚI ***
-  void connect_to_inverter_();
-  void handle_connection_();
-  void process_buffer_();
-  void disconnect_();
-  
-  void request_bank_(uint8_t bank_start_register);
-  
-  // Các hàm xử lý và publish của bạn được giữ nguyên
+
+  void request_bank_(uint8_t bank);
+  bool receive_response_(uint8_t bank);
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
   void process_section1_(const LuxLogDataRawSection1 &data);
   void process_section2_(const LuxLogDataRawSection2 &data);
@@ -313,12 +303,12 @@ class LuxpowerSNAComponent : public PollingComponent {
   void publish_sensor_(sensor::Sensor *sensor, float value);
   void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
 
-  // Các biến cấu hình và sensor của bạn được giữ nguyên
   std::string host_;
   uint16_t port_;
   std::string dongle_serial_;
   std::string inverter_serial_;
   
+  // Status text mappings
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
