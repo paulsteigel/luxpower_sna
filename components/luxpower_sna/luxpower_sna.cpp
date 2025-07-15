@@ -183,8 +183,8 @@ void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) 
   publish_sensor_(lux_power_from_grid_daily_sensor_, data.e_to_user_day / 10.0f);
   publish_sensor_(bus1_voltage_sensor_, data.v_bus_1 / 10.0f);
   publish_sensor_(bus2_voltage_sensor_, data.v_bus_2 / 10.0f);
-
-  float lux_grid_voltage_live = (data.v_ac_r + data.v_ac_s + data.v_ac_t) / 30.0f;
+    
+  float lux_grid_voltage_live = data.v_ac_r;
   int16_t lux_current_solar_output = data.p_pv_1 + data.p_pv_2 + data.p_pv_3;
   float lux_daily_solar = (data.e_pv_1_day + data.e_pv_2_day + data.e_pv_3_day) / 10.0f;
   int16_t lux_power_to_home = data.p_to_user - data.p_rec;
