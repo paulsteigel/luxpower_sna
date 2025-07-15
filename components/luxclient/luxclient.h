@@ -7,6 +7,12 @@
 #include <string>
 #include <optional>
 #include <memory> // Required for std::unique_ptr
+// Platform-specific WiFi includes
+#ifdef USE_ESP32
+#include <WiFi.h>
+#elif USE_ESP8266
+#include <ESP8266WiFi.h>
+#endif
 
 // Forward-declare the Mutex class to avoid including heavy headers.
 namespace esphome {
