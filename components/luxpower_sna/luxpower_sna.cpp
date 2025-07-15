@@ -4,7 +4,6 @@
 namespace esphome {
 namespace luxpower_sna {
 
-// --- YOUR ORIGINAL STATIC ARRAYS: UNCHANGED ---
 const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
   "Standby", "Error", "Inverting", "", "Solar > Load - Surplus > Grid", "Float", "", "Charger Off", "Supporting", "Selling", "Pass Through", "Offsetting", "Solar > Battery Charging", "", "", "",
   "Battery Discharging > LOAD - Surplus > Grid", "Temperature Over Range", "", "", "Solar + Battery Discharging > LOAD - Surplus > Grid", "", "", "", "", "", "", "", "AC Battery Charging", "", "", "", "", "", "Solar + Grid > Battery Charging",
@@ -15,115 +14,54 @@ const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
   "", "", "", "", "", "", "", "", "", "", "", "", "Charge Allowed & Discharge Forbidden"
 };
 
-
-// =========================================================================
-// Implementation of the Client class
-// =========================================================================
-void Client::setup(const std::string &host, uint16_t port) {
-  this->host_ = host;
-  this->port_ = port;
-}
-
-void Client::disconnect_() {
-  client_.stop();
-  state_ = STATE_DISCONNECTED;
-}
-
-void Client::connect_() {
-  state_ = STATE_CONNECTING;
-  ESP_LOGI(TAG, "Connecting to %s:%u...", host_.c_str(), port_);
-  if (client_.connect(host_.c_str(), port_)) {
-    ESP_LOGI(TAG, "Connection successful!");
-    state_ = STATE_CONNECTED;
-  } else {
-    ESP_LOGW(TAG, "Connection failed.");
-    disconnect_();
-  }
-}
-
-void Client::loop() {
-  switch (state_) {
-    case STATE_DISCONNECTED:
-      if (millis() - last_connect_attempt_ > 10000) {
-        last_connect_attempt_ = millis();
-        this->connect_();
-      }
-      break;
-    case STATE_CONNECTED:
-      if (!client_.connected()) {
-        ESP_LOGW(TAG, "Inverter disconnected.");
-        this->disconnect_();
-      }
-      break;
-    case STATE_CONNECTING:
-      break;
-  }
-}
-
-bool Client::is_connected() {
-    return state_ == STATE_CONNECTED && client_.connected();
-}
-
-size_t Client::write(const uint8_t *buffer, size_t size) {
-    if (!is_connected()) return 0;
-    return client_.write(buffer, size);
-}
-
-int Client::read(uint8_t *buffer, size_t size) {
-    if (!is_connected()) return 0;
-    return client_.read(buffer, size);
-}
-
-int Client::available() {
-    if (!is_connected()) return 0;
-    return client_.available();
-}
-
-// =========================================================================
-// Your main component methods, now using the Client correctly
-// =========================================================================
-
 void LuxpowerSNAComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA...");
-  client_.setup(host_, port_);
-}
-
-void LuxpowerSNAComponent::loop() {
-  client_.loop();
+  ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA component...");
 }
 
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", host_.c_str(), port_);
-  ESP_LOGCONFIG(TAG, "  Dongle: %s", dongle_serial_.c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter: %s", inverter_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", dongle_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", inverter_serial_.c_str());
 }
 
 void LuxpowerSNAComponent::update() {
-  if (!client_.is_connected()) {
-    ESP_LOGD(TAG, "Not connected, skipping update.");
+  ESP_LOGD(TAG, "Starting new update cycle.");
+
+  if (!client_.connect(host_.c_str(), port_)) {
+    ESP_LOGW(TAG, "Connection to %s:%u failed. Skipping update.", host_.c_str(), port_);
     return;
   }
 
-  uint8_t bank = banks_[next_bank_index_];
-  request_bank_(bank);
-  
-  if (receive_response_(bank)) {
-    ESP_LOGD(TAG, "Successfully processed bank %d", bank);
-  } else {
-    ESP_LOGW(TAG, "Failed to process bank %d", bank);
+  ESP_LOGD(TAG, "Connection successful. Polling all banks.");
+  bool all_banks_successful = true;
+
+  for (uint8_t bank : banks_) {
+    request_bank_(bank);
+    
+    if (!receive_response_(bank)) {
+      ESP_LOGW(TAG, "Failed to process bank %d. Aborting rest of update cycle.", bank);
+      all_banks_successful = false;
+      break; 
+    }
+    
+    ESP_LOGD(TAG, "Successfully processed bank %d.", bank);
+    delay(200); 
   }
-  
-  next_bank_index_ = (next_bank_index_ + 1) % 5;
+
+  if (all_banks_successful) {
+    ESP_LOGI(TAG, "Update cycle completed successfully.");
+  }
+
+  client_.stop();
+  ESP_LOGD(TAG, "Connection closed.");
 }
 
 void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   uint8_t pkt[38] = {
     0xA1, 0x1A, 0x02, 0x00, 0x20, 0x00, 0x01, 0xC2,
-    0,0,0,0,0,0,0,0,0,0, // dongle serial
-    0x12, 0x00, 0x00, 0x04,
-    0,0,0,0,0,0,0,0,0,0, // inverter serial
-    static_cast<uint8_t>(bank), 0x00, 0x28, 0x00, 0x00, 0x00
+    0,0,0,0,0,0,0,0,0,0, 0x12, 0x00, 0x00, 0x04,
+    0,0,0,0,0,0,0,0,0,0, static_cast<uint8_t>(bank), 0x00, 0x28, 0x00, 0x00, 0x00
   };
   memcpy(pkt + 8, dongle_serial_.c_str(), 10);
   memcpy(pkt + 22, inverter_serial_.c_str(), 10);
@@ -140,19 +78,17 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
   uint32_t start = millis();
   size_t total_read = 0;
   
-  while (millis() - start < 5000) {
+  while (millis() - start < 3000) { 
     if (client_.available()) {
       int bytes_read = client_.read(buffer + total_read, sizeof(buffer) - total_read);
       if (bytes_read > 0) { total_read += bytes_read; }
-    } else {
-      delay(10);
     }
-    
     if (total_read >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) { break; }
+    delay(10);
   }
   
   if (total_read == 0) {
-    ESP_LOGD(TAG, "No data received for bank %d", bank);
+    ESP_LOGW(TAG, "No data received for bank %d (timeout)", bank);
     return false;
   }
 
@@ -189,9 +125,6 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
   return true;
 }
 
-// =========================================================================
-// UNCHANGED: All your original, working functions below this line
-// =========================================================================
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
   while (len--) {
