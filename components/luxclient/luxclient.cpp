@@ -99,7 +99,7 @@ response_received:
     return {};
   }
   uint16_t received_crc = (uint16_t(response[response.size() - 2]) << 8) | response[response.size() - 3];
-  uint16_t calculated_ crc = crc16(response.data() + 1, response.size() - 4);
+  uint16_t calculated_crc = crc16(response.data() + 1, response.size() - 4);
   if (received_crc != calculated_crc) {
     ESP_LOGW(TAG, "CRC check failed! Received: 0x%04X, Calculated: 0x%04X", received_crc, calculated_crc);
     return {};
