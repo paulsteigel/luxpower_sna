@@ -8,12 +8,10 @@
 #include <optional>
 #include <memory> // Required for std::unique_ptr
 
-// --- START OF FIX ---
 // Forward-declare the Mutex class to avoid including heavy headers.
 namespace esphome {
 class Mutex;
 }
-// --- END OF FIX ---
 
 namespace esphome {
 namespace luxclient {
@@ -43,7 +41,6 @@ class LuxClient : public Component {
   std::string inverter_serial_;
   uint32_t read_timeout_{1000};
 
-  // --- FIX ---
   // Using a unique_ptr to the Mutex. This only requires the forward
   // declaration above, keeping this header file clean.
   std::unique_ptr<Mutex> client_mutex_;
