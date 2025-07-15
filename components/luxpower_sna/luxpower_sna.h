@@ -18,6 +18,29 @@ namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
+class Client {
+ public:
+  Client() = default;
+
+  // Public interface for the main component to use
+  void setup(const std::string &host, uint16_t port);
+  void loop(); // This is the state machine manager
+  bool is_connected() { return state_ == STATE_CONNECTED && client_.connected(); }
+  size_t write(const uint8_t *buffer, size_t size) { return client_.write(buffer, size); }
+  int read(uint8_t *buffer, size_t size) { return client_.read(buffer, size); }
+  int available() { return client_.available(); }
+
+ private:
+  enum State { STATE_DISCONNECTED, STATE_CONNECTING, STATE_CONNECTED };
+  void connect_();
+  void disconnect_();
+
+  WiFiClient client_;
+  State state_{STATE_DISCONNECTED};
+  std::string host_;
+  uint16_t port_;
+  uint32_t last_connect_attempt_{0};
+};
 
 #pragma pack(push, 1)
 struct LuxHeader {
@@ -155,6 +178,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void setup() override;
   void dump_config() override;
   void update() override;
+  void loop() override; // Added to drive the connection manager
   
   void set_host(const std::string &host) { host_ = host; }
   void set_port(uint16_t port) { port_ = port; }
@@ -294,6 +318,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   // Status text mappings
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
+  Client client_;
 
   // System Sensors
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
