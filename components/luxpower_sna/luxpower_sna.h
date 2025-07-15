@@ -1,3 +1,4 @@
+```cpp
 // luxpower_sna.h
 #pragma once
 
@@ -7,6 +8,8 @@
 #include "esphome/core/log.h"
 #include <WiFiClient.h>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace esphome {
 namespace luxpower_sna {
@@ -161,7 +164,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
   void set_lux_battery_status_text_sensor(text_sensor::TextSensor *s) { lux_battery_status_text_sensor_ = s; }
-  //void set_inverter_serial_number_sensor(text_sensor::TextSensor *s) { inverter_serial_number_sensor_ = s; }
 
   // Section1 Sensor Setters
   void set_lux_current_solar_voltage_1_sensor(sensor::Sensor *s) { lux_current_solar_voltage_1_sensor_ = s; }
@@ -268,24 +270,19 @@ class LuxpowerSNAComponent : public PollingComponent {
  private:
   WiFiClient client_;
   uint8_t next_bank_index_{0};
-  //const uint8_t banks_[5] = {0, 40, 80, 120, 160};
-
-  // added 15/7 for connection handling
+  uint8_t banks_[5] = {0, 40, 80, 120, 160};
   bool connected_{false};
   uint32_t last_heartbeat_{0};
   uint8_t current_bank_{0};
-  uint8_t banks_[5] = {0, 40, 80, 120, 160};
   std::vector<uint8_t> packet_buffer_;
   uint32_t last_request_{0};
-  
-  // added 15/7
+  bool request_in_progress_{false}; // Added for lock-like mechanism
+
   void check_connection_();
   void safe_disconnect_();
   void handle_heartbeat_(const uint8_t *data, size_t len);
   bool is_heartbeat_packet_(const uint8_t *data);
   bool process_packet_buffer_(uint8_t bank);
-
-
   void request_bank_(uint8_t bank);
   bool receive_response_(uint8_t bank);
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
@@ -301,7 +298,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   uint16_t port_;
   std::string dongle_serial_;
   std::string inverter_serial_;
-  
+
   // Status text mappings
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
