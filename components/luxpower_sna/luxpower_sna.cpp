@@ -24,11 +24,19 @@ const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
   "", "", "", "", "", "", "", "", "", "", "", "", 
   "Charge Allowed & Discharge Forbidden"
 };
-
+// revised 15/7
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA...");
+  packet_buffer_.reserve(1024);
 }
-
+//added 15/7
+void LuxpowerSNAComponent::loop() {
+  check_connection_();
+  if (connected_) {
+    receive_response_(banks_[current_bank_]);
+  }
+}
+//
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA:");
   ESP_LOGCONFIG(TAG, "  Host: %s:%u", host_.c_str(), port_);
@@ -37,22 +45,24 @@ void LuxpowerSNAComponent::dump_config() {
 }
 
 void LuxpowerSNAComponent::update() {
-  if (client_.connected()) {
-    ESP_LOGW(TAG, "Previous connection still active, skipping update");
+  if (!connected_) {
+    if (!client_.connect(host_.c_str(), port_)) {
+      ESP_LOGE(TAG, "Connection failed");
+      return;
+    }
+    connected_ = true;
+    ESP_LOGI(TAG, "Connected to inverter");
+  }
+
+  if (millis() - last_heartbeat_ > 15000) {
+    ESP_LOGW(TAG, "No heartbeat, reconnecting");
+    client_.stop();
+    connected_ = false;
     return;
   }
 
-  uint8_t bank = banks_[next_bank_index_];
-  ESP_LOGD(TAG, "Requesting bank %d", bank);
-  request_bank_(bank);
-  
-  if (receive_response_(bank)) {
-    ESP_LOGD(TAG, "Successfully processed bank %d", bank);
-  } else {
-    ESP_LOGE(TAG, "Failed to process bank %d", bank);
-  }
-  
-  next_bank_index_ = (next_bank_index_ + 1) % 5;
+  request_bank_(banks_[current_bank_]);
+  current_bank_ = (current_bank_ + 1) % 5;
 }
 
 void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
@@ -92,6 +102,59 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   
   client_.write(pkt, sizeof(pkt));
 }
+// revise 15/7
+bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
+  uint8_t buffer[512];
+  size_t bytes_read = client_.readBytes(buffer, sizeof(buffer));
+  
+  if (bytes_read > 0) {
+    packet_buffer_.insert(packet_buffer_.end(), buffer, buffer + bytes_read);
+    return process_packet_buffer_(bank);
+  }
+  return false;
+}
+
+bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
+  // Add after header declaration
+  uint16_t crc_calc = calculate_crc_(packet_buffer_.data() + 6, header->packetLength);
+  uint16_t crc_received = *(uint16_t *)(packet_buffer_.data() + 6 + header->packetLength);
+  
+  if (crc_calc != crc_received) {
+    ESP_LOGE(TAG, "CRC mismatch, discarding packet");
+    packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + header->packetLength + 8);
+    continue;
+  }
+  
+  while (packet_buffer_.size() >= sizeof(LuxHeader)) {
+    LuxHeader *header = (LuxHeader *)packet_buffer_.data();
+    
+    // Check minimum packet size
+    if (packet_buffer_.size() < header->packetLength + 6) {
+      return false; // Incomplete packet
+    }
+
+    // Handle heartbeats
+    if (is_heartbeat_packet_(packet_buffer_.data())) {
+      handle_heartbeat_(packet_buffer_.data(), header->packetLength + 6);
+      last_heartbeat_ = millis();
+      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + header->packetLength + 6);
+      continue;
+    }
+
+    // Process data packet
+    size_t data_offset = sizeof(LuxHeader);
+    size_t total_length = header->packetLength + 6;
+    
+    if (packet_buffer_.size() >= total_length) {
+      process_bank_data_(bank, packet_buffer_.data() + data_offset, header->packetLength);
+      packet_buffer_.erase(packet_buffer_.begin(), packet_buffer_.begin() + total_length);
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
 
 bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
   uint8_t buffer[512];
@@ -112,7 +175,7 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
       break;
     }
   }
-  
+
   if (total_read == 0) {
     ESP_LOGE(TAG, "No data received");
     client_.stop();
@@ -179,6 +242,7 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
   client_.stop();
   return true;
 }
+*/
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
@@ -357,5 +421,32 @@ void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) 
   publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
 }
 
+// Added 15/7
+void LuxpowerSNAComponent::check_connection_() {
+  if (!client_.connected()) {
+    connected_ = false;
+    packet_buffer_.clear();
+  }
+}
+
+void LuxpowerSNAComponent::safe_disconnect_() {
+  if (connected_) {
+    client_.stop();
+    connected_ = false;
+    ESP_LOGI(TAG, "Disconnected safely");
+  }
+}
+
+void LuxpowerSNAComponent::handle_heartbeat_(const uint8_t *data, size_t len) {
+  if (client_.connected()) {
+    client_.write(data, len);
+    ESP_LOGD(TAG, "Responded to heartbeat");
+  }
+}
+
+bool LuxpowerSNAComponent::is_heartbeat_packet_(const uint8_t *data) {
+  LuxHeader *header = (LuxHeader *)data;
+  return (header->function == 0x00); // Heartbeat function code
+}
 }  // namespace luxpower_sna
 }  // namespace esphome
