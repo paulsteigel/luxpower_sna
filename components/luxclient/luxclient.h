@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 // --- START OF FIX ---
-#include "esphome/core/mutex.h" // Specifically for Mutex and MutexLock
+#include "esphome/core/mutex.h" // Specifically include for Mutex and MutexLock
 // "esphome/core/helpers.h" is removed to avoid conflicts
 // --- END OF FIX ---
 
