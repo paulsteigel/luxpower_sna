@@ -138,8 +138,10 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
       continue;
     }
 
-    // Validate CRC - calculate for entire packet except last 2 bytes
-    uint16_t crc_calc = calculate_crc_(packet_buffer_.data(), total_length - 2);
+    // Validate CRC - calculate for data frame portion only
+    const uint8_t* data_frame = packet_buffer_.data() + sizeof(LuxHeader);
+    size_t data_frame_length = total_length - sizeof(LuxHeader) - 2;
+    uint16_t crc_calc = calculate_crc_(data_frame, data_frame_length);
     uint16_t crc_received = (packet_buffer_[total_length - 1] << 8) | packet_buffer_[total_length - 2];
     
     if (crc_calc != crc_received) {
@@ -190,96 +192,6 @@ bool LuxpowerSNAComponent::process_packet_buffer_(uint8_t bank) {
   }
   return false;
 }
-
-/*
-
-bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
-  uint8_t buffer[512];
-  uint32_t start = millis();
-  size_t total_read = 0;
-  
-  while (millis() - start < 5000) {
-    if (client_.available()) {
-      int bytes_read = client_.read(buffer + total_read, sizeof(buffer) - total_read);
-      if (bytes_read > 0) {
-        total_read += bytes_read;
-      }
-    } else {
-      delay(10);
-    }
-    
-    if (total_read >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) {
-      break;
-    }
-  }
-
-  if (total_read == 0) {
-    ESP_LOGE(TAG, "No data received");
-    client_.stop();
-    return false;
-  }
-
-  LuxHeader *header = reinterpret_cast<LuxHeader *>(buffer);
-  if (header->prefix != 0x1AA1) {
-    ESP_LOGE(TAG, "Invalid header prefix: 0x%04X", header->prefix);
-    client_.stop();
-    return false;
-  }
-
-  LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData *>(buffer + sizeof(LuxHeader));
-  if (trans->deviceFunction != 0x04) {
-    ESP_LOGE(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
-    client_.stop();
-    return false;
-  }
-
-  // Validate CRC
-  uint16_t crc_calc = calculate_crc_(buffer + sizeof(LuxHeader), total_read - sizeof(LuxHeader) - 2);
-  uint16_t crc_received = buffer[total_read - 2] | (buffer[total_read - 1] << 8);
-  if (crc_calc != crc_received) {
-    ESP_LOGE(TAG, "CRC mismatch: calc=0x%04X, recv=0x%04X", crc_calc, crc_received);
-    client_.stop();
-    return false;
-  }
-
-  // Process data based on bank
-  size_t data_offset = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
-  size_t data_size = total_read - data_offset - 2; // Exclude CRC
-  
-  switch (bank) {
-    case 0:
-      if (data_size >= sizeof(LuxLogDataRawSection1)) {
-        process_section1_(*reinterpret_cast<LuxLogDataRawSection1 *>(buffer + data_offset));
-      }
-      break;
-    case 40:
-      if (data_size >= sizeof(LuxLogDataRawSection2)) {
-        process_section2_(*reinterpret_cast<LuxLogDataRawSection2 *>(buffer + data_offset));
-      }
-      break;
-    case 80:
-      if (data_size >= sizeof(LuxLogDataRawSection3)) {
-        process_section3_(*reinterpret_cast<LuxLogDataRawSection3 *>(buffer + data_offset));
-      }
-      break;
-    case 120:
-      if (data_size >= sizeof(LuxLogDataRawSection4)) {
-        process_section4_(*reinterpret_cast<LuxLogDataRawSection4 *>(buffer + data_offset));
-      }
-      break;
-    case 160:
-      if (data_size >= sizeof(LuxLogDataRawSection5)) {
-        process_section5_(*reinterpret_cast<LuxLogDataRawSection5 *>(buffer + data_offset));
-      }
-      break;
-    default:
-      ESP_LOGW(TAG, "Unknown bank: %d", bank);
-  }
-
-  client_.stop();
-  return true;
-}
-*/
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
