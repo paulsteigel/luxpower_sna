@@ -313,7 +313,7 @@ void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor,
 }
 
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
-  publish_sensor_(lux_status_text_sensor_, STATUS_TEXTS[std::min(data.status, static_cast<uint16_t>(192))]);
+  publish_text_sensor_(lux_status_text_sensor_, STATUS_TEXTS[std::min(data.status, static_cast<uint16_t>(192))]);
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_3_sensor_, data.v_pv_3 / 10.0f);
@@ -399,7 +399,7 @@ void LuxpowerSNAComponent::process_section3_(const LuxLogDataRawSection3 &data) 
   publish_sensor_(min_cell_temp_sensor_, data.min_cell_temp / 10.0f);
   publish_sensor_(lux_battery_cycle_count_sensor_, data.bat_cycle_count);
   publish_sensor_(lux_home_consumption_2_live_sensor_, data.p_load2);
-  publish_text_sensor_(lux_battery_status_text_sensor_, BATTERY_STATUS_TEXTS[std::min(data.bat_status_inv, 16)]);
+  publish_text_sensor_(lux_battery_status_text_sensor_, BATTERY_STATUS_TEXTS[std::min(data.bat_status_inv, static_cast<int16_t>(16))]);
 }
 
 void LuxpowerSNAComponent::process_section4_(const LuxLogDataRawSection4 &data) {
