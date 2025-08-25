@@ -1,6 +1,10 @@
 // luxpower_sna.cpp
 #include "luxpower_sna.h"
-
+// ADD THIS BLOCK
+#ifdef USE_ESP_IDF
+#error "The luxpower_sna component is not compatible with the ESP-IDF framework. Please remove the 'framework: type: esp-idf' line from your YAML configuration to use the default Arduino framework."
+#endif
+// END OF BLOCK
 namespace esphome {
 namespace luxpower_sna {
 
