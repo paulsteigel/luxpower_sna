@@ -16,7 +16,11 @@
 #elif USE_ESP8266
 #include <ESP8266WiFi.h>
 #endif
+#ifdef USE_ESP_IDF
+#error "The luxpower_sna component is not compatible with the ESP-IDF framework. Please remove the 'framework: type: esp-idf' line from your YAML configuration to use the default Arduino framework."
+#else
 #include <WiFiClient.h>
+#endif
 
 namespace esphome {
 namespace luxpower_sna {
