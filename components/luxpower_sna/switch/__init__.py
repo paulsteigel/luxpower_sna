@@ -79,4 +79,4 @@ async def to_code(config):
             register, bitmask = SWITCH_DEFINITIONS[switch_key]
             cg.add(var.set_register_address(register))
             cg.add(var.set_bitmask(bitmask))
-            cg.add(var.set_switch_type(switch_key))
+            #cg.add(var.set_switch_type(switch_key))
