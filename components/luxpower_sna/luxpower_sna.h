@@ -2,6 +2,7 @@
 #pragma once
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/template/text/template_text.h"
@@ -17,6 +18,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_timer.h"
 #else
 #include <WiFiClient.h>
 #ifdef USE_ESP32
@@ -121,7 +126,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_dongle_serial_input(template_::TemplateText *input) { dongle_serial_input_ = input; }
   void set_inverter_serial_input(template_::TemplateText *input) { inverter_serial_input_ = input; }
 
-  // Sensor setters
+  // All your existing sensor setters (keeping them exactly as they are)
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
@@ -297,7 +302,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  // Sensor pointers
+  // All your existing sensor pointers (keeping them exactly as they are)
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
   text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
   text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
