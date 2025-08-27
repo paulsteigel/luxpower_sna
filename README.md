@@ -10,14 +10,49 @@ external_components: # skip this line if you already have this
   - source: github://paulsteigel/luxpower_sna@main
     refresh: 0s   
 #Definition for the component
+# Input components for dynamic configuration
+text:
+  - platform: template
+    id: input_host_ip_address
+    name: "Inverter Host IP"
+    optimistic: true
+    initial_value: "192.168.4.1"
+    mode: text
+
+  - platform: template
+    id: input_dongle_serial
+    name: "Dongle Serial Number"
+    optimistic: true
+    initial_value: "SW12345678"
+    mode: text
+
+  - platform: template
+    id: input_inverter_serial
+    name: "Inverter Serial Number"
+    optimistic: true
+    initial_value: "LX87654321"
+    mode: text
+
+number:
+  - platform: template
+    id: input_port_number
+    name: "Inverter Port"
+    optimistic: true
+    initial_value: 8000
+    min_value: 1
+    max_value: 65535
+    step: 1
+    mode: box
+
+# Your component using the inputs
 luxpower_sna:
-  id: luxpower_hub
-  host: "xxx.xxx.xxx.xxx" # Internal IP address of your Wifi Dongle
-  port: 8000
-  dongle_serial: "xxxxxxxxxx" # Your Dongle Serial
-  inverter_serial_number: "xxxxxxxxxx" # Your Inverter serial number. Currently this is not needed but just leave it
-  update_interval: 20s
-  
+  id: ${name}_luxpower_hub
+  host: input_host_ip_address
+  port: input_port_number
+  dongle_serial: input_dongle_serial
+  inverter_serial: input_inverter_serial
+  update_interval: 30s
+
 # Definition sensors, you should be selective on the following sensor, keep what you need for later Lovelace UI CARD
 sensor:
   - platform: luxpower_sna
@@ -201,6 +236,9 @@ text_sensor:
 Here’s a snapshot of the sensor list on my combined ESP32-S2 Lolin logger for JKBMS and LuxPower:
 
 <img width="340" height="784" alt="image" src="https://github.com/user-attachments/assets/ed58fca8-83d4-4c9d-bacf-e270755629cc" />
+
+After successfully boot up, put the host address, serrial numbers.. here
+<img width="363" height="320" alt="image" src="https://github.com/user-attachments/assets/dd9a5c2d-6e1e-4c4b-8f24-9d5a2ebb50de" />
 
 I'm excited to share that the logger is already functional in read-only mode, and it integrates almost all the sensors available in the official LuxPower Integration.
 In the coming days, I’ll begin adding support for buttons, switches, and time-based control—making it possible to fully control your LuxPower inverter just as easily as with the original Integration by @guybw's team. I also plan to design a Lovelace card to improve the Home Assistant dashboard experience. 🔗 Component link: https://github.com/paulsteigel/luxpower_sna
