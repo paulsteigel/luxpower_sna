@@ -1,6 +1,3 @@
-// For different functions
-#include <functional>
-
 // luxpower_sna.h
 #pragma once
 #include "esphome/core/hal.h"
@@ -38,6 +35,8 @@
 #include <vector>
 #include <queue>
 #include <cstring>
+#include <functional>
+#include <map>
 
 namespace esphome {
 namespace luxpower_sna {
@@ -123,6 +122,11 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
   void loop() override;  // Non-blocking processing
+
+  // Methods for switch support
+  void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
+  void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
+  bool is_connection_ready() const;
 
   // Template input setters
   void set_host_input(template_::TemplateText *input) { host_input_ = input; }
@@ -272,10 +276,11 @@ class LuxpowerSNAComponent : public PollingComponent {
   void publish_sensor_(sensor::Sensor *sensor, float value);
   void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
 
-  // Simple interface for switch components to use existing connection
-  void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
-  void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
-  bool is_connection_ready() const;
+  // Methods for switch support
+  void process_async_requests_();
+  std::vector<uint8_t> prepare_single_register_read_packet_(uint16_t reg);
+  std::vector<uint8_t> prepare_single_register_write_packet_(uint16_t reg, uint16_t value);
+  bool send_packet_(const std::vector<uint8_t> &packet);
 
  private:
   // Template input references
@@ -283,17 +288,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   template_::TemplateNumber *port_input_{nullptr};
   template_::TemplateText *dongle_serial_input_{nullptr};
   template_::TemplateText *inverter_serial_input_{nullptr};
-
-  // Simple request queue for async operations of switch
-  struct AsyncRequest {
-    enum Type { READ, WRITE };
-    Type type;
-    uint16_t reg;
-    uint16_t value;  // for write operations
-    std::function<void(uint16_t)> read_callback;
-    std::function<void(bool)> write_callback;
-  };
-  std::vector<AsyncRequest> async_requests_;
 
   // Framework-specific connection management
 #ifdef USE_ESP_IDF
@@ -322,7 +316,19 @@ class LuxpowerSNAComponent : public PollingComponent {
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  // Sensor pointers
+  // For switch support
+  struct AsyncRequest {
+    enum Type { READ, WRITE };
+    Type type;
+    uint16_t reg;
+    uint16_t value;  // for write operations
+    std::function<void(uint16_t)> read_callback;
+    std::function<void(bool)> write_callback;
+  };
+  std::vector<AsyncRequest> async_requests_;
+  std::map<uint16_t, uint16_t> register_cache_;
+
+  // Sensor pointer declarations
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
   text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
   text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
