@@ -1,15 +1,15 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import switch
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_NAME
 from .. import luxpower_sna_ns, LuxpowerSNAComponent, CONF_LUXPOWER_SNA_ID
 
 DEPENDENCIES = ["luxpower_sna"]
 
 LuxPowerSwitch = luxpower_sna_ns.class_("LuxPowerSwitch", switch.Switch, cg.Component)
 
-# Switch definitions - completely self-contained
-SWITCH_TYPES = {
+# Switch definitions with register and bitmask
+SWITCH_DEFINITIONS = {
     # Register 21 switches
     "feed_in_grid": (21, 1 << 15),
     "dci_enable": (21, 1 << 14),
@@ -43,25 +43,40 @@ SWITCH_TYPES = {
     "enable_peak_shaving": (179, 1 << 7),
 }
 
-CONF_SWITCH_TYPE = "switch_type"
+# Create individual switch schemas
+def create_switch_schema(switch_key):
+    return switch.switch_schema(LuxPowerSwitch).extend({
+        cv.GenerateID(): cv.declare_id(LuxPowerSwitch),
+    }).extend(cv.COMPONENT_SCHEMA)
 
-CONFIG_SCHEMA = switch.switch_schema(LuxPowerSwitch).extend({
-    cv.GenerateID(): cv.declare_id(LuxPowerSwitch),
+# Build the main config schema with all possible switches
+switch_schemas = {}
+for switch_key in SWITCH_DEFINITIONS.keys():
+    switch_schemas[cv.Optional(switch_key)] = create_switch_schema(switch_key)
+
+CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-    cv.Required(CONF_SWITCH_TYPE): cv.one_of(*SWITCH_TYPES.keys(), lower=True),
+    **switch_schemas
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await switch.register_switch(var, config)
-
     parent = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    cg.add(var.set_parent(parent))
-
-    switch_type = config[CONF_SWITCH_TYPE]
-    register, bitmask_value = SWITCH_TYPES[switch_type]
     
-    cg.add(var.set_register_address(register))
-    cg.add(var.set_bitmask(bitmask_value))  # Direct bitmask value instead of constant reference
-    cg.add(var.set_switch_type(switch_type))
+    # Process each configured switch
+    for switch_key, switch_config in config.items():
+        if switch_key == CONF_LUXPOWER_SNA_ID:
+            continue
+            
+        if switch_key in SWITCH_DEFINITIONS:
+            # Create the switch component
+            var = cg.new_Pvariable(switch_config[CONF_ID])
+            await cg.register_component(var, switch_config)
+            await switch.register_switch(var, switch_config)
+            
+            # Configure the switch
+            cg.add(var.set_parent(parent))
+            
+            register, bitmask = SWITCH_DEFINITIONS[switch_key]
+            cg.add(var.set_register_address(register))
+            cg.add(var.set_bitmask(bitmask))
+            cg.add(var.set_switch_type(switch_key))
