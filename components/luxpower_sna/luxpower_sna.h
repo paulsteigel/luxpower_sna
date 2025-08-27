@@ -4,29 +4,31 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/text/text.h"
+#include "esphome/components/number/number.h"
 #include "esphome/core/log.h"
 #include <cstring>
 
 #ifdef USE_ESP32
-#ifdef USE_ESP_IDF
-#error "The luxpower_sna component is not compatible with the ESP-IDF framework. Please remove the 'framework: type: esp-idf' line from your YAML configuration to use the default Arduino framework."
-#else
 #include <WiFi.h>
-#endif
 #elif USE_ESP8266
 #include <ESP8266WiFi.h>
 #endif
-#ifdef USE_ESP_IDF
-#error "The luxpower_sna component is not compatible with the ESP-IDF framework. Please remove the 'framework: type: esp-idf' line from your YAML configuration to use the default Arduino framework."
-#else
 #include <WiFiClient.h>
-#endif
 
 namespace esphome {
 namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
+enum class ConnectionState {
+  DISCONNECTED,
+  CONNECTING,
+  CONNECTED,
+  ERROR
+};
+
+// [Keep all your existing struct definitions exactly as they are...]
 #pragma pack(push, 1)
 struct LuxHeader {
   uint16_t prefix; uint16_t protocolVersion; uint16_t packetLength; uint8_t address;
@@ -36,6 +38,7 @@ struct LuxTranslatedData {
   uint8_t address; uint8_t deviceFunction; char serialNumber[10];
   uint16_t registerStart; uint8_t dataFieldLength;
 };
+// [Keep all your existing structs - LuxLogDataRawSection1, etc.]
 struct LuxLogDataRawSection1 {
   uint16_t status;
   int16_t v_pv_1, v_pv_2, v_pv_3, v_bat;
@@ -87,19 +90,17 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
 
-  void set_host(const std::string &host) { host_ = host; }
-  void set_port(uint16_t port) { port_ = port; }
-  void set_dongle_serial(const std::string &serial) { dongle_serial_ = serial; }
-  void set_inverter_serial(const std::string &serial) { inverter_serial_ = serial; }
+  // Input setters for template component references
+  void set_host_input(text::Text *input) { host_input_ = input; }
+  void set_port_input(number::Number *input) { port_input_ = input; }
+  void set_dongle_serial_input(text::Text *input) { dongle_serial_input_ = input; }
+  void set_inverter_serial_input(text::Text *input) { inverter_serial_input_ = input; }
 
-  // System Sensor Setters
+  // [Keep all your existing sensor setters exactly as they are...]
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
   void set_lux_battery_status_text_sensor(text_sensor::TextSensor *s) { lux_battery_status_text_sensor_ = s; }
-  void set_inverter_serial_number_sensor(text_sensor::TextSensor *s) { inverter_serial_number_sensor_ = s; }
-
-  // Section1 Sensor Setters
   void set_lux_current_solar_voltage_1_sensor(sensor::Sensor *s) { lux_current_solar_voltage_1_sensor_ = s; }
   void set_lux_current_solar_voltage_2_sensor(sensor::Sensor *s) { lux_current_solar_voltage_2_sensor_ = s; }
   void set_lux_current_solar_voltage_3_sensor(sensor::Sensor *s) { lux_current_solar_voltage_3_sensor_ = s; }
@@ -147,8 +148,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_grid_flow_sensor(sensor::Sensor *s) { lux_grid_flow_sensor_ = s; }
   void set_lux_home_consumption_live_sensor(sensor::Sensor *s) { lux_home_consumption_live_sensor_ = s; }
   void set_lux_home_consumption_sensor(sensor::Sensor *s) { lux_home_consumption_sensor_ = s; }
-
-  // Section2 Sensor Setters
+  
+  // Section2 sensors
   void set_lux_total_solar_array_1_sensor(sensor::Sensor *s) { lux_total_solar_array_1_sensor_ = s; }
   void set_lux_total_solar_array_2_sensor(sensor::Sensor *s) { lux_total_solar_array_2_sensor_ = s; }
   void set_lux_total_solar_array_3_sensor(sensor::Sensor *s) { lux_total_solar_array_3_sensor_ = s; }
@@ -168,8 +169,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_uptime_sensor(sensor::Sensor *s) { lux_uptime_sensor_ = s; }
   void set_lux_total_solar_sensor(sensor::Sensor *s) { lux_total_solar_sensor_ = s; }
   void set_lux_home_consumption_total_sensor(sensor::Sensor *s) { lux_home_consumption_total_sensor_ = s; }
-
-  // Section3 Sensor Setters
+  
+  // Section3 sensors
   void set_lux_bms_limit_charge_sensor(sensor::Sensor *s) { lux_bms_limit_charge_sensor_ = s; }
   void set_lux_bms_limit_discharge_sensor(sensor::Sensor *s) { lux_bms_limit_discharge_sensor_ = s; }
   void set_charge_voltage_ref_sensor(sensor::Sensor *s) { charge_voltage_ref_sensor_ = s; }
@@ -184,8 +185,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_min_cell_temp_sensor(sensor::Sensor *s) { min_cell_temp_sensor_ = s; }
   void set_lux_battery_cycle_count_sensor(sensor::Sensor *s) { lux_battery_cycle_count_sensor_ = s; }
   void set_lux_home_consumption_2_live_sensor(sensor::Sensor *s) { lux_home_consumption_2_live_sensor_ = s; }
-
-  // Section4 Sensor Setters
+  
+  // Section4 sensors
   void set_lux_current_generator_voltage_sensor(sensor::Sensor *s) { lux_current_generator_voltage_sensor_ = s; }
   void set_lux_current_generator_frequency_sensor(sensor::Sensor *s) { lux_current_generator_frequency_sensor_ = s; }
   void set_lux_current_generator_power_sensor(sensor::Sensor *s) { lux_current_generator_power_sensor_ = s; }
@@ -195,137 +196,169 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_lux_current_eps_L2_voltage_sensor(sensor::Sensor *s) { lux_current_eps_L2_voltage_sensor_ = s; }
   void set_lux_current_eps_L1_watt_sensor(sensor::Sensor *s) { lux_current_eps_L1_watt_sensor_ = s; }
   void set_lux_current_eps_L2_watt_sensor(sensor::Sensor *s) { lux_current_eps_L2_watt_sensor_ = s; }
-
-  // Section5 Sensor Setters
+  
+  // Section5 sensors
   void set_p_load_ongrid_sensor(sensor::Sensor *s) { p_load_ongrid_sensor_ = s; }
   void set_e_load_day_sensor(sensor::Sensor *s) { e_load_day_sensor_ = s; }
   void set_e_load_all_l_sensor(sensor::Sensor *s) { e_load_all_l_sensor_ = s; }
 
- private:
+ protected:
+  // Connection state management
+  void start_connection_();
+  void check_connection_status_();
+  void process_data_collection_();
+  void handle_error_recovery_();
+  
+  // Data processing
   void request_bank_(uint8_t bank);
   bool receive_response_(uint8_t bank);
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
+  
   void process_section1_(const LuxLogDataRawSection1 &data);
   void process_section2_(const LuxLogDataRawSection2 &data);
   void process_section3_(const LuxLogDataRawSection3 &data);
   void process_section4_(const LuxLogDataRawSection4 &data);
   void process_section5_(const LuxLogDataRawSection5 &data);
+  
+  // Helper methods
   void publish_sensor_(sensor::Sensor *sensor, float value);
   void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
+  bool validate_runtime_parameters_();
+  std::string get_host_from_input_();
+  uint16_t get_port_from_input_();
+  std::string get_dongle_serial_from_input_();
+  std::string get_inverter_serial_from_input_();
+  const char* get_state_name_(ConnectionState state);
 
-  std::string host_;
-  uint16_t port_;
-  std::string dongle_serial_;
-  std::string inverter_serial_;
-  
+ private:
+  // Template input references
+  text::Text *host_input_{nullptr};
+  number::Number *port_input_{nullptr};
+  text::Text *dongle_serial_input_{nullptr};
+  text::Text *inverter_serial_input_{nullptr};
+
+  // Connection management
   WiFiClient client_;
-
+  ConnectionState connection_state_;
+  uint8_t current_bank_index_;
+  uint32_t last_connection_attempt_;
+  uint32_t connection_start_time_;
+  bool initialization_complete_;
+  
+  // Data banks to query
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
-
+  
+  // Status text arrays
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  text_sensor::TextSensor 
-    *lux_firmware_version_sensor_{nullptr}, 
-    *lux_inverter_model_sensor_{nullptr}, 
-    *lux_status_text_sensor_{nullptr}, 
-    *lux_battery_status_text_sensor_{nullptr}, 
-    *inverter_serial_number_sensor_{nullptr};
+  // [Keep all your existing sensor pointers exactly as they are...]
+  text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
+  text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
+  text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
+  text_sensor::TextSensor *lux_battery_status_text_sensor_{nullptr};
   
-  sensor::Sensor 
-    *lux_current_solar_voltage_1_sensor_{nullptr},
-    *lux_current_solar_voltage_2_sensor_{nullptr},
-    *lux_current_solar_voltage_3_sensor_{nullptr},
-    *lux_battery_voltage_sensor_{nullptr},
-    *lux_battery_percent_sensor_{nullptr},
-    *soh_sensor_{nullptr},
-    *lux_internal_fault_sensor_{nullptr},
-    *lux_current_solar_output_1_sensor_{nullptr},
-    *lux_current_solar_output_2_sensor_{nullptr},
-    *lux_current_solar_output_3_sensor_{nullptr},
-    *lux_battery_charge_sensor_{nullptr},
-    *lux_battery_discharge_sensor_{nullptr},
-    *lux_grid_voltage_r_sensor_{nullptr},
-    *lux_grid_voltage_s_sensor_{nullptr},
-    *lux_grid_voltage_t_sensor_{nullptr},
-    *lux_grid_frequency_live_sensor_{nullptr},
-    *lux_grid_voltage_live_sensor_{nullptr},
-    *lux_power_from_inverter_live_sensor_{nullptr},
-    *lux_power_to_inverter_live_sensor_{nullptr},
-    *lux_power_current_clamp_sensor_{nullptr},
-    *grid_power_factor_sensor_{nullptr},
-    *eps_voltage_r_sensor_{nullptr},
-    *eps_voltage_s_sensor_{nullptr},
-    *eps_voltage_t_sensor_{nullptr},
-    *eps_frequency_sensor_{nullptr},
-    *lux_power_to_eps_sensor_{nullptr},
-    *lux_power_to_grid_live_sensor_{nullptr},
-    *lux_power_from_grid_live_sensor_{nullptr},
-    *lux_daily_solar_array_1_sensor_{nullptr},
-    *lux_daily_solar_array_2_sensor_{nullptr},
-    *lux_daily_solar_array_3_sensor_{nullptr},
-    *lux_power_from_inverter_daily_sensor_{nullptr},
-    *lux_power_to_inverter_daily_sensor_{nullptr},
-    *lux_daily_battery_charge_sensor_{nullptr},
-    *lux_daily_battery_discharge_sensor_{nullptr},
-    *lux_power_to_eps_daily_sensor_{nullptr},
-    *lux_power_to_grid_daily_sensor_{nullptr},
-    *lux_power_from_grid_daily_sensor_{nullptr},
-    *bus1_voltage_sensor_{nullptr},
-    *bus2_voltage_sensor_{nullptr},
-    *lux_current_solar_output_sensor_{nullptr},
-    *lux_daily_solar_sensor_{nullptr},
-    *lux_power_to_home_sensor_{nullptr},
-    *lux_battery_flow_sensor_{nullptr},
-    *lux_grid_flow_sensor_{nullptr},
-    *lux_home_consumption_live_sensor_{nullptr},
-    *lux_home_consumption_sensor_{nullptr},
-    *lux_total_solar_array_1_sensor_{nullptr},
-    *lux_total_solar_array_2_sensor_{nullptr},
-    *lux_total_solar_array_3_sensor_{nullptr},
-    *lux_power_from_inverter_total_sensor_{nullptr},
-    *lux_power_to_inverter_total_sensor_{nullptr},
-    *lux_total_battery_charge_sensor_{nullptr},
-    *lux_total_battery_discharge_sensor_{nullptr},
-    *lux_power_to_eps_total_sensor_{nullptr},
-    *lux_power_to_grid_total_sensor_{nullptr},
-    *lux_power_from_grid_total_sensor_{nullptr},
-    *lux_fault_code_sensor_{nullptr},
-    *lux_warning_code_sensor_{nullptr},
-    *lux_internal_temp_sensor_{nullptr},
-    *lux_radiator1_temp_sensor_{nullptr},
-    *lux_radiator2_temp_sensor_{nullptr},
-    *lux_battery_temperature_live_sensor_{nullptr},
-    *lux_uptime_sensor_{nullptr},
-    *lux_total_solar_sensor_{nullptr},
-    *lux_home_consumption_total_sensor_{nullptr},
-    *lux_bms_limit_charge_sensor_{nullptr},
-    *lux_bms_limit_discharge_sensor_{nullptr},
-    *charge_voltage_ref_sensor_{nullptr},
-    *discharge_cutoff_voltage_sensor_{nullptr},
-    *battery_status_inv_sensor_{nullptr},
-    *lux_battery_count_sensor_{nullptr},
-    *lux_battery_capacity_ah_sensor_{nullptr},
-    *lux_battery_current_sensor_{nullptr},
-    *max_cell_volt_sensor_{nullptr},
-    *min_cell_volt_sensor_{nullptr},
-    *max_cell_temp_sensor_{nullptr},
-    *min_cell_temp_sensor_{nullptr},
-    *lux_battery_cycle_count_sensor_{nullptr},
-    *lux_home_consumption_2_live_sensor_{nullptr},
-    *lux_current_generator_voltage_sensor_{nullptr},
-    *lux_current_generator_frequency_sensor_{nullptr},
-    *lux_current_generator_power_sensor_{nullptr},
-    *lux_current_generator_power_daily_sensor_{nullptr},
-    *lux_current_generator_power_all_sensor_{nullptr},
-    *lux_current_eps_L1_voltage_sensor_{nullptr},
-    *lux_current_eps_L2_voltage_sensor_{nullptr},
-    *lux_current_eps_L1_watt_sensor_{nullptr},
-    *lux_current_eps_L2_watt_sensor_{nullptr},
-    *p_load_ongrid_sensor_{nullptr},
-    *e_load_day_sensor_{nullptr},
-    *e_load_all_l_sensor_{nullptr};
- };
+  sensor::Sensor *lux_current_solar_voltage_1_sensor_{nullptr};
+  sensor::Sensor *lux_current_solar_voltage_2_sensor_{nullptr};
+  sensor::Sensor *lux_current_solar_voltage_3_sensor_{nullptr};
+  sensor::Sensor *lux_battery_voltage_sensor_{nullptr};
+  sensor::Sensor *lux_battery_percent_sensor_{nullptr};
+  sensor::Sensor *soh_sensor_{nullptr};
+  sensor::Sensor *lux_internal_fault_sensor_{nullptr};
+  sensor::Sensor *lux_current_solar_output_1_sensor_{nullptr};
+  sensor::Sensor *lux_current_solar_output_2_sensor_{nullptr};
+  sensor::Sensor *lux_current_solar_output_3_sensor_{nullptr};
+  sensor::Sensor *lux_battery_charge_sensor_{nullptr};
+  sensor::Sensor *lux_battery_discharge_sensor_{nullptr};
+  sensor::Sensor *lux_grid_voltage_r_sensor_{nullptr};
+  sensor::Sensor *lux_grid_voltage_s_sensor_{nullptr};
+  sensor::Sensor *lux_grid_voltage_t_sensor_{nullptr};
+  sensor::Sensor *lux_grid_frequency_live_sensor_{nullptr};
+  sensor::Sensor *lux_grid_voltage_live_sensor_{nullptr};
+  sensor::Sensor *lux_power_from_inverter_live_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_inverter_live_sensor_{nullptr};
+  sensor::Sensor *lux_power_current_clamp_sensor_{nullptr};
+  sensor::Sensor *grid_power_factor_sensor_{nullptr};
+  sensor::Sensor *eps_voltage_r_sensor_{nullptr};
+  sensor::Sensor *eps_voltage_s_sensor_{nullptr};
+  sensor::Sensor *eps_voltage_t_sensor_{nullptr};
+  sensor::Sensor *eps_frequency_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_eps_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_grid_live_sensor_{nullptr};
+  sensor::Sensor *lux_power_from_grid_live_sensor_{nullptr};
+  sensor::Sensor *lux_daily_solar_array_1_sensor_{nullptr};
+  sensor::Sensor *lux_daily_solar_array_2_sensor_{nullptr};
+  sensor::Sensor *lux_daily_solar_array_3_sensor_{nullptr};
+  sensor::Sensor *lux_power_from_inverter_daily_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_inverter_daily_sensor_{nullptr};
+  sensor::Sensor *lux_daily_battery_charge_sensor_{nullptr};
+  sensor::Sensor *lux_daily_battery_discharge_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_eps_daily_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_grid_daily_sensor_{nullptr};
+  sensor::Sensor *lux_power_from_grid_daily_sensor_{nullptr};
+  sensor::Sensor *bus1_voltage_sensor_{nullptr};
+  sensor::Sensor *bus2_voltage_sensor_{nullptr};
+  sensor::Sensor *lux_current_solar_output_sensor_{nullptr};
+  sensor::Sensor *lux_daily_solar_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_home_sensor_{nullptr};
+  sensor::Sensor *lux_battery_flow_sensor_{nullptr};
+  sensor::Sensor *lux_grid_flow_sensor_{nullptr};
+  sensor::Sensor *lux_home_consumption_live_sensor_{nullptr};
+  sensor::Sensor *lux_home_consumption_sensor_{nullptr};
+  
+  // Section2 sensors
+  sensor::Sensor *lux_total_solar_array_1_sensor_{nullptr};
+  sensor::Sensor *lux_total_solar_array_2_sensor_{nullptr};
+  sensor::Sensor *lux_total_solar_array_3_sensor_{nullptr};
+  sensor::Sensor *lux_power_from_inverter_total_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_inverter_total_sensor_{nullptr};
+  sensor::Sensor *lux_total_battery_charge_sensor_{nullptr};
+  sensor::Sensor *lux_total_battery_discharge_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_eps_total_sensor_{nullptr};
+  sensor::Sensor *lux_power_to_grid_total_sensor_{nullptr};
+  sensor::Sensor *lux_power_from_grid_total_sensor_{nullptr};
+  sensor::Sensor *lux_fault_code_sensor_{nullptr};
+  sensor::Sensor *lux_warning_code_sensor_{nullptr};
+  sensor::Sensor *lux_internal_temp_sensor_{nullptr};
+  sensor::Sensor *lux_radiator1_temp_sensor_{nullptr};
+  sensor::Sensor *lux_radiator2_temp_sensor_{nullptr};
+  sensor::Sensor *lux_battery_temperature_live_sensor_{nullptr};
+  sensor::Sensor *lux_uptime_sensor_{nullptr};
+  sensor::Sensor *lux_total_solar_sensor_{nullptr};
+  sensor::Sensor *lux_home_consumption_total_sensor_{nullptr};
+  
+  // Section3 sensors
+  sensor::Sensor *lux_bms_limit_charge_sensor_{nullptr};
+  sensor::Sensor *lux_bms_limit_discharge_sensor_{nullptr};
+  sensor::Sensor *charge_voltage_ref_sensor_{nullptr};
+  sensor::Sensor *discharge_cutoff_voltage_sensor_{nullptr};
+  sensor::Sensor *battery_status_inv_sensor_{nullptr};
+  sensor::Sensor *lux_battery_count_sensor_{nullptr};
+  sensor::Sensor *lux_battery_capacity_ah_sensor_{nullptr};
+  sensor::Sensor *lux_battery_current_sensor_{nullptr};
+  sensor::Sensor *max_cell_volt_sensor_{nullptr};
+  sensor::Sensor *min_cell_volt_sensor_{nullptr};
+  sensor::Sensor *max_cell_temp_sensor_{nullptr};
+  sensor::Sensor *min_cell_temp_sensor_{nullptr};
+  sensor::Sensor *lux_battery_cycle_count_sensor_{nullptr};
+  sensor::Sensor *lux_home_consumption_2_live_sensor_{nullptr};
+  
+  // Section4 sensors
+  sensor::Sensor *lux_current_generator_voltage_sensor_{nullptr};
+  sensor::Sensor *lux_current_generator_frequency_sensor_{nullptr};
+  sensor::Sensor *lux_current_generator_power_sensor_{nullptr};
+  sensor::Sensor *lux_current_generator_power_daily_sensor_{nullptr};
+  sensor::Sensor *lux_current_generator_power_all_sensor_{nullptr};
+  sensor::Sensor *lux_current_eps_L1_voltage_sensor_{nullptr};
+  sensor::Sensor *lux_current_eps_L2_voltage_sensor_{nullptr};
+  sensor::Sensor *lux_current_eps_L1_watt_sensor_{nullptr};
+  sensor::Sensor *lux_current_eps_L2_watt_sensor_{nullptr};
+  
+  // Section5 sensors
+  sensor::Sensor *p_load_ongrid_sensor_{nullptr};
+  sensor::Sensor *e_load_day_sensor_{nullptr};
+  sensor::Sensor *e_load_all_l_sensor_{nullptr};
+};
 
 }  // namespace luxpower_sna
 }  // namespace esphome
