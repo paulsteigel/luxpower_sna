@@ -4,10 +4,11 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "esphome/components/text/text.h"
-#include "esphome/components/number/number.h"
+#include "esphome/components/template/template_text.h"
+#include "esphome/components/template/template_number.h"
 #include "esphome/core/log.h"
 #include <cstring>
+#include <queue>
 
 #ifdef USE_ESP32
 #include <WiFi.h>
@@ -25,6 +26,18 @@ enum class ConnectionState {
   DISCONNECTED,
   CONNECTING,
   CONNECTED,
+  REQUESTING_DATA,
+  WAITING_RESPONSE,
+  PROCESSING_RESPONSE,
+  ERROR
+};
+
+enum class DataBankState {
+  IDLE,
+  SENDING_REQUEST,
+  WAITING_RESPONSE,
+  PROCESSING_DATA,
+  COMPLETED,
   ERROR
 };
 
@@ -38,7 +51,6 @@ struct LuxTranslatedData {
   uint8_t address; uint8_t deviceFunction; char serialNumber[10];
   uint16_t registerStart; uint8_t dataFieldLength;
 };
-// [Keep all your existing structs - LuxLogDataRawSection1, etc.]
 struct LuxLogDataRawSection1 {
   uint16_t status;
   int16_t v_pv_1, v_pv_2, v_pv_3, v_bat;
@@ -89,12 +101,13 @@ class LuxpowerSNAComponent : public PollingComponent {
   void setup() override;
   void dump_config() override;
   void update() override;
+  void loop() override;  // Non-blocking processing
 
-  // Input setters for template component references
-  void set_host_input(text::Text *input) { host_input_ = input; }
-  void set_port_input(number::Number *input) { port_input_ = input; }
-  void set_dongle_serial_input(text::Text *input) { dongle_serial_input_ = input; }
-  void set_inverter_serial_input(text::Text *input) { inverter_serial_input_ = input; }
+  // Template input setters
+  void set_host_input(template_::TemplateText *input) { host_input_ = input; }
+  void set_port_input(template_::TemplateNumber *input) { port_input_ = input; }
+  void set_dongle_serial_input(template_::TemplateText *input) { dongle_serial_input_ = input; }
+  void set_inverter_serial_input(template_::TemplateText *input) { inverter_serial_input_ = input; }
 
   // [Keep all your existing sensor setters exactly as they are...]
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
@@ -203,47 +216,59 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_e_load_all_l_sensor(sensor::Sensor *s) { e_load_all_l_sensor_ = s; }
 
  protected:
-  // Connection state management
-  void start_connection_();
-  void check_connection_status_();
-  void process_data_collection_();
-  void handle_error_recovery_();
-  
-  // Data processing
-  void request_bank_(uint8_t bank);
-  bool receive_response_(uint8_t bank);
-  uint16_t calculate_crc_(const uint8_t *data, size_t len);
-  
-  void process_section1_(const LuxLogDataRawSection1 &data);
-  void process_section2_(const LuxLogDataRawSection2 &data);
-  void process_section3_(const LuxLogDataRawSection3 &data);
-  void process_section4_(const LuxLogDataRawSection4 &data);
-  void process_section5_(const LuxLogDataRawSection5 &data);
+  // Non-blocking state machine methods
+  void handle_disconnected_state_();
+  void handle_connecting_state_();
+  void handle_connected_state_();
+  void handle_requesting_data_state_();
+  void handle_waiting_response_state_();
+  void handle_processing_response_state_();
+  void handle_error_state_();
   
   // Helper methods
-  void publish_sensor_(sensor::Sensor *sensor, float value);
-  void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
   bool validate_runtime_parameters_();
   std::string get_host_from_input_();
   uint16_t get_port_from_input_();
   std::string get_dongle_serial_from_input_();
   std::string get_inverter_serial_from_input_();
   const char* get_state_name_(ConnectionState state);
+  
+  // Non-blocking data operations
+  bool start_connection_attempt_();
+  bool check_connection_ready_();
+  bool send_bank_request_();
+  bool read_available_data_();
+  bool process_received_data_();
+  
+  // Data processing
+  uint16_t calculate_crc_(const uint8_t *data, size_t len);
+  void process_section1_(const LuxLogDataRawSection1 &data);
+  void process_section2_(const LuxLogDataRawSection2 &data);
+  void process_section3_(const LuxLogDataRawSection3 &data);
+  void process_section4_(const LuxLogDataRawSection4 &data);
+  void process_section5_(const LuxLogDataRawSection5 &data);
+  void publish_sensor_(sensor::Sensor *sensor, float value);
+  void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
 
  private:
   // Template input references
-  text::Text *host_input_{nullptr};
-  number::Number *port_input_{nullptr};
-  text::Text *dongle_serial_input_{nullptr};
-  text::Text *inverter_serial_input_{nullptr};
+  template_::TemplateText *host_input_{nullptr};
+  template_::TemplateNumber *port_input_{nullptr};
+  template_::TemplateText *dongle_serial_input_{nullptr};
+  template_::TemplateText *inverter_serial_input_{nullptr};
 
-  // Connection management
+  // Non-blocking connection management
   WiFiClient client_;
   ConnectionState connection_state_;
+  DataBankState bank_state_;
   uint8_t current_bank_index_;
+  uint32_t state_start_time_;
   uint32_t last_connection_attempt_;
-  uint32_t connection_start_time_;
   bool initialization_complete_;
+  
+  // Response buffer management
+  std::vector<uint8_t> response_buffer_;
+  size_t expected_response_size_;
   
   // Data banks to query
   const uint8_t banks_[5] = {0, 40, 80, 120, 160};
