@@ -218,7 +218,7 @@ void LuxpowerSNAComponent::loop() {
 }
 
 void LuxpowerSNAComponent::handle_disconnected_state_() {
-  uint32_t now = millis();
+  uint32_t now = esphome::millis();
   
   // Prevent too frequent connection attempts
   if (now - last_connection_attempt_ < 5000) {
@@ -237,7 +237,7 @@ void LuxpowerSNAComponent::handle_disconnected_state_() {
 }
 
 void LuxpowerSNAComponent::handle_connecting_state_() {
-  uint32_t now = millis();
+  uint32_t now = esphome::millis();
   
   if (check_connection_ready_()) {
     std::string host = get_host_from_input_();
@@ -294,7 +294,7 @@ void LuxpowerSNAComponent::handle_requesting_data_state_() {
   
   if (send_bank_request_()) {
     connection_state_ = ConnectionState::WAITING_RESPONSE;
-    state_start_time_ = millis();
+    state_start_time_ = esphome::millis();
     response_buffer_.clear();
     expected_response_size_ = 200; // Approximate expected size
   } else {
@@ -315,7 +315,7 @@ void LuxpowerSNAComponent::handle_waiting_response_state_() {
   }
   
   // Check for timeout
-  uint32_t now = millis();
+  uint32_t now = esphome::millis();
   if (now - state_start_time_ > 5000) {
     ESP_LOGW(TAG, "Response timeout for bank %d", banks_[current_bank_index_]);
     connection_state_ = ConnectionState::ERROR;
