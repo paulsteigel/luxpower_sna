@@ -13,7 +13,7 @@ LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.Polling
 
 CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
 
-# Configuration parameter keys that reference input IDs
+# Configuration parameter keys that reference template component IDs
 CONF_HOST = "host"
 CONF_PORT = "port" 
 CONF_DONGLE_SERIAL = "dongle_serial"
@@ -29,10 +29,10 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
-            cv.Required(CONF_HOST): cv.use_id(cg.std_string),  # Reference to text input ID
-            cv.Required(CONF_PORT): cv.use_id(cg.float_),      # Reference to number input ID
-            cv.Required(CONF_DONGLE_SERIAL): cv.use_id(cg.std_string),    # Reference to text input ID
-            cv.Required(CONF_INVERTER_SERIAL): cv.use_id(cg.std_string),  # Reference to text input ID
+            cv.Required(CONF_HOST): cv.use_id(),           # Template text component
+            cv.Required(CONF_PORT): cv.use_id(),           # Template number component
+            cv.Required(CONF_DONGLE_SERIAL): cv.use_id(),  # Template text component
+            cv.Required(CONF_INVERTER_SERIAL): cv.use_id(), # Template text component
         }
     )
     .extend(cv.polling_component_schema("20s"))
@@ -43,7 +43,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Set references to input components
+    # Set references to template input components
     host_var = await cg.get_variable(config[CONF_HOST])
     port_var = await cg.get_variable(config[CONF_PORT])
     dongle_serial_var = await cg.get_variable(config[CONF_DONGLE_SERIAL])
