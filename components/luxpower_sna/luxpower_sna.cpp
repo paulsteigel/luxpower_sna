@@ -216,6 +216,10 @@ void LuxpowerSNAComponent::loop() {
       handle_error_state_();
       break;
   }
+  // Process async requests when connected and not busy, used for switches and other entity that need write
+  if (is_connection_ready() && !async_requests_.empty()) {
+    process_async_requests_();
+  }
 }
 
 void LuxpowerSNAComponent::handle_disconnected_state_() {
@@ -816,6 +820,85 @@ void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) 
   publish_sensor_(e_load_day_sensor_, data.e_load_day / 10.0f);
   publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
 }
+  
+// for switch writing
+bool LuxpowerSNAComponent::is_connection_ready() const {
+  // Use your existing connection state logic
+  return state_ == CONNECTED;  // Adjust based on your state enum
+}
+  
+void LuxpowerSNAComponent::read_register_async(uint16_t reg, std::function<void(uint16_t)> callback) {
+  // Check if we already have this register cached from sensor updates
+  auto it = register_cache_.find(reg);
+  if (it != register_cache_.end()) {
+    ESP_LOGD(TAG, "Returning cached register %d: 0x%04X", reg, it->second);
+    if (callback) callback(it->second);
+    return;
+  }
+  
+  // Queue async read request
+  AsyncRequest req;
+  req.type = AsyncRequest::READ;
+  req.reg = reg;
+  req.read_callback = callback;
+  async_requests_.push_back(req);
+  
+  ESP_LOGD(TAG, "Queued async read for register %d", reg);
+}
 
+void LuxpowerSNAComponent::write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback) {
+  // Queue async write request
+  AsyncRequest req;
+  req.type = AsyncRequest::WRITE;
+  req.reg = reg;
+  req.value = value;
+  req.write_callback = callback;
+  async_requests_.push_back(req);
+  
+  ESP_LOGD(TAG, "Queued async write for register %d: 0x%04X", reg, value);
+}
+
+void LuxpowerSNAComponent::process_async_requests_() {
+  if (async_requests_.empty()) return;
+  
+  // Process one request at a time to avoid overwhelming the connection
+  auto req = async_requests_.front();
+  async_requests_.erase(async_requests_.begin());
+  
+  if (req.type == AsyncRequest::READ) {
+    // Use your existing read mechanism
+    ESP_LOGD(TAG, "Processing async read for register %d", req.reg);
+    
+    // If you have a synchronous read method, use it
+    // Otherwise integrate with your existing TCP read logic
+    auto packet = prepare_read_packet_(req.reg, 1);
+    if (client_.write(packet.data(), packet.size())) {
+      // You'll need to handle the response in your existing response handler
+      // and call req.read_callback when response arrives
+      
+      // For now, return cached value or trigger your existing read
+      auto it = register_cache_.find(req.reg);
+      if (it != register_cache_.end() && req.read_callback) {
+        req.read_callback(it->second);
+      }
+    }
+    
+  } else if (req.type == AsyncRequest::WRITE) {
+    // Use your existing write mechanism
+    ESP_LOGD(TAG, "Processing async write for register %d: 0x%04X", req.reg, req.value);
+    
+    auto packet = prepare_write_packet_(req.reg, req.value);
+    bool success = client_.write(packet.data(), packet.size());
+    
+    if (success) {
+      // Update your cache
+      register_cache_[req.reg] = req.value;
+    }
+    
+    if (req.write_callback) {
+      req.write_callback(success);
+    }
+  }
+}
 }  // namespace luxpower_sna
 }  // namespace esphome
