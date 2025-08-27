@@ -1,7 +1,6 @@
 # components/luxpower_sna/__init__.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.core import CORE, coroutine_with_priority
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["wifi"]
@@ -10,6 +9,11 @@ MULTI_CONF = True
 
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
 LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.PollingComponent)
+
+# Import template component classes the ESPHome way
+template_ns = cg.esphome_ns.namespace("template_")
+TemplateText = template_ns.class_("TemplateText")
+TemplateNumber = template_ns.class_("TemplateNumber")
 
 CONF_LUXPOWER_SNA_ID = "luxpower_sna_id"
 
@@ -29,16 +33,17 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
-            cv.Required(CONF_HOST): cv.use_id(),           # Any component with state
-            cv.Required(CONF_PORT): cv.use_id(),           # Any component with state
-            cv.Required(CONF_DONGLE_SERIAL): cv.use_id(),  # Any component with state
-            cv.Required(CONF_INVERTER_SERIAL): cv.use_id(), # Any component with state
+            cv.Required(CONF_HOST): cv.use_id(TemplateText),           # Template text component
+            cv.Required(CONF_PORT): cv.use_id(TemplateNumber),         # Template number component
+            cv.Required(CONF_DONGLE_SERIAL): cv.use_id(TemplateText),  # Template text component
+            cv.Required(CONF_INVERTER_SERIAL): cv.use_id(TemplateText), # Template text component
         }
     )
     .extend(cv.polling_component_schema("20s"))
 )
 
 async def to_code(config):
+    """Generate C++ code for the component"""
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
