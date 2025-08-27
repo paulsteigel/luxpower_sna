@@ -237,8 +237,9 @@ Here’s a snapshot of the sensor list on my combined ESP32-S2 Lolin logger for 
 
 <img width="340" height="784" alt="image" src="https://github.com/user-attachments/assets/ed58fca8-83d4-4c9d-bacf-e270755629cc" />
 
+<br>
 After successfully boot up, put the host address, serrial numbers.. here
-<img width="363" height="320" alt="image" src="https://github.com/user-attachments/assets/dd9a5c2d-6e1e-4c4b-8f24-9d5a2ebb50de" />
+<img width="331" height="312" alt="image" src="https://github.com/user-attachments/assets/9aafc655-097d-43d5-b838-f6a4b3fbda20" />
 
 I'm excited to share that the logger is already functional in read-only mode, and it integrates almost all the sensors available in the official LuxPower Integration.
 In the coming days, I’ll begin adding support for buttons, switches, and time-based control—making it possible to fully control your LuxPower inverter just as easily as with the original Integration by @guybw's team. I also plan to design a Lovelace card to improve the Home Assistant dashboard experience. 🔗 Component link: https://github.com/paulsteigel/luxpower_sna
