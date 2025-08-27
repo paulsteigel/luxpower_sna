@@ -1,24 +1,33 @@
-// luxpower_sna.h
 #pragma once
+
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "esphome/components/template/text/template_text.h"
-#include "esphome/components/template/number/template_number.h"
-#include <WiFiClient.h>
-#include <vector>
-#include <queue>
 
-#ifdef USE_ESP32
-#include <WiFi.h>
-#elif USE_ESP8266
-#include <ESP8266WiFi.h>
-#endif
+// Framework-specific includes
+#ifdef USE_ESP_IDF
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "lwip/sys.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#else
 #include <WiFiClient.h>
+#endif
+
+#include <vector>
 
 namespace esphome {
 namespace luxpower_sna {
+
+static const char *const TAG = "luxpower_sna";
+
+// Forward declarations
+namespace text_sensor { class TextSensor; }
+namespace sensor { class Sensor; }
 
 static const char *const TAG = "luxpower_sna";
 
@@ -96,17 +105,17 @@ struct LuxLogDataRawSection5 {
 #pragma pack(pop)
 
 class LuxpowerSNAComponent : public PollingComponent {
- public:
+public:
   void setup() override;
-  void dump_config() override;
   void update() override;
-  void loop() override;  // Non-blocking processing
+  void loop() override;
+  void dump_config() override;
 
   // Template input setters
-  void set_host_input(template_::TemplateText *input) { host_input_ = input; }
-  void set_port_input(template_::TemplateNumber *input) { port_input_ = input; }
-  void set_dongle_serial_input(template_::TemplateText *input) { dongle_serial_input_ = input; }
-  void set_inverter_serial_input(template_::TemplateText *input) { inverter_serial_input_ = input; }
+  void set_host_input(Component *host_input) { host_input_ = host_input; }
+  void set_port_input(Component *port_input) { port_input_ = port_input; }
+  void set_dongle_serial_input(Component *dongle_serial_input) { dongle_serial_input_ = dongle_serial_input; }
+  void set_inverter_serial_input(Component *inverter_serial_input) { inverter_serial_input_ = inverter_serial_input; }
 
   // [Keep all your existing sensor setters exactly as they are...]
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
@@ -250,14 +259,34 @@ class LuxpowerSNAComponent : public PollingComponent {
   void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
 
  private:
-  // Template input references
-  template_::TemplateText *host_input_{nullptr};
-  template_::TemplateNumber *port_input_{nullptr};
-  template_::TemplateText *dongle_serial_input_{nullptr};
-  template_::TemplateText *inverter_serial_input_{nullptr};
+  // Template input component references
+  Component *host_input_{nullptr};
+  Component *port_input_{nullptr};
+  Component *dongle_serial_input_{nullptr};
+  Component *inverter_serial_input_{nullptr};
+
+  // Helper methods to get values from template components
+  std::string get_host_from_input_();
+  uint16_t get_port_from_input_();
+  std::string get_dongle_serial_from_input_();
+  std::string get_inverter_serial_from_input_();
+
+  // Framework-agnostic networking
+  bool connect_to_inverter_();
+  void disconnect_from_inverter_();
+  bool send_data_(const std::vector<uint8_t> &data);
+  bool receive_data_(std::vector<uint8_t> &data, size_t expected_size, uint32_t timeout_ms = 5000);
+
+  #ifdef USE_ESP_IDF
+  // ESP-IDF socket implementation
+  int socket_fd_{-1};
+  struct sockaddr_in server_addr_{};
+  #else
+  // Arduino WiFiClient implementation
+  WiFiClient client_;
+  #endif
 
   // Non-blocking connection management
-  WiFiClient client_;
   ConnectionState connection_state_;
   DataBankState bank_state_;
   uint8_t current_bank_index_;
@@ -276,7 +305,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  // [Keep all your existing sensor pointers exactly as they are...]
+  // Sensor pointers]
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
   text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
   text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
