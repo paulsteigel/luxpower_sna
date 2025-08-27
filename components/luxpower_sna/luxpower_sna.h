@@ -41,7 +41,6 @@ enum class DataBankState {
   ERROR
 };
 
-// [Keep all your existing struct definitions exactly as they are...]
 #pragma pack(push, 1)
 struct LuxHeader {
   uint16_t prefix; uint16_t protocolVersion; uint16_t packetLength; uint8_t address;
