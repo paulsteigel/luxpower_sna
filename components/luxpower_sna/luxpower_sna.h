@@ -2,20 +2,38 @@
 #pragma once
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/template/text/template_text.h"
 #include "esphome/components/template/number/template_number.h"
-#include <WiFiClient.h>
-#include <vector>
-#include <queue>
 
+// Framework-specific includes
+#ifdef USE_ESP_IDF
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "lwip/sys.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_timer.h"
+#else
+#include <WiFiClient.h>
 #ifdef USE_ESP32
 #include <WiFi.h>
 #elif USE_ESP8266
 #include <ESP8266WiFi.h>
 #endif
-#include <WiFiClient.h>
+#endif
+
+#include <vector>
+#include <queue>
+#include <cstring>
 
 namespace esphome {
 namespace luxpower_sna {
@@ -108,7 +126,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_dongle_serial_input(template_::TemplateText *input) { dongle_serial_input_ = input; }
   void set_inverter_serial_input(template_::TemplateText *input) { inverter_serial_input_ = input; }
 
-  // [Keep all your existing sensor setters exactly as they are...]
+  // All your existing sensor setters (keeping them exactly as they are)
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
@@ -232,12 +250,13 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::string get_inverter_serial_from_input_();
   const char* get_state_name_(ConnectionState state);
   
-  // Non-blocking data operations
+  // Framework-agnostic networking methods
   bool start_connection_attempt_();
   bool check_connection_ready_();
   bool send_bank_request_();
   bool read_available_data_();
   bool process_received_data_();
+  void disconnect_client_();
   
   // Data processing
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
@@ -256,8 +275,15 @@ class LuxpowerSNAComponent : public PollingComponent {
   template_::TemplateText *dongle_serial_input_{nullptr};
   template_::TemplateText *inverter_serial_input_{nullptr};
 
-  // Non-blocking connection management
+  // Framework-specific connection management
+#ifdef USE_ESP_IDF
+  int socket_fd_{-1};
+  struct sockaddr_in server_addr_{};
+#else
   WiFiClient client_;
+#endif
+
+  // Non-blocking connection management
   ConnectionState connection_state_;
   DataBankState bank_state_;
   uint8_t current_bank_index_;
@@ -276,7 +302,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  // [Keep all your existing sensor pointers exactly as they are...]
+  // All your existing sensor pointers (keeping them exactly as they are)
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
   text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
   text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
