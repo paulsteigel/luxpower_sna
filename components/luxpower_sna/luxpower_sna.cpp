@@ -817,5 +817,82 @@ void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) 
   publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
 }
 
+// For handling switches
+void LuxpowerSNAComponent::register_switch(uint16_t reg, switch_::Switch *sw) {
+  register_switches_[reg].push_back(sw);
+  ESP_LOGD(TAG, "Registered switch for register %d", reg);
+}
+
+void LuxpowerSNAComponent::update_switch_states(uint16_t reg, uint16_t value) {
+  // Update cache
+  register_cache_[reg] = value;
+  
+  // Update all switches that depend on this register
+  auto it = register_switches_.find(reg);
+  if (it != register_switches_.end()) {
+    for (auto *sw : it->second) {
+      if (auto *lux_sw = dynamic_cast<LuxPowerSwitch*>(sw)) {
+        bool state = (value & lux_sw->get_bitmask()) == lux_sw->get_bitmask();
+        lux_sw->publish_state(state);
+      }
+    }
+  }
+}
+
+uint16_t LuxpowerSNAComponent::prepare_binary_value(uint16_t old_value, uint16_t mask, bool enable) {
+  // Direct port from Python: prepare_binary_value(oldvalue, mask, enable=True)
+  return enable ? (old_value | mask) : (old_value & (65535 - mask));
+}
+
+uint16_t LuxpowerSNAComponent::get_cached_register(uint16_t reg) {
+  auto it = register_cache_.find(reg);
+  return it != register_cache_.end() ? it->second : 0;
+}
+
+bool LuxpowerSNAComponent::has_cached_register(uint16_t reg) {
+  return register_cache_.find(reg) != register_cache_.end();
+}
+
+void LuxpowerSNAComponent::write_register(uint16_t reg, uint16_t value, std::function<void(bool)> callback) {
+  ESP_LOGD(TAG, "Write register %d with value 0x%04X", reg, value);
+  
+  // TODO: Implement actual TCP write using your LXPPacket protocol
+  // This should:
+  // 1. Create write packet using prepare_packet_for_write(reg, value)
+  // 2. Send via TCP
+  // 3. Wait for response
+  // 4. Call callback(success)
+  // 5. Update register cache on success
+  
+  // For now, simulate success and update cache
+  register_cache_[reg] = value;
+  update_switch_states(reg, value);
+  
+  if (callback) callback(true);
+}
+
+void LuxpowerSNAComponent::read_register(uint16_t reg, std::function<void(uint16_t)> callback) {
+  // Check cache first
+  if (has_cached_register(reg)) {
+    ESP_LOGD(TAG, "Read register %d from cache: 0x%04X", reg, get_cached_register(reg));
+    if (callback) callback(get_cached_register(reg));
+    return;
+  }
+  
+  ESP_LOGD(TAG, "Read register %d from device", reg);
+  
+  // TODO: Implement actual TCP read using your LXPPacket protocol
+  // This should:
+  // 1. Create read packet using prepare_packet_for_read(reg, 1, READ_HOLD)
+  // 2. Send via TCP  
+  // 3. Wait for response
+  // 4. Parse response and extract register value
+  // 5. Update cache
+  // 6. Call callback(value)
+  
+  // For now, return cached value or 0
+  if (callback) callback(0);
+}
+
 }  // namespace luxpower_sna
 }  // namespace esphome
