@@ -20,9 +20,15 @@ void LuxpowerSNAComponent::setup() {
   
   // Initialize state
   connection_state_ = ConnectionState::DISCONNECTED;
+  bank_state_ = DataBankState::IDLE;
   current_bank_index_ = 0;
   last_connection_attempt_ = 0;
+  state_start_time_ = 0;
   initialization_complete_ = false;
+  expected_response_size_ = 0;
+  
+  // Reserve buffer space
+  response_buffer_.reserve(512);
   
   // Validate that required input components are configured
   if (host_input_ == nullptr) {
@@ -60,17 +66,17 @@ bool LuxpowerSNAComponent::validate_runtime_parameters_() {
   std::string inverter_serial = get_inverter_serial_from_input_();
   
   if (host.empty()) {
-    ESP_LOGD(TAG, "Host input is empty");
+    ESP_LOGV(TAG, "Host input is empty");
     valid = false;
   }
   
   if (port == 0) {
-    ESP_LOGD(TAG, "Port input is 0");
+    ESP_LOGV(TAG, "Port input is 0");
     valid = false;
   }
   
   if (dongle_serial.empty()) {
-    ESP_LOGD(TAG, "Dongle serial input is empty");
+    ESP_LOGV(TAG, "Dongle serial input is empty");
     valid = false;
   } else if (dongle_serial.length() != 10) {
     ESP_LOGW(TAG, "Dongle serial must be exactly 10 characters, got %zu: '%s'", 
@@ -79,7 +85,7 @@ bool LuxpowerSNAComponent::validate_runtime_parameters_() {
   }
   
   if (inverter_serial.empty()) {
-    ESP_LOGD(TAG, "Inverter serial input is empty");
+    ESP_LOGV(TAG, "Inverter serial input is empty");
     valid = false;
   } else if (inverter_serial.length() != 10) {
     ESP_LOGW(TAG, "Inverter serial must be exactly 10 characters, got %zu: '%s'", 
@@ -149,71 +155,81 @@ void LuxpowerSNAComponent::update() {
     return;
   }
   
-  // Validate runtime parameters from template inputs
-  if (!validate_runtime_parameters_()) {
-    ESP_LOGD(TAG, "Skipping update - input parameters not ready or invalid");
-    if (connection_state_ != ConnectionState::DISCONNECTED) {
-      connection_state_ = ConnectionState::DISCONNECTED;
-      if (client_.connected()) {
-        client_.stop();
-      }
+  // Only trigger new data collection if we're disconnected
+  if (connection_state_ == ConnectionState::DISCONNECTED) {
+    // Validate runtime parameters from template inputs
+    if (!validate_runtime_parameters_()) {
+      ESP_LOGV(TAG, "Skipping update - input parameters not ready or invalid");
+      return;
     }
+    
+    ESP_LOGD(TAG, "Starting new data collection cycle");
+    connection_state_ = ConnectionState::DISCONNECTED; // Will be handled in loop()
+  } else {
+    ESP_LOGV(TAG, "Data collection already in progress, state: %s", get_state_name_(connection_state_));
+  }
+}
+
+void LuxpowerSNAComponent::loop() {
+  if (!initialization_complete_) {
     return;
   }
   
-  ESP_LOGV(TAG, "Starting update cycle - State: %s", get_state_name_(connection_state_));
-  
-  // State machine for non-blocking operation
+  // Non-blocking state machine - runs every loop iteration
   switch (connection_state_) {
     case ConnectionState::DISCONNECTED:
-      start_connection_();
+      handle_disconnected_state_();
       break;
       
     case ConnectionState::CONNECTING:
-      check_connection_status_();
+      handle_connecting_state_();
       break;
       
     case ConnectionState::CONNECTED:
-      process_data_collection_();
+      handle_connected_state_();
+      break;
+      
+    case ConnectionState::REQUESTING_DATA:
+      handle_requesting_data_state_();
+      break;
+      
+    case ConnectionState::WAITING_RESPONSE:
+      handle_waiting_response_state_();
+      break;
+      
+    case ConnectionState::PROCESSING_RESPONSE:
+      handle_processing_response_state_();
       break;
       
     case ConnectionState::ERROR:
-      handle_error_recovery_();
+      handle_error_state_();
       break;
   }
 }
 
-void LuxpowerSNAComponent::start_connection_() {
-  // Get current values from template inputs
-  std::string host = get_host_from_input_();
-  uint16_t port = get_port_from_input_();
+void LuxpowerSNAComponent::handle_disconnected_state_() {
+  uint32_t now = millis();
   
   // Prevent too frequent connection attempts
-  uint32_t now = millis();
   if (now - last_connection_attempt_ < 5000) {
-    ESP_LOGV(TAG, "Connection cooldown active, waiting...");
     return;
   }
   
-  ESP_LOGD(TAG, "Attempting to connect to %s:%u", host.c_str(), port);
-  last_connection_attempt_ = now;
+  if (!validate_runtime_parameters_()) {
+    return;
+  }
   
-  // Start non-blocking connection
-  if (client_.connect(host.c_str(), port)) {
-    ESP_LOGD(TAG, "Connection initiated successfully");
+  if (start_connection_attempt_()) {
     connection_state_ = ConnectionState::CONNECTING;
-    connection_start_time_ = now;
-    current_bank_index_ = 0;
-  } else {
-    ESP_LOGW(TAG, "Failed to initiate connection to %s:%u", host.c_str(), port);
-    connection_state_ = ConnectionState::ERROR;
+    state_start_time_ = now;
+    last_connection_attempt_ = now;
   }
 }
 
-void LuxpowerSNAComponent::check_connection_status_() {
+void LuxpowerSNAComponent::handle_connecting_state_() {
   uint32_t now = millis();
   
-  if (client_.connected()) {
+  if (check_connection_ready_()) {
     std::string host = get_host_from_input_();
     uint16_t port = get_port_from_input_();
     ESP_LOGI(TAG, "Successfully connected to %s:%u", host.c_str(), port);
@@ -222,64 +238,119 @@ void LuxpowerSNAComponent::check_connection_status_() {
     return;
   }
   
-  if (now - connection_start_time_ > 10000) {
+  // Check for timeout
+  if (now - state_start_time_ > 10000) {
     ESP_LOGW(TAG, "Connection timeout after 10 seconds");
-    client_.stop();
     connection_state_ = ConnectionState::ERROR;
   }
 }
 
-void LuxpowerSNAComponent::process_data_collection_() {
+void LuxpowerSNAComponent::handle_connected_state_() {
   if (!client_.connected()) {
-    ESP_LOGW(TAG, "Connection lost during data collection");
+    ESP_LOGW(TAG, "Connection lost");
     connection_state_ = ConnectionState::ERROR;
     return;
   }
   
-  if (current_bank_index_ < 5) {
-    uint8_t bank = banks_[current_bank_index_];
-    ESP_LOGV(TAG, "Processing bank %d (%d/5)", bank, current_bank_index_ + 1);
-    
-    request_bank_(bank);
-    
-    if (receive_response_(bank)) {
-      ESP_LOGV(TAG, "Successfully processed bank %d", bank);
-      current_bank_index_++;
-    } else {
-      ESP_LOGW(TAG, "Failed to process bank %d, will retry next cycle", bank);
-      connection_state_ = ConnectionState::ERROR;
-      return;
-    }
-  } else {
-    ESP_LOGI(TAG, "All banks processed successfully");
+  // Start data collection
+  connection_state_ = ConnectionState::REQUESTING_DATA;
+  bank_state_ = DataBankState::IDLE;
+  current_bank_index_ = 0;
+}
+
+void LuxpowerSNAComponent::handle_requesting_data_state_() {
+  if (!client_.connected()) {
+    ESP_LOGW(TAG, "Connection lost during data request");
+    connection_state_ = ConnectionState::ERROR;
+    return;
+  }
+  
+  if (current_bank_index_ >= 5) {
+    // All banks processed successfully
+    ESP_LOGI(TAG, "All data banks processed successfully");
     client_.stop();
     connection_state_ = ConnectionState::DISCONNECTED;
     current_bank_index_ = 0;
+    return;
+  }
+  
+  if (send_bank_request_()) {
+    connection_state_ = ConnectionState::WAITING_RESPONSE;
+    state_start_time_ = millis();
+    response_buffer_.clear();
+    expected_response_size_ = 200; // Approximate expected size
+  } else {
+    ESP_LOGW(TAG, "Failed to send bank request");
+    connection_state_ = ConnectionState::ERROR;
   }
 }
 
-void LuxpowerSNAComponent::handle_error_recovery_() {
+void LuxpowerSNAComponent::handle_waiting_response_state_() {
+  if (!client_.connected()) {
+    ESP_LOGW(TAG, "Connection lost while waiting for response");
+    connection_state_ = ConnectionState::ERROR;
+    return;
+  }
+  
+  // Check for timeout
+  uint32_t now = millis();
+  if (now - state_start_time_ > 5000) {
+    ESP_LOGW(TAG, "Response timeout for bank %d", banks_[current_bank_index_]);
+    connection_state_ = ConnectionState::ERROR;
+    return;
+  }
+  
+  // Try to read available data
+  if (read_available_data_()) {
+    // Check if we have enough data to process
+    if (response_buffer_.size() >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) {
+      connection_state_ = ConnectionState::PROCESSING_RESPONSE;
+    }
+  }
+}
+
+void LuxpowerSNAComponent::handle_processing_response_state_() {
+  if (process_received_data_()) {
+    ESP_LOGV(TAG, "Successfully processed bank %d (%d/5)", 
+             banks_[current_bank_index_], current_bank_index_ + 1);
+    current_bank_index_++;
+    connection_state_ = ConnectionState::REQUESTING_DATA;
+  } else {
+    ESP_LOGW(TAG, "Failed to process response for bank %d", banks_[current_bank_index_]);
+    connection_state_ = ConnectionState::ERROR;
+  }
+}
+
+void LuxpowerSNAComponent::handle_error_state_() {
   ESP_LOGV(TAG, "Handling error recovery");
   
   if (client_.connected()) {
     client_.stop();
   }
   
+  response_buffer_.clear();
   connection_state_ = ConnectionState::DISCONNECTED;
   current_bank_index_ = 0;
+  bank_state_ = DataBankState::IDLE;
 }
 
-const char* LuxpowerSNAComponent::get_state_name_(ConnectionState state) {
-  switch (state) {
-    case ConnectionState::DISCONNECTED: return "DISCONNECTED";
-    case ConnectionState::CONNECTING: return "CONNECTING";
-    case ConnectionState::CONNECTED: return "CONNECTED";
-    case ConnectionState::ERROR: return "ERROR";
-    default: return "UNKNOWN";
-  }
+bool LuxpowerSNAComponent::start_connection_attempt_() {
+  std::string host = get_host_from_input_();
+  uint16_t port = get_port_from_input_();
+  
+  ESP_LOGD(TAG, "Attempting to connect to %s:%u", host.c_str(), port);
+  
+  // Start non-blocking connection
+  return client_.connect(host.c_str(), port);
 }
 
-void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
+bool LuxpowerSNAComponent::check_connection_ready_() {
+  return client_.connected();
+}
+
+bool LuxpowerSNAComponent::send_bank_request_() {
+  uint8_t bank = banks_[current_bank_index_];
+  
   // Get current serial numbers from template inputs
   std::string dongle_serial = get_dongle_serial_from_input_();
   std::string inverter_serial = get_inverter_serial_from_input_();
@@ -300,108 +371,107 @@ void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   pkt[36] = crc & 0xFF;
   pkt[37] = crc >> 8;
 
-  ESP_LOGVV(TAG, "Sending request for bank %d with dongle: %s, inverter: %s", 
-            bank, dongle_serial.c_str(), inverter_serial.c_str());
-  client_.write(pkt, sizeof(pkt));
+  ESP_LOGV(TAG, "Sending request for bank %d with dongle: %s, inverter: %s", 
+           bank, dongle_serial.c_str(), inverter_serial.c_str());
+  
+  size_t written = client_.write(pkt, sizeof(pkt));
   client_.flush();
+  
+  return written == sizeof(pkt);
 }
 
-bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
-  uint8_t buffer[512];
-  uint32_t start = millis();
-  size_t total_read = 0;
-  const uint32_t timeout_ms = 3000;
+bool LuxpowerSNAComponent::read_available_data_() {
+  bool data_received = false;
   
-  while (millis() - start < timeout_ms) {
-    if (client_.available()) {
-      int bytes_read = client_.read(buffer + total_read, sizeof(buffer) - total_read);
-      if (bytes_read > 0) {
-        total_read += bytes_read;
-      }
-    }
+  while (client_.available()) {
+    uint8_t byte = client_.read();
+    response_buffer_.push_back(byte);
+    data_received = true;
     
-    if (total_read >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) {
-      break;
+    // Prevent buffer overflow
+    if (response_buffer_.size() > 1024) {
+      ESP_LOGW(TAG, "Response buffer overflow, resetting");
+      response_buffer_.clear();
+      return false;
     }
-    
-    delay(10);
   }
   
-  if (total_read == 0) {
-    ESP_LOGW(TAG, "No data received for bank %d (timeout after %dms)", bank, timeout_ms);
+  return data_received;
+}
+
+bool LuxpowerSNAComponent::process_received_data_() {
+  if (response_buffer_.size() < sizeof(LuxHeader)) {
+    ESP_LOGW(TAG, "Response too short: %zu bytes", response_buffer_.size());
     return false;
   }
   
-  if (total_read < sizeof(LuxHeader)) {
-    ESP_LOGE(TAG, "Response too short: %zu bytes", total_read);
-    return false;
-  }
-  
-  LuxHeader *header = reinterpret_cast<LuxHeader *>(buffer);
+  LuxHeader *header = reinterpret_cast<LuxHeader *>(response_buffer_.data());
   if (header->prefix != 0x1AA1) {
-    ESP_LOGE(TAG, "Invalid header prefix: 0x%04X", header->prefix);
+    ESP_LOGW(TAG, "Invalid header prefix: 0x%04X", header->prefix);
     return false;
   }
 
-  if (total_read < sizeof(LuxHeader) + sizeof(LuxTranslatedData)) {
-    ESP_LOGE(TAG, "Response missing translated data section");
+  if (response_buffer_.size() < sizeof(LuxHeader) + sizeof(LuxTranslatedData)) {
+    ESP_LOGW(TAG, "Response missing translated data section");
     return false;
   }
 
-  LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData *>(buffer + sizeof(LuxHeader));
+  LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData *>(response_buffer_.data() + sizeof(LuxHeader));
   if (trans->deviceFunction != 0x04) {
-    ESP_LOGE(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
+    ESP_LOGW(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
     return false;
   }
 
-  uint16_t crc_calc = calculate_crc_(buffer + sizeof(LuxHeader), total_read - sizeof(LuxHeader) - 2);
-  uint16_t crc_received = buffer[total_read - 2] | (buffer[total_read - 1] << 8);
+  size_t total_size = response_buffer_.size();
+  uint16_t crc_calc = calculate_crc_(response_buffer_.data() + sizeof(LuxHeader), total_size - sizeof(LuxHeader) - 2);
+  uint16_t crc_received = response_buffer_[total_size - 2] | (response_buffer_[total_size - 1] << 8);
   if (crc_calc != crc_received) {
-    ESP_LOGE(TAG, "CRC mismatch: calc=0x%04X, recv=0x%04X", crc_calc, crc_received);
+    ESP_LOGW(TAG, "CRC mismatch: calc=0x%04X, recv=0x%04X", crc_calc, crc_received);
     return false;
   }
 
   size_t data_offset = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
-  size_t data_size = total_read - data_offset - 2;
+  size_t data_size = total_size - data_offset - 2;
+  uint8_t bank = banks_[current_bank_index_];
   
   switch (bank) {
     case 0: 
       if (data_size >= sizeof(LuxLogDataRawSection1)) {
-        process_section1_(*reinterpret_cast<LuxLogDataRawSection1 *>(buffer + data_offset));
+        process_section1_(*reinterpret_cast<LuxLogDataRawSection1 *>(response_buffer_.data() + data_offset));
       } else {
-        ESP_LOGW(TAG, "Insufficient data for section 1");
+        ESP_LOGW(TAG, "Insufficient data for section 1: %zu < %zu", data_size, sizeof(LuxLogDataRawSection1));
         return false;
       }
       break;
     case 40: 
       if (data_size >= sizeof(LuxLogDataRawSection2)) {
-        process_section2_(*reinterpret_cast<LuxLogDataRawSection2 *>(buffer + data_offset));
+        process_section2_(*reinterpret_cast<LuxLogDataRawSection2 *>(response_buffer_.data() + data_offset));
       } else {
-        ESP_LOGW(TAG, "Insufficient data for section 2");
+        ESP_LOGW(TAG, "Insufficient data for section 2: %zu < %zu", data_size, sizeof(LuxLogDataRawSection2));
         return false;
       }
       break;
     case 80: 
       if (data_size >= sizeof(LuxLogDataRawSection3)) {
-        process_section3_(*reinterpret_cast<LuxLogDataRawSection3 *>(buffer + data_offset));
+        process_section3_(*reinterpret_cast<LuxLogDataRawSection3 *>(response_buffer_.data() + data_offset));
       } else {
-        ESP_LOGW(TAG, "Insufficient data for section 3");
+        ESP_LOGW(TAG, "Insufficient data for section 3: %zu < %zu", data_size, sizeof(LuxLogDataRawSection3));
         return false;
       }
       break;
     case 120: 
       if (data_size >= sizeof(LuxLogDataRawSection4)) {
-        process_section4_(*reinterpret_cast<LuxLogDataRawSection4 *>(buffer + data_offset));
+        process_section4_(*reinterpret_cast<LuxLogDataRawSection4 *>(response_buffer_.data() + data_offset));
       } else {
-        ESP_LOGW(TAG, "Insufficient data for section 4");
+        ESP_LOGW(TAG, "Insufficient data for section 4: %zu < %zu", data_size, sizeof(LuxLogDataRawSection4));
         return false;
       }
       break;
     case 160: 
       if (data_size >= sizeof(LuxLogDataRawSection5)) {
-        process_section5_(*reinterpret_cast<LuxLogDataRawSection5 *>(buffer + data_offset));
+        process_section5_(*reinterpret_cast<LuxLogDataRawSection5 *>(response_buffer_.data() + data_offset));
       } else {
-        ESP_LOGW(TAG, "Insufficient data for section 5");
+        ESP_LOGW(TAG, "Insufficient data for section 5: %zu < %zu", data_size, sizeof(LuxLogDataRawSection5));
         return false;
       }
       break;
@@ -411,6 +481,19 @@ bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
   }
   
   return true;
+}
+
+const char* LuxpowerSNAComponent::get_state_name_(ConnectionState state) {
+  switch (state) {
+    case ConnectionState::DISCONNECTED: return "DISCONNECTED";
+    case ConnectionState::CONNECTING: return "CONNECTING";
+    case ConnectionState::CONNECTED: return "CONNECTED";
+    case ConnectionState::REQUESTING_DATA: return "REQUESTING_DATA";
+    case ConnectionState::WAITING_RESPONSE: return "WAITING_RESPONSE";
+    case ConnectionState::PROCESSING_RESPONSE: return "PROCESSING_RESPONSE";
+    case ConnectionState::ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
 }
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
