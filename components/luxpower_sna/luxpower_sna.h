@@ -1,13 +1,13 @@
 // luxpower_sna.h
 #pragma once
-
 #include "esphome/core/component.h"
+#include "esphome/core/log.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "esphome/components/template/template_text.h"
-#include "esphome/components/template/template_number.h"
-#include "esphome/core/log.h"
-#include <cstring>
+#include "esphome/components/template/text/template_text.h"
+#include "esphome/components/template/number/template_number.h"
+#include <WiFiClient.h>
+#include <vector>
 #include <queue>
 
 #ifdef USE_ESP32
