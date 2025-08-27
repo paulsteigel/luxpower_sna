@@ -3,6 +3,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.core import CORE, coroutine_with_priority
 from esphome.const import CONF_ID
+from esphome.components import template
 
 DEPENDENCIES = ["wifi"]
 AUTO_LOAD = ["sensor", "text_sensor"]
@@ -29,17 +30,16 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(LuxpowerSNAComponent),
-            cv.Required(CONF_HOST): cv.use_id(),           # Template text component
-            cv.Required(CONF_PORT): cv.use_id(),           # Template number component
-            cv.Required(CONF_DONGLE_SERIAL): cv.use_id(),  # Template text component
-            cv.Required(CONF_INVERTER_SERIAL): cv.use_id(), # Template text component
+            cv.Required(CONF_HOST): cv.use_id(template.TemplateText),           # Template text component
+            cv.Required(CONF_PORT): cv.use_id(template.TemplateNumber),         # Template number component
+            cv.Required(CONF_DONGLE_SERIAL): cv.use_id(template.TemplateText),  # Template text component
+            cv.Required(CONF_INVERTER_SERIAL): cv.use_id(template.TemplateText), # Template text component
         }
     )
     .extend(cv.polling_component_schema("20s"))
 )
 
 async def to_code(config):
-    """Generate C++ code for the component"""
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
