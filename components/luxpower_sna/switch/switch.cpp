@@ -1,5 +1,5 @@
+#include "switch.h"
 #include "esphome/core/log.h"
-#include "../luxpower_sna.h"
 
 namespace esphome {
 namespace luxpower_sna {
@@ -15,16 +15,15 @@ void LuxPowerSwitch::setup() {
   
   ESP_LOGCONFIG(TAG, "Setting up LuxPower Switch: %s", switch_type_.c_str());
   
-  // Register this switch with the parent for state updates
-  parent_->register_switch(register_address_, this);
-  
-  // Get initial state if register is cached
-  if (parent_->has_cached_register(register_address_)) {
-    uint16_t reg_value = parent_->get_cached_register(register_address_);
-    bool initial_state = (reg_value & bitmask_) == bitmask_;
-    ESP_LOGD(TAG, "Initial state for %s: %s (reg: 0x%04X, mask: 0x%04X)", 
-             switch_type_.c_str(), initial_state ? "ON" : "OFF", reg_value, bitmask_);
-    publish_state(initial_state);
+  // Get initial state
+  sync_state_();
+}
+
+void LuxPowerSwitch::loop() {
+  uint32_t now = millis();
+  if (now - last_sync_ > SYNC_INTERVAL) {
+    last_sync_ = now;
+    sync_state_();
   }
 }
 
@@ -36,38 +35,50 @@ void LuxPowerSwitch::dump_config() {
 }
 
 void LuxPowerSwitch::write_state(bool state) {
-  if (parent_ == nullptr) {
-    ESP_LOGE(TAG, "Parent component not available");
+  if (parent_ == nullptr || !parent_->is_connection_ready()) {
+    ESP_LOGW(TAG, "Cannot write '%s' - parent not ready", switch_type_.c_str());
     return;
   }
 
-  ESP_LOGI(TAG, "Setting '%s' to %s (register %d, mask 0x%04X)", 
-           switch_type_.c_str(), state ? "ON" : "OFF", register_address_, bitmask_);
+  ESP_LOGI(TAG, "Setting '%s' to %s", switch_type_.c_str(), state ? "ON" : "OFF");
 
-  // Delegate everything to the parent component
-  parent_->read_register(register_address_, [this, state](uint16_t current_value) {
-    if (current_value == 0 && !parent_->has_cached_register(register_address_)) {
-      ESP_LOGE(TAG, "Failed to read current register value for %s", switch_type_.c_str());
-      return;
-    }
-    
-    // Use parent's bit manipulation method (from prepare_binary_value)
-    uint16_t new_value = parent_->prepare_binary_value(current_value, bitmask_, state);
+  // Read current register value
+  parent_->read_register_async(register_address_, [this, state](uint16_t current_value) {
+    // Calculate new value
+    uint16_t new_value = prepare_binary_value_(current_value, bitmask_, state);
     
     ESP_LOGD(TAG, "Writing register %d for '%s': 0x%04X -> 0x%04X", 
              register_address_, switch_type_.c_str(), current_value, new_value);
     
-    // Write back the modified value through parent
-    parent_->write_register(register_address_, new_value, [this, state](bool success) {
+    // Write new value
+    parent_->write_register_async(register_address_, new_value, [this, state](bool success) {
       if (success) {
         ESP_LOGI(TAG, "Successfully set '%s' to %s", switch_type_.c_str(), state ? "ON" : "OFF");
         publish_state(state);
       } else {
         ESP_LOGE(TAG, "Failed to write register for '%s'", switch_type_.c_str());
-        // Don't publish state on failure - keep current state
       }
     });
   });
+}
+
+void LuxPowerSwitch::sync_state_() {
+  if (parent_ == nullptr || !parent_->is_connection_ready()) {
+    return;
+  }
+  
+  parent_->read_register_async(register_address_, [this](uint16_t reg_value) {
+    bool current_state = (reg_value & bitmask_) == bitmask_;
+    
+    if (current_state != state) {
+      ESP_LOGD(TAG, "Syncing '%s' state: %s", switch_type_.c_str(), current_state ? "ON" : "OFF");
+      publish_state(current_state);
+    }
+  });
+}
+
+uint16_t LuxPowerSwitch::prepare_binary_value_(uint16_t old_value, uint16_t mask, bool enable) {
+  return enable ? (old_value | mask) : (old_value & (65535 - mask));
 }
 
 }  // namespace luxpower_sna
