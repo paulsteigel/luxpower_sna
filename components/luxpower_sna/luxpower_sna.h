@@ -1,3 +1,6 @@
+// For different functions
+#include <functional>
+
 // luxpower_sna.h
 #pragma once
 #include "esphome/core/component.h"
@@ -268,12 +271,28 @@ class LuxpowerSNAComponent : public PollingComponent {
   void publish_sensor_(sensor::Sensor *sensor, float value);
   void publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value);
 
+  // Simple interface for switch components to use existing connection
+  void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
+  void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
+  bool is_connection_ready() const;
+
  private:
   // Template input references
   template_::TemplateText *host_input_{nullptr};
   template_::TemplateNumber *port_input_{nullptr};
   template_::TemplateText *dongle_serial_input_{nullptr};
   template_::TemplateText *inverter_serial_input_{nullptr};
+
+  // Simple request queue for async operations of switch
+  struct AsyncRequest {
+    enum Type { READ, WRITE };
+    Type type;
+    uint16_t reg;
+    uint16_t value;  // for write operations
+    std::function<void(uint16_t)> read_callback;
+    std::function<void(bool)> write_callback;
+  };
+  std::vector<AsyncRequest> async_requests_;
 
   // Framework-specific connection management
 #ifdef USE_ESP_IDF
