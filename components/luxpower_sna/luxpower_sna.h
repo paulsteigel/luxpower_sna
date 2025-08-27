@@ -121,7 +121,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void set_dongle_serial_input(template_::TemplateText *input) { dongle_serial_input_ = input; }
   void set_inverter_serial_input(template_::TemplateText *input) { inverter_serial_input_ = input; }
 
-  // All your existing sensor setters (keeping them exactly as they are)
+  // Sensor setters
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
@@ -297,7 +297,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  // All your existing sensor pointers (keeping them exactly as they are)
+  // Sensor pointers
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
   text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
   text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
