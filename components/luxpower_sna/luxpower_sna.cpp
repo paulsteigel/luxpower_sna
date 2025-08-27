@@ -1,210 +1,9 @@
 // luxpower_sna.cpp
 #include "luxpower_sna.h"
-#include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace luxpower_sna {
 
-// Helper methods to get values from template components
-std::string LuxpowerSNAComponent::get_host_from_input_() {
-  if (host_input_ != nullptr) {
-    auto *text_sensor = dynamic_cast<text_sensor::TextSensor *>(host_input_);
-    if (text_sensor != nullptr && text_sensor->has_state()) {
-      return text_sensor->state;
-    }
-  }
-  return "";
-}
-
-uint16_t LuxpowerSNAComponent::get_port_from_input_() {
-  if (port_input_ != nullptr) {
-    auto *sensor = dynamic_cast<sensor::Sensor *>(port_input_);
-    if (sensor != nullptr && sensor->has_state()) {
-      float port_val = sensor->state;
-      if (port_val > 0 && port_val <= 65535) {
-        return static_cast<uint16_t>(port_val);
-      }
-    }
-  }
-  return 4346; // Default port
-}
-
-std::string LuxpowerSNAComponent::get_dongle_serial_from_input_() {
-  if (dongle_serial_input_ != nullptr) {
-    auto *text_sensor = dynamic_cast<text_sensor::TextSensor *>(dongle_serial_input_);
-    if (text_sensor != nullptr && text_sensor->has_state()) {
-      return text_sensor->state;
-    }
-  }
-  return "";
-}
-
-std::string LuxpowerSNAComponent::get_inverter_serial_from_input_() {
-  if (inverter_serial_input_ != nullptr) {
-    auto *text_sensor = dynamic_cast<text_sensor::TextSensor *>(inverter_serial_input_);
-    if (text_sensor != nullptr && text_sensor->has_state()) {
-      return text_sensor->state;
-    }
-  }
-  return "";
-}
-
-// Framework-agnostic networking implementation
-bool LuxpowerSNAComponent::connect_to_inverter_() {
-  std::string host = get_host_from_input_();
-  uint16_t port = get_port_from_input_();
-  
-  if (host.empty()) {
-    ESP_LOGW(TAG, "Host address is empty");
-    return false;
-  }
-
-#ifdef USE_ESP_IDF
-  // ESP-IDF socket implementation
-  if (socket_fd_ >= 0) {
-    close(socket_fd_);
-  }
-
-  socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-  if (socket_fd_ < 0) {
-    ESP_LOGE(TAG, "Failed to create socket: %d", errno);
-    return false;
-  }
-
-  // Set socket timeout
-  struct timeval timeout;
-  timeout.tv_sec = 10;
-  timeout.tv_usec = 0;
-  setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-  setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-
-  // Setup server address
-  memset(&server_addr_, 0, sizeof(server_addr_));
-  server_addr_.sin_family = AF_INET;
-  server_addr_.sin_port = htons(port);
-  
-  if (inet_pton(AF_INET, host.c_str(), &server_addr_.sin_addr) <= 0) {
-    ESP_LOGE(TAG, "Invalid IP address: %s", host.c_str());
-    close(socket_fd_);
-    socket_fd_ = -1;
-    return false;
-  }
-
-  // Connect to server
-  if (connect(socket_fd_, (struct sockaddr*)&server_addr_, sizeof(server_addr_)) < 0) {
-    ESP_LOGE(TAG, "Failed to connect to %s:%d - %d", host.c_str(), port, errno);
-    close(socket_fd_);
-    socket_fd_ = -1;
-    return false;
-  }
-
-  ESP_LOGD(TAG, "Connected to %s:%d", host.c_str(), port);
-  return true;
-
-#else
-  // Arduino WiFiClient implementation
-  if (client_.connected()) {
-    client_.stop();
-  }
-
-  if (!client_.connect(host.c_str(), port)) {
-    ESP_LOGE(TAG, "Failed to connect to %s:%d", host.c_str(), port);
-    return false;
-  }
-
-  ESP_LOGD(TAG, "Connected to %s:%d", host.c_str(), port);
-  return true;
-#endif
-}
-
-void LuxpowerSNAComponent::disconnect_from_inverter_() {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ >= 0) {
-    close(socket_fd_);
-    socket_fd_ = -1;
-  }
-#else
-  if (client_.connected()) {
-    client_.stop();
-  }
-#endif
-}
-
-bool LuxpowerSNAComponent::send_data_(const std::vector<uint8_t> &data) {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
-
-  ssize_t sent = send(socket_fd_, data.data(), data.size(), 0);
-  if (sent != static_cast<ssize_t>(data.size())) {
-    ESP_LOGE(TAG, "Failed to send data: sent %d of %d bytes", sent, data.size());
-    return false;
-  }
-  return true;
-
-#else
-  if (!client_.connected()) {
-    return false;
-  }
-
-  size_t sent = client_.write(data.data(), data.size());
-  if (sent != data.size()) {
-    ESP_LOGE(TAG, "Failed to send data: sent %d of %d bytes", sent, data.size());
-    return false;
-  }
-  return true;
-#endif
-}
-
-bool LuxpowerSNAComponent::receive_data_(std::vector<uint8_t> &data, size_t expected_size, uint32_t timeout_ms) {
-  data.clear();
-  data.reserve(expected_size);
-
-  uint32_t start_time = millis();
-
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
-
-  while (data.size() < expected_size && (millis() - start_time) < timeout_ms) {
-    uint8_t buffer[256];
-    ssize_t received = recv(socket_fd_, buffer, sizeof(buffer), MSG_DONTWAIT);
-    
-    if (received > 0) {
-      data.insert(data.end(), buffer, buffer + received);
-    } else if (received == 0) {
-      ESP_LOGW(TAG, "Connection closed by peer");
-      break;
-    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-      ESP_LOGE(TAG, "Receive error: %d", errno);
-      break;
-    }
-    
-    delay(10); // Small delay to prevent busy waiting
-  }
-
-#else
-  while (data.size() < expected_size && (millis() - start_time) < timeout_ms) {
-    while (client_.available() && data.size() < expected_size) {
-      data.push_back(client_.read());
-    }
-    
-    if (!client_.connected()) {
-      ESP_LOGW(TAG, "Connection lost during receive");
-      break;
-    }
-    
-    delay(10); // Small delay to prevent busy waiting
-  }
-#endif
-
-  return data.size() >= expected_size;
-}
-
-// Configurations
 const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
   "Standby", "Error", "Inverting", "", "Solar > Load - Surplus > Grid", "Float", "", "Charger Off", "Supporting", "Selling", "Pass Through", "Offsetting", "Solar > Battery Charging", "", "", "",
   "Battery Discharging > LOAD - Surplus > Grid", "Temperature Over Range", "", "", "Solar + Battery Discharging > LOAD - Surplus > Grid", "", "", "", "", "", "", "", "AC Battery Charging", "", "", "", "", "", "Solar + Grid > Battery Charging",
@@ -230,6 +29,11 @@ void LuxpowerSNAComponent::setup() {
   
   // Reserve buffer space
   response_buffer_.reserve(512);
+
+#ifdef USE_ESP_IDF
+  socket_fd_ = -1;
+  memset(&server_addr_, 0, sizeof(server_addr_));
+#endif
   
   // Validate that required input components are configured
   if (host_input_ == nullptr) {
@@ -348,6 +152,11 @@ void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", inverter_serial.empty() ? "Not set" : inverter_serial.c_str());
   ESP_LOGCONFIG(TAG, "  Update Interval: %.1fs", this->get_update_interval() / 1000.0f);
   ESP_LOGCONFIG(TAG, "  Current State: %s", get_state_name_(connection_state_));
+#ifdef USE_ESP_IDF
+  ESP_LOGCONFIG(TAG, "  Framework: ESP-IDF");
+#else
+  ESP_LOGCONFIG(TAG, "  Framework: Arduino");
+#endif
 }
 
 void LuxpowerSNAComponent::update() {
@@ -447,7 +256,11 @@ void LuxpowerSNAComponent::handle_connecting_state_() {
 }
 
 void LuxpowerSNAComponent::handle_connected_state_() {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+#else
   if (!client_.connected()) {
+#endif
     ESP_LOGW(TAG, "Connection lost");
     connection_state_ = ConnectionState::ERROR;
     return;
@@ -460,7 +273,11 @@ void LuxpowerSNAComponent::handle_connected_state_() {
 }
 
 void LuxpowerSNAComponent::handle_requesting_data_state_() {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+#else
   if (!client_.connected()) {
+#endif
     ESP_LOGW(TAG, "Connection lost during data request");
     connection_state_ = ConnectionState::ERROR;
     return;
@@ -469,7 +286,7 @@ void LuxpowerSNAComponent::handle_requesting_data_state_() {
   if (current_bank_index_ >= 5) {
     // All banks processed successfully
     ESP_LOGI(TAG, "All data banks processed successfully");
-    client_.stop();
+    disconnect_client_();
     connection_state_ = ConnectionState::DISCONNECTED;
     current_bank_index_ = 0;
     return;
@@ -487,7 +304,11 @@ void LuxpowerSNAComponent::handle_requesting_data_state_() {
 }
 
 void LuxpowerSNAComponent::handle_waiting_response_state_() {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+#else
   if (!client_.connected()) {
+#endif
     ESP_LOGW(TAG, "Connection lost while waiting for response");
     connection_state_ = ConnectionState::ERROR;
     return;
@@ -525,10 +346,7 @@ void LuxpowerSNAComponent::handle_processing_response_state_() {
 void LuxpowerSNAComponent::handle_error_state_() {
   ESP_LOGV(TAG, "Handling error recovery");
   
-  if (client_.connected()) {
-    client_.stop();
-  }
-  
+  disconnect_client_();
   response_buffer_.clear();
   connection_state_ = ConnectionState::DISCONNECTED;
   current_bank_index_ = 0;
@@ -540,13 +358,119 @@ bool LuxpowerSNAComponent::start_connection_attempt_() {
   uint16_t port = get_port_from_input_();
   
   ESP_LOGD(TAG, "Attempting to connect to %s:%u", host.c_str(), port);
+
+#ifdef USE_ESP_IDF
+  // ESP-IDF socket implementation
+  if (socket_fd_ >= 0) {
+    close(socket_fd_);
+  }
+
+  socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+  if (socket_fd_ < 0) {
+    ESP_LOGE(TAG, "Failed to create socket: %d", errno);
+    return false;
+  }
+
+  // Set socket to non-blocking for connection
+  int flags = fcntl(socket_fd_, F_GETFL, 0);
+  fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK);
+
+  // Setup server address
+  server_addr_.sin_family = AF_INET;
+  server_addr_.sin_port = htons(port);
   
+  if (inet_pton(AF_INET, host.c_str(), &server_addr_.sin_addr) <= 0) {
+    ESP_LOGE(TAG, "Invalid IP address: %s", host.c_str());
+    close(socket_fd_);
+    socket_fd_ = -1;
+    return false;
+  }
+
   // Start non-blocking connection
+  int result = connect(socket_fd_, (struct sockaddr*)&server_addr_, sizeof(server_addr_));
+  if (result == 0) {
+    // Connected immediately (unlikely but possible)
+    return true;
+  } else if (errno == EINPROGRESS) {
+    // Connection in progress - this is expected for non-blocking
+    return true;
+  } else {
+    ESP_LOGE(TAG, "Failed to start connection: %d", errno);
+    close(socket_fd_);
+    socket_fd_ = -1;
+    return false;
+  }
+
+#else
+  // Arduino WiFiClient implementation
   return client_.connect(host.c_str(), port);
+#endif
 }
 
 bool LuxpowerSNAComponent::check_connection_ready_() {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+    return false;
+  }
+
+  // Check if connection is ready using select
+  fd_set write_fds;
+  fd_set error_fds;
+  struct timeval timeout = {0, 0}; // Non-blocking
+  
+  FD_ZERO(&write_fds);
+  FD_ZERO(&error_fds);
+  FD_SET(socket_fd_, &write_fds);
+  FD_SET(socket_fd_, &error_fds);
+  
+  int result = select(socket_fd_ + 1, nullptr, &write_fds, &error_fds, &timeout);
+  
+  if (result > 0) {
+    if (FD_ISSET(socket_fd_, &error_fds)) {
+      // Connection failed
+      int error;
+      socklen_t len = sizeof(error);
+      getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, &error, &len);
+      ESP_LOGE(TAG, "Connection failed with error: %d", error);
+      close(socket_fd_);
+      socket_fd_ = -1;
+      return false;
+    }
+    
+    if (FD_ISSET(socket_fd_, &write_fds)) {
+      // Connection successful, set socket back to blocking
+      int flags = fcntl(socket_fd_, F_GETFL, 0);
+      fcntl(socket_fd_, F_SETFL, flags & ~O_NONBLOCK);
+      
+      // Set socket timeouts
+      struct timeval tv;
+      tv.tv_sec = 10;
+      tv.tv_usec = 0;
+      setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+      
+      return true;
+    }
+  }
+  
+  return false; // Still connecting
+
+#else
   return client_.connected();
+#endif
+}
+
+void LuxpowerSNAComponent::disconnect_client_() {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ >= 0) {
+    close(socket_fd_);
+    socket_fd_ = -1;
+  }
+#else
+  if (client_.connected()) {
+    client_.stop();
+  }
+#endif
 }
 
 bool LuxpowerSNAComponent::send_bank_request_() {
@@ -574,16 +498,45 @@ bool LuxpowerSNAComponent::send_bank_request_() {
 
   ESP_LOGV(TAG, "Sending request for bank %d with dongle: %s, inverter: %s", 
            bank, dongle_serial.c_str(), inverter_serial.c_str());
+
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+    return false;
+  }
   
+  ssize_t written = send(socket_fd_, pkt, sizeof(pkt), 0);
+  return written == sizeof(pkt);
+
+#else
   size_t written = client_.write(pkt, sizeof(pkt));
   client_.flush();
-  
   return written == sizeof(pkt);
+#endif
 }
 
 bool LuxpowerSNAComponent::read_available_data_() {
   bool data_received = false;
+
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+    return false;
+  }
   
+  uint8_t buffer[256];
+  ssize_t received = recv(socket_fd_, buffer, sizeof(buffer), MSG_DONTWAIT);
+  
+  if (received > 0) {
+    response_buffer_.insert(response_buffer_.end(), buffer, buffer + received);
+    data_received = true;
+  } else if (received == 0) {
+    ESP_LOGW(TAG, "Connection closed by peer");
+    return false;
+  } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+    ESP_LOGE(TAG, "Receive error: %d", errno);
+    return false;
+  }
+
+#else
   while (client_.available()) {
     uint8_t byte = client_.read();
     response_buffer_.push_back(byte);
@@ -596,7 +549,8 @@ bool LuxpowerSNAComponent::read_available_data_() {
       return false;
     }
   }
-  
+#endif
+
   return data_received;
 }
 
@@ -715,6 +669,7 @@ void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor,
   if (sensor != nullptr) sensor->publish_state(value);
 }
 
+// Process_sectionX_ methods for data retrieval
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
