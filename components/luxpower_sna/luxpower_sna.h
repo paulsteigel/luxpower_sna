@@ -2,113 +2,23 @@
 #pragma once
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/template/text/template_text.h"
 #include "esphome/components/template/number/template_number.h"
-
-// Framework-specific includes
-#ifdef USE_ESP_IDF
-#include "lwip/sockets.h"
-#include "lwip/netdb.h"
-#include "lwip/sys.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_timer.h"
-#else
 #include <WiFiClient.h>
+#include <vector>
+#include <queue>
+
 #ifdef USE_ESP32
 #include <WiFi.h>
 #elif USE_ESP8266
 #include <ESP8266WiFi.h>
 #endif
-#endif
-
-#include <vector>
-#include <queue>
-#include <cstring>
+#include <WiFiClient.h>
 
 namespace esphome {
 namespace luxpower_sna {
-// for Switch
-// Register 21 bit masks (Most Significant Byte)
-static const uint16_t FEED_IN_GRID = 1 << 15;
-static const uint16_t DCI_ENABLE = 1 << 14;
-static const uint16_t GFCI_ENABLE = 1 << 13;
-static const uint16_t R21_UNKNOWN_BIT_12 = 1 << 12;
-static const uint16_t CHARGE_PRIORITY = 1 << 11;
-static const uint16_t FORCED_DISCHARGE_ENABLE = 1 << 10;
-static const uint16_t NORMAL_OR_STANDBY = 1 << 9;
-static const uint16_t SEAMLESS_EPS_SWITCHING = 1 << 8;
-
-// Register 21 bit masks (Least Significant Byte)
-static const uint16_t AC_CHARGE_ENABLE = 1 << 7;
-static const uint16_t GRID_ON_POWER_SS = 1 << 6;
-static const uint16_t NEUTRAL_DETECT_ENABLE = 1 << 5;
-static const uint16_t ANTI_ISLAND_ENABLE = 1 << 4;
-static const uint16_t R21_UNKNOWN_BIT_3 = 1 << 3;
-static const uint16_t DRMS_ENABLE = 1 << 2;
-static const uint16_t OVF_LOAD_DERATE_ENABLE = 1 << 1;
-static const uint16_t POWER_BACKUP_ENABLE = 1 << 0;
-
-// Register 110 bit masks (Most Significant Byte)
-static const uint16_t TAKE_LOAD_TOGETHER = 1 << 10;
-
-// Register 110 bit masks (Least Significant Byte)
-static const uint16_t CHARGE_LAST = 1 << 4;
-static const uint16_t MICRO_GRID_ENABLE = 1 << 2;
-static const uint16_t FAST_ZERO_EXPORT_ENABLE = 1 << 1;
-static const uint16_t RUN_WITHOUT_GRID = 1 << 1;  // Same as FAST_ZERO_EXPORT_ENABLE
-static const uint16_t PV_GRID_OFF_ENABLE = 1 << 0;
-
-// Register 120 bit masks (Most Significant Byte)
-static const uint16_t R120_UNKNOWN_BIT_15 = 1 << 15;
-static const uint16_t R120_UNKNOWN_BIT_14 = 1 << 14;
-static const uint16_t R120_UNKNOWN_BIT_13 = 1 << 13;
-static const uint16_t R120_UNKNOWN_BIT_12 = 1 << 12;
-static const uint16_t R120_UNKNOWN_BIT_11 = 1 << 11;
-static const uint16_t R120_UNKNOWN_BIT_10 = 1 << 10;
-static const uint16_t R120_UNKNOWN_BIT_09 = 1 << 9;
-static const uint16_t R120_UNKNOWN_BIT_08 = 1 << 8;
-
-// Register 120 bit masks (Least Significant Byte)
-static const uint16_t GEN_CHRG_ACC_TO_SOC = 1 << 7;  // Generator Charge According To SOC
-static const uint16_t R120_UNKNOWN_BIT_06 = 1 << 6;
-static const uint16_t R120_UNKNOWN_BIT_05 = 1 << 5;
-static const uint16_t DISCHARG_ACC_TO_SOC = 1 << 4;  // Discharge According To SOC
-static const uint16_t R120_UNKNOWN_BIT_03 = 1 << 3;
-static const uint16_t AC_CHARGE_MODE_B_02 = 1 << 2;  // AC Charge Mode Bit 2
-static const uint16_t AC_CHARGE_MODE_B_01 = 1 << 1;  // AC Charge Mode Bit 1
-static const uint16_t R120_UNKNOWN_BIT_00 = 1 << 0;
-
-// Register 179 bit masks (Most Significant Byte)
-static const uint16_t R179_UNKNOWN_BIT_15 = 1 << 15;
-static const uint16_t R179_UNKNOWN_BIT_14 = 1 << 14;
-static const uint16_t R179_UNKNOWN_BIT_13 = 1 << 13;
-static const uint16_t R179_UNKNOWN_BIT_12 = 1 << 12;
-static const uint16_t R179_UNKNOWN_BIT_11 = 1 << 11;
-static const uint16_t R179_UNKNOWN_BIT_10 = 1 << 10;
-static const uint16_t R179_UNKNOWN_BIT_09 = 1 << 9;
-static const uint16_t R179_UNKNOWN_BIT_08 = 1 << 8;
-
-// Register 179 bit masks (Least Significant Byte)
-static const uint16_t ENABLE_PEAK_SHAVING = 1 << 7;
-static const uint16_t R179_UNKNOWN_BIT_06 = 1 << 6;
-static const uint16_t R179_UNKNOWN_BIT_05 = 1 << 5;
-static const uint16_t R179_UNKNOWN_BIT_04 = 1 << 4;
-static const uint16_t R179_UNKNOWN_BIT_03 = 1 << 3;
-static const uint16_t R179_UNKNOWN_BIT_02 = 1 << 2;
-static const uint16_t R179_UNKNOWN_BIT_01 = 1 << 1;
-static const uint16_t R179_UNKNOWN_BIT_00 = 1 << 0;
-
 
 static const char *const TAG = "luxpower_sna";
 
@@ -192,27 +102,13 @@ class LuxpowerSNAComponent : public PollingComponent {
   void update() override;
   void loop() override;  // Non-blocking processing
 
-  // for switches
-  // Register operations for switches - these will be implemented by luxpower_sna
-  void write_register(uint16_t reg, uint16_t value, std::function<void(bool)> callback = nullptr);
-  void read_register(uint16_t reg, std::function<void(uint16_t)> callback = nullptr);
-  uint16_t get_cached_register(uint16_t reg);
-  bool has_cached_register(uint16_t reg);
-  
-  // Utility for switches - from prepare_binary_value in LXPPacket.py
-  uint16_t prepare_binary_value(uint16_t old_value, uint16_t mask, bool enable);
-
-  // Register switch for state updates
-  void register_switch(uint16_t reg, switch_::Switch *sw);
-  void update_switch_states(uint16_t reg, uint16_t value);
-
   // Template input setters
   void set_host_input(template_::TemplateText *input) { host_input_ = input; }
   void set_port_input(template_::TemplateNumber *input) { port_input_ = input; }
   void set_dongle_serial_input(template_::TemplateText *input) { dongle_serial_input_ = input; }
   void set_inverter_serial_input(template_::TemplateText *input) { inverter_serial_input_ = input; }
 
-  // Sensor setters
+  // [Keep all your existing sensor setters exactly as they are...]
   void set_lux_firmware_version_sensor(text_sensor::TextSensor *s) { lux_firmware_version_sensor_ = s; }
   void set_lux_inverter_model_sensor(text_sensor::TextSensor *s) { lux_inverter_model_sensor_ = s; }
   void set_lux_status_text_sensor(text_sensor::TextSensor *s) { lux_status_text_sensor_ = s; }
@@ -336,13 +232,12 @@ class LuxpowerSNAComponent : public PollingComponent {
   std::string get_inverter_serial_from_input_();
   const char* get_state_name_(ConnectionState state);
   
-  // Framework-agnostic networking methods
+  // Non-blocking data operations
   bool start_connection_attempt_();
   bool check_connection_ready_();
   bool send_bank_request_();
   bool read_available_data_();
   bool process_received_data_();
-  void disconnect_client_();
   
   // Data processing
   uint16_t calculate_crc_(const uint8_t *data, size_t len);
@@ -361,15 +256,8 @@ class LuxpowerSNAComponent : public PollingComponent {
   template_::TemplateText *dongle_serial_input_{nullptr};
   template_::TemplateText *inverter_serial_input_{nullptr};
 
-  // Framework-specific connection management
-#ifdef USE_ESP_IDF
-  int socket_fd_{-1};
-  struct sockaddr_in server_addr_{};
-#else
-  WiFiClient client_;
-#endif
-
   // Non-blocking connection management
+  WiFiClient client_;
   ConnectionState connection_state_;
   DataBankState bank_state_;
   uint8_t current_bank_index_;
@@ -388,7 +276,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   static const char *STATUS_TEXTS[193];
   static const char *BATTERY_STATUS_TEXTS[17];
 
-  // Sensor pointers
+  // [Keep all your existing sensor pointers exactly as they are...]
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
   text_sensor::TextSensor *lux_inverter_model_sensor_{nullptr};
   text_sensor::TextSensor *lux_status_text_sensor_{nullptr};
@@ -494,27 +382,6 @@ class LuxpowerSNAComponent : public PollingComponent {
   sensor::Sensor *p_load_ongrid_sensor_{nullptr};
   sensor::Sensor *e_load_day_sensor_{nullptr};
   sensor::Sensor *e_load_all_l_sensor_{nullptr};
-};
-
-// Switch sub-component - relies entirely on parent for actions
-class LuxPowerSwitch : public switch_::Switch, public Component {
- public:
-  void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
-  void set_register_address(uint16_t reg) { register_address_ = reg; }
-  void set_bitmask(uint16_t mask) { bitmask_ = mask; }
-  void set_switch_type(const std::string &type) { switch_type_ = type; }
-
-  void setup() override;
-  void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::DATA; }
-
- protected:
-  void write_state(bool state) override;
-
-  LuxpowerSNAComponent *parent_{nullptr};
-  uint16_t register_address_;
-  uint16_t bitmask_;
-  std::string switch_type_;
 };
 
 }  // namespace luxpower_sna
