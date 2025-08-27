@@ -1,9 +1,210 @@
 // luxpower_sna.cpp
 #include "luxpower_sna.h"
+#include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace luxpower_sna {
 
+// Helper methods to get values from template components
+std::string LuxpowerSNAComponent::get_host_from_input_() {
+  if (host_input_ != nullptr) {
+    auto *text_sensor = dynamic_cast<text_sensor::TextSensor *>(host_input_);
+    if (text_sensor != nullptr && text_sensor->has_state()) {
+      return text_sensor->state;
+    }
+  }
+  return "";
+}
+
+uint16_t LuxpowerSNAComponent::get_port_from_input_() {
+  if (port_input_ != nullptr) {
+    auto *sensor = dynamic_cast<sensor::Sensor *>(port_input_);
+    if (sensor != nullptr && sensor->has_state()) {
+      float port_val = sensor->state;
+      if (port_val > 0 && port_val <= 65535) {
+        return static_cast<uint16_t>(port_val);
+      }
+    }
+  }
+  return 4346; // Default port
+}
+
+std::string LuxpowerSNAComponent::get_dongle_serial_from_input_() {
+  if (dongle_serial_input_ != nullptr) {
+    auto *text_sensor = dynamic_cast<text_sensor::TextSensor *>(dongle_serial_input_);
+    if (text_sensor != nullptr && text_sensor->has_state()) {
+      return text_sensor->state;
+    }
+  }
+  return "";
+}
+
+std::string LuxpowerSNAComponent::get_inverter_serial_from_input_() {
+  if (inverter_serial_input_ != nullptr) {
+    auto *text_sensor = dynamic_cast<text_sensor::TextSensor *>(inverter_serial_input_);
+    if (text_sensor != nullptr && text_sensor->has_state()) {
+      return text_sensor->state;
+    }
+  }
+  return "";
+}
+
+// Framework-agnostic networking implementation
+bool LuxpowerSNAComponent::connect_to_inverter_() {
+  std::string host = get_host_from_input_();
+  uint16_t port = get_port_from_input_();
+  
+  if (host.empty()) {
+    ESP_LOGW(TAG, "Host address is empty");
+    return false;
+  }
+
+#ifdef USE_ESP_IDF
+  // ESP-IDF socket implementation
+  if (socket_fd_ >= 0) {
+    close(socket_fd_);
+  }
+
+  socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+  if (socket_fd_ < 0) {
+    ESP_LOGE(TAG, "Failed to create socket: %d", errno);
+    return false;
+  }
+
+  // Set socket timeout
+  struct timeval timeout;
+  timeout.tv_sec = 10;
+  timeout.tv_usec = 0;
+  setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+  // Setup server address
+  memset(&server_addr_, 0, sizeof(server_addr_));
+  server_addr_.sin_family = AF_INET;
+  server_addr_.sin_port = htons(port);
+  
+  if (inet_pton(AF_INET, host.c_str(), &server_addr_.sin_addr) <= 0) {
+    ESP_LOGE(TAG, "Invalid IP address: %s", host.c_str());
+    close(socket_fd_);
+    socket_fd_ = -1;
+    return false;
+  }
+
+  // Connect to server
+  if (connect(socket_fd_, (struct sockaddr*)&server_addr_, sizeof(server_addr_)) < 0) {
+    ESP_LOGE(TAG, "Failed to connect to %s:%d - %d", host.c_str(), port, errno);
+    close(socket_fd_);
+    socket_fd_ = -1;
+    return false;
+  }
+
+  ESP_LOGD(TAG, "Connected to %s:%d", host.c_str(), port);
+  return true;
+
+#else
+  // Arduino WiFiClient implementation
+  if (client_.connected()) {
+    client_.stop();
+  }
+
+  if (!client_.connect(host.c_str(), port)) {
+    ESP_LOGE(TAG, "Failed to connect to %s:%d", host.c_str(), port);
+    return false;
+  }
+
+  ESP_LOGD(TAG, "Connected to %s:%d", host.c_str(), port);
+  return true;
+#endif
+}
+
+void LuxpowerSNAComponent::disconnect_from_inverter_() {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ >= 0) {
+    close(socket_fd_);
+    socket_fd_ = -1;
+  }
+#else
+  if (client_.connected()) {
+    client_.stop();
+  }
+#endif
+}
+
+bool LuxpowerSNAComponent::send_data_(const std::vector<uint8_t> &data) {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+    return false;
+  }
+
+  ssize_t sent = send(socket_fd_, data.data(), data.size(), 0);
+  if (sent != static_cast<ssize_t>(data.size())) {
+    ESP_LOGE(TAG, "Failed to send data: sent %d of %d bytes", sent, data.size());
+    return false;
+  }
+  return true;
+
+#else
+  if (!client_.connected()) {
+    return false;
+  }
+
+  size_t sent = client_.write(data.data(), data.size());
+  if (sent != data.size()) {
+    ESP_LOGE(TAG, "Failed to send data: sent %d of %d bytes", sent, data.size());
+    return false;
+  }
+  return true;
+#endif
+}
+
+bool LuxpowerSNAComponent::receive_data_(std::vector<uint8_t> &data, size_t expected_size, uint32_t timeout_ms) {
+  data.clear();
+  data.reserve(expected_size);
+
+  uint32_t start_time = millis();
+
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+    return false;
+  }
+
+  while (data.size() < expected_size && (millis() - start_time) < timeout_ms) {
+    uint8_t buffer[256];
+    ssize_t received = recv(socket_fd_, buffer, sizeof(buffer), MSG_DONTWAIT);
+    
+    if (received > 0) {
+      data.insert(data.end(), buffer, buffer + received);
+    } else if (received == 0) {
+      ESP_LOGW(TAG, "Connection closed by peer");
+      break;
+    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      ESP_LOGE(TAG, "Receive error: %d", errno);
+      break;
+    }
+    
+    delay(10); // Small delay to prevent busy waiting
+  }
+
+#else
+  while (data.size() < expected_size && (millis() - start_time) < timeout_ms) {
+    while (client_.available() && data.size() < expected_size) {
+      data.push_back(client_.read());
+    }
+    
+    if (!client_.connected()) {
+      ESP_LOGW(TAG, "Connection lost during receive");
+      break;
+    }
+    
+    delay(10); // Small delay to prevent busy waiting
+  }
+#endif
+
+  return data.size() >= expected_size;
+}
+
+// Configurations
 const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
   "Standby", "Error", "Inverting", "", "Solar > Load - Surplus > Grid", "Float", "", "Charger Off", "Supporting", "Selling", "Pass Through", "Offsetting", "Solar > Battery Charging", "", "", "",
   "Battery Discharging > LOAD - Surplus > Grid", "Temperature Over Range", "", "", "Solar + Battery Discharging > LOAD - Surplus > Grid", "", "", "", "", "", "", "", "AC Battery Charging", "", "", "", "", "", "Solar + Grid > Battery Charging",
