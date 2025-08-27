@@ -53,23 +53,23 @@ void LuxPowerSwitch::write_state(bool state) {
   // Read current register value first
   parent_->read_register_async(register_address_, [this, state](uint16_t current_value) {
     // Update our cache
-    cached_register_value_ = current_value;
-    has_cached_value_ = true;
+    this->cached_register_value_ = current_value;
+    this->has_cached_value_ = true;
     
     // Calculate new value with bit manipulation
-    uint16_t new_value = prepare_binary_value_(current_value, bitmask_, state);
+    uint16_t new_value = this->prepare_binary_value_(current_value, this->bitmask_, state);
     
     ESP_LOGD(SWITCH_TAG, "Writing register %d for '%s': 0x%04X -> 0x%04X", 
-             register_address_, switch_type_.c_str(), current_value, new_value);
+             this->register_address_, this->switch_type_.c_str(), current_value, new_value);
     
-    // Write the new value
-    parent_->write_register_async(register_address_, new_value, [this, state, new_value](bool success) {
+    // Write the new value - capture 'this' to access member variables
+    this->parent_->write_register_async(this->register_address_, new_value, [this, state, new_value](bool success) {
       if (success) {
-        ESP_LOGI(SWITCH_TAG, "Successfully set '%s' to %s", switch_type_.c_str(), state ? "ON" : "OFF");
-        cached_register_value_ = new_value;  // Update cache
-        publish_state(state);
+        ESP_LOGI(SWITCH_TAG, "Successfully set '%s' to %s", this->switch_type_.c_str(), state ? "ON" : "OFF");
+        this->cached_register_value_ = new_value;  // Update cache
+        this->publish_state(state);
       } else {
-        ESP_LOGE(SWITCH_TAG, "Failed to write register for '%s'", switch_type_.c_str());
+        ESP_LOGE(SWITCH_TAG, "Failed to write register for '%s'", this->switch_type_.c_str());
       }
     });
   });
