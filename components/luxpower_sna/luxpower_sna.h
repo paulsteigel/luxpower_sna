@@ -4,6 +4,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/template/text/template_text.h"
 #include "esphome/components/template/number/template_number.h"
@@ -37,6 +38,77 @@
 
 namespace esphome {
 namespace luxpower_sna {
+// for Switch
+// Register 21 bit masks (Most Significant Byte)
+static const uint16_t FEED_IN_GRID = 1 << 15;
+static const uint16_t DCI_ENABLE = 1 << 14;
+static const uint16_t GFCI_ENABLE = 1 << 13;
+static const uint16_t R21_UNKNOWN_BIT_12 = 1 << 12;
+static const uint16_t CHARGE_PRIORITY = 1 << 11;
+static const uint16_t FORCED_DISCHARGE_ENABLE = 1 << 10;
+static const uint16_t NORMAL_OR_STANDBY = 1 << 9;
+static const uint16_t SEAMLESS_EPS_SWITCHING = 1 << 8;
+
+// Register 21 bit masks (Least Significant Byte)
+static const uint16_t AC_CHARGE_ENABLE = 1 << 7;
+static const uint16_t GRID_ON_POWER_SS = 1 << 6;
+static const uint16_t NEUTRAL_DETECT_ENABLE = 1 << 5;
+static const uint16_t ANTI_ISLAND_ENABLE = 1 << 4;
+static const uint16_t R21_UNKNOWN_BIT_3 = 1 << 3;
+static const uint16_t DRMS_ENABLE = 1 << 2;
+static const uint16_t OVF_LOAD_DERATE_ENABLE = 1 << 1;
+static const uint16_t POWER_BACKUP_ENABLE = 1 << 0;
+
+// Register 110 bit masks (Most Significant Byte)
+static const uint16_t TAKE_LOAD_TOGETHER = 1 << 10;
+
+// Register 110 bit masks (Least Significant Byte)
+static const uint16_t CHARGE_LAST = 1 << 4;
+static const uint16_t MICRO_GRID_ENABLE = 1 << 2;
+static const uint16_t FAST_ZERO_EXPORT_ENABLE = 1 << 1;
+static const uint16_t RUN_WITHOUT_GRID = 1 << 1;  // Same as FAST_ZERO_EXPORT_ENABLE
+static const uint16_t PV_GRID_OFF_ENABLE = 1 << 0;
+
+// Register 120 bit masks (Most Significant Byte)
+static const uint16_t R120_UNKNOWN_BIT_15 = 1 << 15;
+static const uint16_t R120_UNKNOWN_BIT_14 = 1 << 14;
+static const uint16_t R120_UNKNOWN_BIT_13 = 1 << 13;
+static const uint16_t R120_UNKNOWN_BIT_12 = 1 << 12;
+static const uint16_t R120_UNKNOWN_BIT_11 = 1 << 11;
+static const uint16_t R120_UNKNOWN_BIT_10 = 1 << 10;
+static const uint16_t R120_UNKNOWN_BIT_09 = 1 << 9;
+static const uint16_t R120_UNKNOWN_BIT_08 = 1 << 8;
+
+// Register 120 bit masks (Least Significant Byte)
+static const uint16_t GEN_CHRG_ACC_TO_SOC = 1 << 7;  // Generator Charge According To SOC
+static const uint16_t R120_UNKNOWN_BIT_06 = 1 << 6;
+static const uint16_t R120_UNKNOWN_BIT_05 = 1 << 5;
+static const uint16_t DISCHARG_ACC_TO_SOC = 1 << 4;  // Discharge According To SOC
+static const uint16_t R120_UNKNOWN_BIT_03 = 1 << 3;
+static const uint16_t AC_CHARGE_MODE_B_02 = 1 << 2;  // AC Charge Mode Bit 2
+static const uint16_t AC_CHARGE_MODE_B_01 = 1 << 1;  // AC Charge Mode Bit 1
+static const uint16_t R120_UNKNOWN_BIT_00 = 1 << 0;
+
+// Register 179 bit masks (Most Significant Byte)
+static const uint16_t R179_UNKNOWN_BIT_15 = 1 << 15;
+static const uint16_t R179_UNKNOWN_BIT_14 = 1 << 14;
+static const uint16_t R179_UNKNOWN_BIT_13 = 1 << 13;
+static const uint16_t R179_UNKNOWN_BIT_12 = 1 << 12;
+static const uint16_t R179_UNKNOWN_BIT_11 = 1 << 11;
+static const uint16_t R179_UNKNOWN_BIT_10 = 1 << 10;
+static const uint16_t R179_UNKNOWN_BIT_09 = 1 << 9;
+static const uint16_t R179_UNKNOWN_BIT_08 = 1 << 8;
+
+// Register 179 bit masks (Least Significant Byte)
+static const uint16_t ENABLE_PEAK_SHAVING = 1 << 7;
+static const uint16_t R179_UNKNOWN_BIT_06 = 1 << 6;
+static const uint16_t R179_UNKNOWN_BIT_05 = 1 << 5;
+static const uint16_t R179_UNKNOWN_BIT_04 = 1 << 4;
+static const uint16_t R179_UNKNOWN_BIT_03 = 1 << 3;
+static const uint16_t R179_UNKNOWN_BIT_02 = 1 << 2;
+static const uint16_t R179_UNKNOWN_BIT_01 = 1 << 1;
+static const uint16_t R179_UNKNOWN_BIT_00 = 1 << 0;
+
 
 static const char *const TAG = "luxpower_sna";
 
@@ -119,6 +191,20 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
   void loop() override;  // Non-blocking processing
+
+  // for switches
+  // Register operations for switches - these will be implemented by luxpower_sna
+  void write_register(uint16_t reg, uint16_t value, std::function<void(bool)> callback = nullptr);
+  void read_register(uint16_t reg, std::function<void(uint16_t)> callback = nullptr);
+  uint16_t get_cached_register(uint16_t reg);
+  bool has_cached_register(uint16_t reg);
+  
+  // Utility for switches - from prepare_binary_value in LXPPacket.py
+  uint16_t prepare_binary_value(uint16_t old_value, uint16_t mask, bool enable);
+
+  // Register switch for state updates
+  void register_switch(uint16_t reg, switch_::Switch *sw);
+  void update_switch_states(uint16_t reg, uint16_t value);
 
   // Template input setters
   void set_host_input(template_::TemplateText *input) { host_input_ = input; }
@@ -408,6 +494,27 @@ class LuxpowerSNAComponent : public PollingComponent {
   sensor::Sensor *p_load_ongrid_sensor_{nullptr};
   sensor::Sensor *e_load_day_sensor_{nullptr};
   sensor::Sensor *e_load_all_l_sensor_{nullptr};
+};
+
+// Switch sub-component - relies entirely on parent for actions
+class LuxPowerSwitch : public switch_::Switch, public Component {
+ public:
+  void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
+  void set_register_address(uint16_t reg) { register_address_ = reg; }
+  void set_bitmask(uint16_t mask) { bitmask_ = mask; }
+  void set_switch_type(const std::string &type) { switch_type_ = type; }
+
+  void setup() override;
+  void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::DATA; }
+
+ protected:
+  void write_state(bool state) override;
+
+  LuxpowerSNAComponent *parent_{nullptr};
+  uint16_t register_address_;
+  uint16_t bitmask_;
+  std::string switch_type_;
 };
 
 }  // namespace luxpower_sna
