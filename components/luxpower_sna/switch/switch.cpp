@@ -52,26 +52,36 @@ void LuxPowerSwitch::write_state(bool state) {
     return;
   }
   
+  // IMMEDIATELY update the UI to show the desired state (optimistic update)
+  this->publish_state(state);
+  ESP_LOGI(SWITCH_TAG, "UI updated for '%s': %s (optimistic)", 
+           this->get_name().c_str(), state ? "ON" : "OFF");
+  
   if (!parent_->is_connection_ready()) {
     ESP_LOGI(SWITCH_TAG, "Parent busy, queuing write for '%s': %s", 
              this->get_name().c_str(), state ? "ON" : "OFF");
     
-    // Queue the write operation to retry when parent becomes available
     pending_write_ = true;
     last_write_time_ = millis();
     
-    // Store the desired state and retry after a short delay
+    // Store the desired state for retry
     this->set_timeout("retry_write", 2000, [this, state]() {
       if (this->pending_write_) {
         ESP_LOGD(SWITCH_TAG, "Retrying queued write for '%s'", this->get_name().c_str());
         this->pending_write_ = false;
-        this->write_state(state);
+        this->write_state_internal_(state); // Use internal method to avoid double UI update
       }
     });
     return;
   }
   
-  ESP_LOGI(SWITCH_TAG, "Writing state for '%s': %s (register %d, mask 0x%04X)", 
+  // Parent is ready, execute immediately
+  this->write_state_internal_(state);
+}
+
+// New internal method that doesn't update UI (already updated above)
+void LuxPowerSwitch::write_state_internal_(bool state) {
+  ESP_LOGI(SWITCH_TAG, "Executing write for '%s': %s (register %d, mask 0x%04X)", 
            this->get_name().c_str(), state ? "ON" : "OFF", register_address_, bitmask_);
   
   pending_write_ = true;
@@ -91,21 +101,20 @@ void LuxPowerSwitch::write_state(bool state) {
       
       if (success) {
         ESP_LOGI(SWITCH_TAG, "Successfully wrote state for '%s'", this->get_name().c_str());
-        // Confirm the write by reading back the state after 2 seconds
-        this->set_timeout(2000, [this]() {
-          this->read_current_state_();
+        // Verify the write after a delay, but don't let it override UI immediately
+        this->set_timeout("verify_write", 3000, [this]() {
+          this->verify_write_result_();
         });
       } else {
-        ESP_LOGW(SWITCH_TAG, "Failed to write state for '%s'", this->get_name().c_str());
-        // Read current state to restore correct state in UI
-        this->set_timeout(1000, [this]() {
+        ESP_LOGW(SWITCH_TAG, "Failed to write state for '%s', reverting UI", this->get_name().c_str());
+        // Only revert UI on actual failure
+        this->set_timeout("revert_ui", 1000, [this]() {
           this->read_current_state_();
         });
       }
     });
   });
 }
-
 
 void LuxPowerSwitch::update_state_from_parent() {
   // Only update if we're not in the middle of a write operation
