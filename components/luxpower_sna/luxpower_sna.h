@@ -52,7 +52,7 @@ enum class ConnectionState {
   CONNECTED,
   REQUESTING_DATA,
   WAITING_RESPONSE,
-  ASYNC_OPERATION,
+  ASYNC_OPERATION,  // For single register operations
   ERROR
 };
 
@@ -298,6 +298,17 @@ class LuxpowerSNAComponent : public PollingComponent {
   bool send_packet_(const std::vector<uint8_t> &packet);
 
  private:
+  // New async operation methods
+  void process_single_async_request_();
+  void execute_single_read_request_(const AsyncRequest& request);
+  void execute_single_write_request_(const AsyncRequest& request);
+  void finish_async_operation_();
+  void cleanup_failed_async_request_();
+  
+  // Helper methods for single operations
+  std::vector<uint8_t> create_read_command_(uint16_t register_address, uint16_t count);
+  std::vector<uint8_t> create_write_command_(uint16_t register_address, uint16_t value);
+
   // Template input references
   template_::TemplateText *host_input_{nullptr};
   template_::TemplateNumber *port_input_{nullptr};
