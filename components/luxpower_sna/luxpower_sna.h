@@ -38,6 +38,13 @@
 #include <functional>
 #include <map>
 
+// Forward declarations
+namespace esphome {
+namespace luxpower_sna {
+class LuxPowerSwitch;
+}
+}
+
 namespace esphome {
 namespace luxpower_sna {
 
