@@ -61,11 +61,11 @@ void LuxPowerSwitch::write_state(bool state) {
     last_write_time_ = millis();
     
     // Store the desired state and retry after a short delay
-    this->set_timeout(2000, [this, state]() {
+    this->set_timeout("retry_write", 2000, [this, state]() {
       if (this->pending_write_) {
         ESP_LOGD(SWITCH_TAG, "Retrying queued write for '%s'", this->get_name().c_str());
-        this->pending_write_ = false; // Reset flag to allow retry
-        this->write_state(state); // Recursive call to retry
+        this->pending_write_ = false;
+        this->write_state(state);
       }
     });
     return;
