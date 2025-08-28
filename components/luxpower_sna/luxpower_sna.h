@@ -122,10 +122,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
   void loop() override;  // Non-blocking processing
-  
-  // for debuging
-  void debug_connection_state();
-  
+
   // Methods for switch support
   void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
   void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
@@ -334,9 +331,12 @@ class LuxpowerSNAComponent : public PollingComponent {
     uint16_t value;  // for write operations
     std::function<void(uint16_t)> read_callback;
     std::function<void(bool)> write_callback;
+    uint32_t timestamp;
   };
   std::vector<AsyncRequest> async_requests_;
   std::map<uint16_t, uint16_t> register_cache_;
+  bool processing_async_request_{false};
+  uint32_t async_request_start_time_{0};
 
   // Sensor pointer declarations
   text_sensor::TextSensor *lux_firmware_version_sensor_{nullptr};
