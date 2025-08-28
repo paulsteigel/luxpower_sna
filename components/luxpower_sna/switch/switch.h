@@ -101,6 +101,9 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
   uint16_t get_bitmask() const { return bitmask_; }
 
  protected:
+  void write_state_internal_(bool state);
+  void verify_write_result_();
+
   void write_state(bool state) override;
 
  private:
