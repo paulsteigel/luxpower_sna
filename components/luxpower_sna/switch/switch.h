@@ -73,7 +73,16 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
       parent_->register_switch(this);
     }
   }
-  void set_register_address(uint16_t reg) { register_address_ = reg; }
+ // Check if switch has pending operations
+  bool has_pending_operations() const { return pending_write_; }
+  
+  // Cancel any pending operations (useful for cleanup)
+  void cancel_pending_operations() { 
+    pending_write_ = false; 
+    this->cancel_timeout("retry_write");
+  }
+  
+ void set_register_address(uint16_t reg) { register_address_ = reg; }
   void set_bitmask(uint16_t mask) { bitmask_ = mask; }
 
   // Component lifecycle
