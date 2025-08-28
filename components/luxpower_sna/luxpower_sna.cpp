@@ -1,5 +1,6 @@
 // luxpower_sna.cpp
 #include "luxpower_sna.h"
+#include "switch/switch.h"
 
 namespace esphome {
 namespace luxpower_sna {
