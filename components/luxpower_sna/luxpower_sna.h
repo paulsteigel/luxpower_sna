@@ -43,6 +43,9 @@ namespace luxpower_sna {
 
 static const char *const TAG = "luxpower_sna";
 
+// Forward declaration (keep this)
+class LuxPowerSwitch;
+
 enum class ConnectionState {
   DISCONNECTED,
   CONNECTING,
