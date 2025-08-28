@@ -52,7 +52,7 @@ enum class ConnectionState {
   CONNECTED,
   REQUESTING_DATA,
   WAITING_RESPONSE,
-  ASYNC_OPERATION,  // NEW: For single register operations
+  ASYNC_OPERATION,
   ERROR
 };
 
