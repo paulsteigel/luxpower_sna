@@ -1,6 +1,5 @@
 // luxpower_sna.cpp
 #include "luxpower_sna.h"
-//#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace luxpower_sna {
@@ -27,6 +26,8 @@ void LuxpowerSNAComponent::setup() {
   state_start_time_ = 0;
   initialization_complete_ = false;
   expected_response_size_ = 0;
+  processing_async_request_ = false;
+  async_request_start_time_ = 0;
   
   // Reserve buffer space
   response_buffer_.reserve(512);
@@ -166,8 +167,8 @@ void LuxpowerSNAComponent::update() {
     return;
   }
   
-  // Only trigger new data collection if we're disconnected
-  if (connection_state_ == ConnectionState::DISCONNECTED) {
+  // Only trigger new data collection if we're disconnected and not processing async requests
+  if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
     // Validate runtime parameters from template inputs
     if (!validate_runtime_parameters_()) {
       ESP_LOGV(TAG, "Skipping update - input parameters not ready or invalid");
@@ -216,12 +217,9 @@ void LuxpowerSNAComponent::loop() {
       handle_error_state_();
       break;
   }
-
-  // ADD THIS: Process async requests when connected and not busy with main data collection
-  if (is_connection_ready() && !async_requests_.empty() && 
-      (connection_state_ == ConnectionState::CONNECTED || connection_state_ == ConnectionState::DISCONNECTED)) {
-    process_async_requests_();
-  }
+  
+  // Process async requests when disconnected
+  process_async_requests_();
 }
 
 void LuxpowerSNAComponent::handle_disconnected_state_() {
@@ -273,7 +271,32 @@ void LuxpowerSNAComponent::handle_connected_state_() {
     return;
   }
   
-  // Start data collection
+  // Handle async requests if we have any
+  if (processing_async_request_ && !async_requests_.empty()) {
+    AsyncRequest &request = async_requests_.front();
+    std::vector<uint8_t> packet;
+    
+    if (request.type == AsyncRequest::READ) {
+      packet = prepare_single_register_read_packet_(request.reg);
+      ESP_LOGD(TAG, "Sending async read request for register %d", request.reg);
+    } else {
+      packet = prepare_single_register_write_packet_(request.reg, request.value);
+      ESP_LOGD(TAG, "Sending async write request for register %d with value %d", request.reg, request.value);
+    }
+    
+    if (send_packet_(packet)) {
+      connection_state_ = ConnectionState::WAITING_RESPONSE;
+      state_start_time_ = millis();
+      response_buffer_.clear();
+      expected_response_size_ = 50; // Smaller expected size for single register operations
+    } else {
+      ESP_LOGW(TAG, "Failed to send async request packet");
+      connection_state_ = ConnectionState::ERROR;
+    }
+    return;
+  }
+  
+  // Start regular data collection if not processing async requests
   connection_state_ = ConnectionState::REQUESTING_DATA;
   bank_state_ = DataBankState::IDLE;
   current_bank_index_ = 0;
@@ -324,7 +347,11 @@ void LuxpowerSNAComponent::handle_waiting_response_state_() {
   // Check for timeout
   uint32_t now = millis();
   if (now - state_start_time_ > 5000) {
-    ESP_LOGW(TAG, "Response timeout for bank %d", banks_[current_bank_index_]);
+    if (processing_async_request_) {
+      ESP_LOGW(TAG, "Response timeout for async request");
+    } else {
+      ESP_LOGW(TAG, "Response timeout for bank %d", banks_[current_bank_index_]);
+    }
     connection_state_ = ConnectionState::ERROR;
     return;
   }
@@ -340,12 +367,20 @@ void LuxpowerSNAComponent::handle_waiting_response_state_() {
 
 void LuxpowerSNAComponent::handle_processing_response_state_() {
   if (process_received_data_()) {
-    ESP_LOGV(TAG, "Successfully processed bank %d (%d/5)", 
-             banks_[current_bank_index_], current_bank_index_ + 1);
-    current_bank_index_++;
-    connection_state_ = ConnectionState::REQUESTING_DATA;
+    if (processing_async_request_) {
+      ESP_LOGV(TAG, "Successfully processed async request");
+    } else {
+      ESP_LOGV(TAG, "Successfully processed bank %d (%d/5)", 
+               banks_[current_bank_index_], current_bank_index_ + 1);
+      current_bank_index_++;
+      connection_state_ = ConnectionState::REQUESTING_DATA;
+    }
   } else {
-    ESP_LOGW(TAG, "Failed to process response for bank %d", banks_[current_bank_index_]);
+    if (processing_async_request_) {
+      ESP_LOGW(TAG, "Failed to process async response");
+    } else {
+      ESP_LOGW(TAG, "Failed to process response for bank %d", banks_[current_bank_index_]);
+    }
     connection_state_ = ConnectionState::ERROR;
   }
 }
@@ -358,6 +393,22 @@ void LuxpowerSNAComponent::handle_error_state_() {
   connection_state_ = ConnectionState::DISCONNECTED;
   current_bank_index_ = 0;
   bank_state_ = DataBankState::IDLE;
+  
+  // Clean up async request state if needed
+  if (processing_async_request_) {
+    if (!async_requests_.empty()) {
+      AsyncRequest request = async_requests_.front();
+      async_requests_.erase(async_requests_.begin());
+      
+      // Call callback with failure
+      if (request.type == AsyncRequest::READ && request.read_callback) {
+        request.read_callback(0);
+      } else if (request.type == AsyncRequest::WRITE && request.write_callback) {
+        request.write_callback(false);
+      }
+    }
+    processing_async_request_ = false;
+  }
 }
 
 bool LuxpowerSNAComponent::start_connection_attempt_() {
@@ -579,11 +630,7 @@ bool LuxpowerSNAComponent::process_received_data_() {
   }
 
   LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData *>(response_buffer_.data() + sizeof(LuxHeader));
-  if (trans->deviceFunction != 0x04) {
-    ESP_LOGW(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
-    return false;
-  }
-
+  
   size_t total_size = response_buffer_.size();
   uint16_t crc_calc = calculate_crc_(response_buffer_.data() + sizeof(LuxHeader), total_size - sizeof(LuxHeader) - 2);
   uint16_t crc_received = response_buffer_[total_size - 2] | (response_buffer_[total_size - 1] << 8);
@@ -594,6 +641,49 @@ bool LuxpowerSNAComponent::process_received_data_() {
 
   size_t data_offset = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
   size_t data_size = total_size - data_offset - 2;
+  
+  // Handle async request responses
+  if (processing_async_request_ && !async_requests_.empty()) {
+    AsyncRequest request = async_requests_.front();
+    async_requests_.erase(async_requests_.begin());
+    processing_async_request_ = false;
+    
+    if (request.type == AsyncRequest::READ) {
+      // Extract register value from response
+      if (data_size >= 2) {
+        uint16_t value = response_buffer_[data_offset] | (response_buffer_[data_offset + 1] << 8);
+        register_cache_[request.reg] = value;
+        ESP_LOGD(TAG, "Read register %d: value = %d", request.reg, value);
+        
+        if (request.read_callback) {
+          request.read_callback(value);
+        }
+      } else {
+        ESP_LOGW(TAG, "Invalid read response size: %zu", data_size);
+        if (request.read_callback) {
+          request.read_callback(0);
+        }
+      }
+    } else {
+      // Write operation
+      ESP_LOGD(TAG, "Write to register %d completed", request.reg);
+      if (request.write_callback) {
+        request.write_callback(true);
+      }
+    }
+    
+    // Disconnect after async operation
+    disconnect_client_();
+    connection_state_ = ConnectionState::DISCONNECTED;
+    return true;
+  }
+  
+  // Handle regular data collection responses
+  if (trans->deviceFunction != 0x04) {
+    ESP_LOGW(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
+    return false;
+  }
+
   uint8_t bank = banks_[current_bank_index_];
   
   switch (bank) {
@@ -674,6 +764,180 @@ void LuxpowerSNAComponent::publish_sensor_(sensor::Sensor *sensor, float value) 
 
 void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor, const std::string &value) {
   if (sensor != nullptr) sensor->publish_state(value);
+}
+
+// Switch support methods
+void LuxpowerSNAComponent::read_register_async(uint16_t reg, std::function<void(uint16_t)> callback) {
+  AsyncRequest request;
+  request.type = AsyncRequest::READ;
+  request.reg = reg;
+  request.value = 0;
+  request.read_callback = callback;
+  request.timestamp = millis();
+  
+  async_requests_.push_back(request);
+  ESP_LOGD(TAG, "Queued async read request for register %d", reg);
+}
+
+void LuxpowerSNAComponent::write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback) {
+  AsyncRequest request;
+  request.type = AsyncRequest::WRITE;
+  request.reg = reg;
+  request.value = value;
+  request.write_callback = callback;
+  request.timestamp = millis();
+  
+  async_requests_.push_back(request);
+  ESP_LOGD(TAG, "Queued async write request for register %d with value %d", reg, value);
+}
+
+void LuxpowerSNAComponent::process_async_requests_() {
+  // Only process async requests when we're not doing regular data collection
+  if (connection_state_ != ConnectionState::DISCONNECTED || async_requests_.empty()) {
+    return;
+  }
+  
+  // Don't start new async operations too frequently
+  uint32_t now = millis();
+  static uint32_t last_async_attempt = 0;
+  if (now - last_async_attempt < 2000) { // 2 second minimum between async operations
+    return;
+  }
+  
+  if (processing_async_request_) {
+    // Check for timeout
+    if (now - async_request_start_time_ > 10000) { // 10 second timeout
+      ESP_LOGW(TAG, "Async request timed out, cleaning up");
+      processing_async_request_ = false;
+      disconnect_client_();
+      connection_state_ = ConnectionState::DISCONNECTED;
+    }
+    return;
+  }
+  
+  // Validate parameters before attempting connection
+  if (!validate_runtime_parameters_()) {
+    ESP_LOGV(TAG, "Cannot process async requests - parameters not ready");
+    return;
+  }
+  
+  ESP_LOGD(TAG, "Starting async request processing");
+  processing_async_request_ = true;
+  async_request_start_time_ = now;
+  last_async_attempt = now;
+  
+  // Start connection for async operation
+  if (start_connection_attempt_()) {
+    connection_state_ = ConnectionState::CONNECTING;
+    state_start_time_ = now;
+  } else {
+    processing_async_request_ = false;
+  }
+}
+
+std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_read_packet_(uint16_t reg) {
+  std::string dongle_serial = get_dongle_serial_from_input_();
+  std::string inverter_serial = get_inverter_serial_from_input_();
+  
+  std::vector<uint8_t> packet = {
+    0xA1, 0x1A,  // Prefix
+    0x02, 0x00,  // Protocol version
+    0x20, 0x00,  // Frame length (32)
+    0x01,        // Address
+    0xC2,        // Function (TRANSLATED_DATA)
+  };
+  
+  // Dongle serial (10 bytes)
+  packet.resize(18, 0);
+  std::memcpy(packet.data() + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
+  
+  // Data length
+  packet.push_back(0x12); // 18 bytes
+  packet.push_back(0x00);
+  
+  // Data frame
+  packet.push_back(0x00); // Address action (WRITE for compatibility)
+  packet.push_back(0x03); // Device function (READ_HOLD)
+  
+  // Inverter serial (10 bytes)
+  size_t serial_start = packet.size();
+  packet.resize(packet.size() + 10, 0);
+  std::memcpy(packet.data() + serial_start, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
+  
+  // Register address (little endian)
+  packet.push_back(reg & 0xFF);
+  packet.push_back((reg >> 8) & 0xFF);
+  
+  // Number of registers to read
+  packet.push_back(0x01); // 1 register
+  packet.push_back(0x00);
+  
+  // Calculate CRC for data frame (from byte 20 onwards)
+  uint16_t crc = calculate_crc_(packet.data() + 20, packet.size() - 20);
+  packet.push_back(crc & 0xFF);
+  packet.push_back((crc >> 8) & 0xFF);
+  
+  return packet;
+}
+
+std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_write_packet_(uint16_t reg, uint16_t value) {
+  std::string dongle_serial = get_dongle_serial_from_input_();
+  std::string inverter_serial = get_inverter_serial_from_input_();
+  
+  std::vector<uint8_t> packet = {
+    0xA1, 0x1A,  // Prefix
+    0x02, 0x00,  // Protocol version
+    0x20, 0x00,  // Frame length (32)
+    0x01,        // Address
+    0xC2,        // Function (TRANSLATED_DATA)
+  };
+  
+  // Dongle serial (10 bytes)
+  packet.resize(18, 0);
+  std::memcpy(packet.data() + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
+  
+  // Data length
+  packet.push_back(0x12); // 18 bytes
+  packet.push_back(0x00);
+  
+  // Data frame
+  packet.push_back(0x00); // Address action (WRITE)
+  packet.push_back(0x06); // Device function (WRITE_SINGLE)
+  
+  // Inverter serial (10 bytes)
+  size_t serial_start = packet.size();
+  packet.resize(packet.size() + 10, 0);
+  std::memcpy(packet.data() + serial_start, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
+  
+  // Register address (little endian)
+  packet.push_back(reg & 0xFF);
+  packet.push_back((reg >> 8) & 0xFF);
+  
+  // Value to write (little endian)
+  packet.push_back(value & 0xFF);
+  packet.push_back((value >> 8) & 0xFF);
+  
+  // Calculate CRC for data frame (from byte 20 onwards)
+  uint16_t crc = calculate_crc_(packet.data() + 20, packet.size() - 20);
+  packet.push_back(crc & 0xFF);
+  packet.push_back((crc >> 8) & 0xFF);
+  
+  return packet;
+}
+
+bool LuxpowerSNAComponent::send_packet_(const std::vector<uint8_t> &packet) {
+#ifdef USE_ESP_IDF
+  if (socket_fd_ < 0) {
+    return false;
+  }
+  
+  ssize_t written = send(socket_fd_, packet.data(), packet.size(), 0);
+  return written == static_cast<ssize_t>(packet.size());
+#else
+  size_t written = client_.write(packet.data(), packet.size());
+  client_.flush();
+  return written == packet.size();
+#endif
 }
 
 // Process_sectionX_ methods for publishing data to sensors 
@@ -823,178 +1087,6 @@ void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) 
   publish_sensor_(e_load_all_l_sensor_, data.e_load_all_l / 10.0f);
 }
 
-// ===============================
-// NEW METHODS FOR SWITCH SUPPORT
-// ===============================
-/*
-bool LuxpowerSNAComponent::is_connection_ready() const {
-#ifdef USE_ESP_IDF
-  return socket_fd_ >= 0;
-#else
-  return client_.connected();
-#endif
-}
-*/
-void LuxpowerSNAComponent::read_register_async(uint16_t reg, std::function<void(uint16_t)> callback) {
-  // Check cache first
-  auto it = register_cache_.find(reg);
-  if (it != register_cache_.end()) {
-    ESP_LOGD(TAG, "Returning cached register %d: 0x%04X", reg, it->second);
-    if (callback) callback(it->second);
-    return;
-  }
-  
-  // Queue async read request
-  AsyncRequest req;
-  req.type = AsyncRequest::READ;
-  req.reg = reg;
-  req.read_callback = callback;
-  async_requests_.push_back(req);
-  
-  ESP_LOGD(TAG, "Queued async read for register %d", reg);
-}
-
-void LuxpowerSNAComponent::write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback) {
-  // Queue async write request
-  AsyncRequest req;
-  req.type = AsyncRequest::WRITE;
-  req.reg = reg;
-  req.value = value;
-  req.write_callback = callback;
-  async_requests_.push_back(req);
-  
-  ESP_LOGD(TAG, "Queued async write for register %d: 0x%04X", reg, value);
-}
-
-void LuxpowerSNAComponent::process_async_requests_() {
-  if (async_requests_.empty()) return;
-  
-  // Process one request at a time
-  auto req = async_requests_.front();
-  async_requests_.erase(async_requests_.begin());
-  
-  if (req.type == AsyncRequest::READ) {
-    ESP_LOGD(TAG, "Processing async read for register %d", req.reg);
-    
-    auto packet = prepare_single_register_read_packet_(req.reg);
-    if (send_packet_(packet)) {
-      // For now, simulate reading from cache or return 0
-      uint16_t value = 0;
-      auto it = register_cache_.find(req.reg);
-      if (it != register_cache_.end()) {
-        value = it->second;
-      }
-      if (req.read_callback) {
-        req.read_callback(value);
-      }
-    } else {
-      ESP_LOGW(TAG, "Failed to send read packet for register %d", req.reg);
-      if (req.read_callback) {
-        req.read_callback(0);
-      }
-    }
-    
-  } else if (req.type == AsyncRequest::WRITE) {
-    ESP_LOGD(TAG, "Processing async write for register %d: 0x%04X", req.reg, req.value);
-    
-    auto packet = prepare_single_register_write_packet_(req.reg, req.value);
-    bool success = send_packet_(packet);
-    
-    if (success) {
-      // Update cache
-      register_cache_[req.reg] = req.value;
-    }
-    
-    if (req.write_callback) {
-      req.write_callback(success);
-    }
-  }
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_read_packet_(uint16_t reg) {
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
-  std::vector<uint8_t> packet = {
-    0xA1, 0x1A, 0x02, 0x00, 0x20, 0x00, 0x01, 0xC2,
-    0,0,0,0,0,0,0,0,0,0, // dongle serial (10 bytes)
-    0x12, 0x00, 0x00, 0x03, // function code for single register read
-    0,0,0,0,0,0,0,0,0,0, // inverter serial (10 bytes)
-    static_cast<uint8_t>(reg & 0xFF), static_cast<uint8_t>(reg >> 8), // register address
-    0x01, 0x00, // read 1 register
-    0x00, 0x00  // CRC placeholder
-  };
-  
-  // Copy serial numbers
-  memset(packet.data() + 8, 0, 10);
-  memset(packet.data() + 22, 0, 10);
-  memcpy(packet.data() + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
-  memcpy(packet.data() + 22, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
-  
-  // Calculate and set CRC
-  uint16_t crc = calculate_crc_(packet.data() + 20, packet.size() - 20 - 2);
-  packet[packet.size() - 2] = crc & 0xFF;
-  packet[packet.size() - 1] = crc >> 8;
-  
-  return packet;
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_write_packet_(uint16_t reg, uint16_t value) {
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
-  std::vector<uint8_t> packet = {
-    0xA1, 0x1A, 0x02, 0x00, 0x22, 0x00, 0x01, 0xC2,
-    0,0,0,0,0,0,0,0,0,0, // dongle serial (10 bytes)
-    0x14, 0x00, 0x00, 0x06, // function code for single register write
-    0,0,0,0,0,0,0,0,0,0, // inverter serial (10 bytes)
-    static_cast<uint8_t>(reg & 0xFF), static_cast<uint8_t>(reg >> 8), // register address
-    static_cast<uint8_t>(value & 0xFF), static_cast<uint8_t>(value >> 8), // value to write
-    0x00, 0x00  // CRC placeholder
-  };
-  
-  // Copy serial numbers
-  memset(packet.data() + 8, 0, 10);
-  memset(packet.data() + 22, 0, 10);
-  memcpy(packet.data() + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
-  memcpy(packet.data() + 22, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
-  
-  // Calculate and set CRC
-  uint16_t crc = calculate_crc_(packet.data() + 20, packet.size() - 20 - 2);
-  packet[packet.size() - 2] = crc & 0xFF;
-  packet[packet.size() - 1] = crc >> 8;
-  
-  return packet;
-}
-
-bool LuxpowerSNAComponent::send_packet_(const std::vector<uint8_t> &packet) {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
-  
-  ssize_t written = send(socket_fd_, packet.data(), packet.size(), 0);
-  return written == static_cast<ssize_t>(packet.size());
-
-#else
-  size_t written = client_.write(packet.data(), packet.size());
-  client_.flush();
-  return written == packet.size();
-#endif
-}
-  
-void LuxpowerSNAComponent::debug_connection_state() {
-  ESP_LOGD(TAG, "Connection state debug:");
-  ESP_LOGD(TAG, "  Current state: %s", get_state_name_(connection_state_));
-  ESP_LOGD(TAG, "  State enum value: %d", static_cast<int>(connection_state_));
-  ESP_LOGD(TAG, "  CONNECTED enum value: %d", static_cast<int>(ConnectionState::CONNECTED));
-  ESP_LOGD(TAG, "  is_connection_ready(): %s", is_connection_ready() ? "true" : "false");
-#ifdef USE_ESP_IDF
-  ESP_LOGD(TAG, "  Socket FD: %d", socket_fd_);
-#else
-  ESP_LOGD(TAG, "  WiFiClient connected: %s", client_.connected() ? "true" : "false");
-#endif
-}
-  
 }  // namespace luxpower_sna
 }  // namespace esphome
+
