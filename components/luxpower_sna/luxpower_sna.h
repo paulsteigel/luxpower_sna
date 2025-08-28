@@ -122,7 +122,10 @@ class LuxpowerSNAComponent : public PollingComponent {
   void dump_config() override;
   void update() override;
   void loop() override;  // Non-blocking processing
-
+  
+  // for debuging
+  void debug_connection_state();
+  
   // Methods for switch support
   void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
   void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
