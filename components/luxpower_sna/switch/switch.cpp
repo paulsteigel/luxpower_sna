@@ -47,13 +47,27 @@ void LuxPowerSwitch::write_state(bool state) {
     return;
   }
   
-  if (!parent_->is_connection_ready()) {
-    ESP_LOGW(SWITCH_TAG, "Cannot write state for '%s' - parent not ready", this->get_name().c_str());
+  if (pending_write_) {
+    ESP_LOGW(SWITCH_TAG, "Write already pending for '%s', ignoring new request", this->get_name().c_str());
     return;
   }
   
-  if (pending_write_) {
-    ESP_LOGW(SWITCH_TAG, "Write already pending for '%s', ignoring new request", this->get_name().c_str());
+  if (!parent_->is_connection_ready()) {
+    ESP_LOGI(SWITCH_TAG, "Parent busy, queuing write for '%s': %s", 
+             this->get_name().c_str(), state ? "ON" : "OFF");
+    
+    // Queue the write operation to retry when parent becomes available
+    pending_write_ = true;
+    last_write_time_ = millis();
+    
+    // Store the desired state and retry after a short delay
+    this->set_timeout(2000, [this, state]() {
+      if (this->pending_write_) {
+        ESP_LOGD(SWITCH_TAG, "Retrying queued write for '%s'", this->get_name().c_str());
+        this->pending_write_ = false; // Reset flag to allow retry
+        this->write_state(state); // Recursive call to retry
+      }
+    });
     return;
   }
   
@@ -91,6 +105,7 @@ void LuxPowerSwitch::write_state(bool state) {
     });
   });
 }
+
 
 void LuxPowerSwitch::update_state_from_parent() {
   // Only update if we're not in the middle of a write operation
