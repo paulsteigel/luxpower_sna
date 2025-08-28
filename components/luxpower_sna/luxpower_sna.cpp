@@ -274,11 +274,9 @@ void LuxpowerSNAComponent::loop() {
       break;
     
     case ConnectionState::ASYNC_OPERATION:
-      if (client_ && client_->connected()) {
-        // Process ONLY the single async request, don't start data collection
+      if (tcp_client_ && tcp_client_->connected()) {  // Use tcp_client_ not client_
         process_single_async_request_();
       } else {
-        // Connection failed
         ESP_LOGW(TAG, "Connection failed during async operation");
         cleanup_failed_async_request_();
       }
@@ -335,6 +333,42 @@ void LuxpowerSNAComponent::execute_single_read_request_(const AsyncRequest& requ
     if (request.read_callback) request.read_callback(0);
     finish_async_operation_();
   });
+}
+
+std::vector<uint8_t> LuxpowerSNAComponent::create_read_command_(uint16_t register_address, uint16_t count) {
+  // Create a minimal Modbus RTU read holding registers command
+  std::vector<uint8_t> command;
+  command.push_back(0x01); // Device ID
+  command.push_back(0x03); // Function code: Read Holding Registers
+  command.push_back((register_address >> 8) & 0xFF); // Start address high
+  command.push_back(register_address & 0xFF);        // Start address low
+  command.push_back((count >> 8) & 0xFF);            // Count high
+  command.push_back(count & 0xFF);                   // Count low
+  
+  // Add CRC16 (you'll need to implement this or use existing CRC function)
+  uint16_t crc = calculate_crc16_(command.data(), command.size());
+  command.push_back(crc & 0xFF);        // CRC low
+  command.push_back((crc >> 8) & 0xFF); // CRC high
+  
+  return command;
+}
+
+std::vector<uint8_t> LuxpowerSNAComponent::create_write_command_(uint16_t register_address, uint16_t value) {
+  // Create a minimal Modbus RTU write single register command
+  std::vector<uint8_t> command;
+  command.push_back(0x01); // Device ID
+  command.push_back(0x06); // Function code: Write Single Register
+  command.push_back((register_address >> 8) & 0xFF); // Register address high
+  command.push_back(register_address & 0xFF);        // Register address low
+  command.push_back((value >> 8) & 0xFF);            // Value high
+  command.push_back(value & 0xFF);                   // Value low
+  
+  // Add CRC16
+  uint16_t crc = calculate_crc16_(command.data(), command.size());
+  command.push_back(crc & 0xFF);        // CRC low
+  command.push_back((crc >> 8) & 0xFF); // CRC high
+  
+  return command;
 }
 
 void LuxpowerSNAComponent::execute_single_write_request_(const AsyncRequest& request) {
