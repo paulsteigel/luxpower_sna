@@ -826,7 +826,7 @@ void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) 
 // ===============================
 // NEW METHODS FOR SWITCH SUPPORT
 // ===============================
-
+/*
 bool LuxpowerSNAComponent::is_connection_ready() const {
 #ifdef USE_ESP_IDF
   return socket_fd_ >= 0;
@@ -834,7 +834,7 @@ bool LuxpowerSNAComponent::is_connection_ready() const {
   return client_.connected();
 #endif
 }
-
+*/
 void LuxpowerSNAComponent::read_register_async(uint16_t reg, std::function<void(uint16_t)> callback) {
   // Check cache first
   auto it = register_cache_.find(reg);
@@ -982,6 +982,19 @@ bool LuxpowerSNAComponent::send_packet_(const std::vector<uint8_t> &packet) {
   return written == packet.size();
 #endif
 }
-
+  
+void LuxpowerSNAComponent::debug_connection_state() {
+  ESP_LOGD(TAG, "Connection state debug:");
+  ESP_LOGD(TAG, "  Current state: %s", get_state_name_(connection_state_));
+  ESP_LOGD(TAG, "  State enum value: %d", static_cast<int>(connection_state_));
+  ESP_LOGD(TAG, "  CONNECTED enum value: %d", static_cast<int>(ConnectionState::CONNECTED));
+  ESP_LOGD(TAG, "  is_connection_ready(): %s", is_connection_ready() ? "true" : "false");
+#ifdef USE_ESP_IDF
+  ESP_LOGD(TAG, "  Socket FD: %d", socket_fd_);
+#else
+  ESP_LOGD(TAG, "  WiFiClient connected: %s", client_.connected() ? "true" : "false");
+#endif
+}
+  
 }  // namespace luxpower_sna
 }  // namespace esphome
