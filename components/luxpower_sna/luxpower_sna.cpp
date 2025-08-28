@@ -190,35 +190,59 @@ void LuxpowerSNAComponent::update_all_entity_states() {
 }
 
 void LuxpowerSNAComponent::update() {
+  static uint32_t last_update_time = 0;
+  uint32_t now = millis();
+  uint32_t actual_interval = now - last_update_time;
+  last_update_time = now;
+  
+  ESP_LOGI(TAG, "UPDATE CALLED - Actual interval: %lu ms (expected: %lu ms)", 
+           actual_interval, this->get_update_interval());
+  
   if (!initialization_complete_) {
     ESP_LOGW(TAG, "Skipping update - component not properly initialized");
     return;
   }
   
-  // Only trigger new data collection if we're disconnected and not processing async requests
-  if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
-    // Validate runtime parameters from template inputs
-    if (!validate_runtime_parameters_()) {
-      ESP_LOGV(TAG, "Skipping update - input parameters not ready or invalid");
-      return;
-    }
+  // Only start data collection if we're truly disconnected and not busy
+  if (connection_state_ != ConnectionState::DISCONNECTED || processing_async_request_) {
+    ESP_LOGD(TAG, "Skipping update - connection busy (state: %s, async: %s)", 
+             get_state_name_(connection_state_), processing_async_request_ ? "yes" : "no");
+    return;
+  }
+  
+  // Validate runtime parameters from template inputs
+  if (!validate_runtime_parameters_()) {
+    ESP_LOGV(TAG, "Skipping update - input parameters not ready or invalid");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "=== Starting sensor data collection cycle (interval: %.1fs) ===", 
+           this->get_update_interval() / 1000.0f);
+  
+  // Reset state machine for new data collection
+  current_bank_index_ = 0;
+  bank_state_ = DataBankState::IDLE;
+  
+  // Start the connection process by moving to CONNECTING state
+  // The loop() method will handle the actual connection
+  if (start_connection_attempt_()) {
+    connection_state_ = ConnectionState::CONNECTING;
+    state_start_time_ = millis();
+    last_connection_attempt_ = millis();
     
-    ESP_LOGD(TAG, "Starting new data collection cycle (interval: %.1fs)", this->get_update_interval() / 1000.0f);
-    connection_state_ = ConnectionState::DISCONNECTED; // Will be handled in loop()
-    
-    // Schedule entity state updates after sensor data collection completes
-    // Use a reasonable delay to ensure sensor data collection is done
-    this->set_timeout(15000, [this]() {  // 15 seconds should be enough for sensor collection
+    // Schedule entity state updates AFTER this data collection completes
+    // This will run in 25 seconds, giving plenty of time for data collection
+    this->set_timeout("entity_updates", 25000, [this]() {
       if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
         ESP_LOGD(TAG, "Starting scheduled entity state updates");
         this->update_all_entity_states();
       } else {
-        ESP_LOGV(TAG, "Skipping entity updates - connection still busy");
+        ESP_LOGW(TAG, "Skipping entity updates - connection still busy (state: %s)", 
+                 get_state_name_(connection_state_));
       }
     });
-    
   } else {
-    ESP_LOGV(TAG, "Data collection already in progress, state: %s", get_state_name_(connection_state_));
+    ESP_LOGW(TAG, "Failed to start connection attempt");
   }
 }
 
@@ -832,25 +856,47 @@ void LuxpowerSNAComponent::write_register_async(uint16_t reg, uint16_t value, st
 }
 
 void LuxpowerSNAComponent::process_async_requests_() {
-  // Only process async requests when we're not doing regular data collection
+  // Only process async requests when completely idle
   if (connection_state_ != ConnectionState::DISCONNECTED || async_requests_.empty()) {
     return;
   }
   
-  // Don't start new async operations too frequently
+  // Don't interfere with regular sensor data collection
   uint32_t now = millis();
   static uint32_t last_async_attempt = 0;
-  if (now - last_async_attempt < 2000) { // 2 second minimum between async operations
+  
+  // Wait longer between async operations to be gentler on the inverter
+  if (now - last_async_attempt < 5000) { // 5 second minimum between async operations
+    return;
+  }
+  
+  // Don't start async requests too close to the next scheduled sensor update
+  uint32_t time_until_next_update = this->get_update_interval() - (now % this->get_update_interval());
+  if (time_until_next_update < 10000) { // Don't start if next update is within 10 seconds
+    ESP_LOGV(TAG, "Delaying async request - next sensor update in %lu seconds", 
+             time_until_next_update / 1000);
     return;
   }
   
   if (processing_async_request_) {
     // Check for timeout
-    if (now - async_request_start_time_ > 10000) { // 10 second timeout
+    if (now - async_request_start_time_ > 15000) { // 15 second timeout
       ESP_LOGW(TAG, "Async request timed out, cleaning up");
       processing_async_request_ = false;
       disconnect_client_();
       connection_state_ = ConnectionState::DISCONNECTED;
+      
+      // Clean up the failed request
+      if (!async_requests_.empty()) {
+        AsyncRequest request = async_requests_.front();
+        async_requests_.erase(async_requests_.begin());
+        
+        if (request.type == AsyncRequest::READ && request.read_callback) {
+          request.read_callback(0);
+        } else if (request.type == AsyncRequest::WRITE && request.write_callback) {
+          request.write_callback(false);
+        }
+      }
     }
     return;
   }
@@ -861,7 +907,7 @@ void LuxpowerSNAComponent::process_async_requests_() {
     return;
   }
   
-  ESP_LOGD(TAG, "Starting async request processing");
+  ESP_LOGD(TAG, "Starting async request processing (%zu requests queued)", async_requests_.size());
   processing_async_request_ = true;
   async_request_start_time_ = now;
   last_async_attempt = now;
@@ -871,9 +917,11 @@ void LuxpowerSNAComponent::process_async_requests_() {
     connection_state_ = ConnectionState::CONNECTING;
     state_start_time_ = now;
   } else {
+    ESP_LOGW(TAG, "Failed to start connection for async request");
     processing_async_request_ = false;
   }
 }
+
 
 std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_read_packet_(uint16_t reg) {
   std::string dongle_serial = get_dongle_serial_from_input_();
