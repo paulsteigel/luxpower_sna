@@ -7,7 +7,9 @@
 namespace esphome {
 namespace luxpower_sna {
 
-// All bit definitions in the switch component where they're used
+static const char *const SWITCH_TAG = "luxpower_sna.switch";
+
+// All bit definitions for register-based switches
 static const uint16_t FEED_IN_GRID = 1 << 15;
 static const uint16_t DCI_ENABLE = 1 << 14;
 static const uint16_t GFCI_ENABLE = 1 << 13;
@@ -63,8 +65,14 @@ static const uint16_t R179_UNKNOWN_BIT_00 = 1 << 0;
 
 class LuxPowerSwitch : public switch_::Switch, public Component {
  public:
-  // Configuration methods
-  void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
+  // Configuration methods (called from YAML configuration)
+  void set_parent(LuxpowerSNAComponent *parent) { 
+    parent_ = parent; 
+    // Auto-register with parent for centralized updates
+    if (parent_) {
+      parent_->register_switch(this);
+    }
+  }
   void set_register_address(uint16_t reg) { register_address_ = reg; }
   void set_bitmask(uint16_t mask) { bitmask_ = mask; }
 
@@ -72,6 +80,16 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
   void setup() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
+
+  // Called by parent component during centralized updates
+  void update_state_from_parent();
+  
+  // Check if switch is currently processing a write operation
+  bool is_pending_write() const { return pending_write_; }
+  
+  // Get configuration for debugging
+  uint16_t get_register_address() const { return register_address_; }
+  uint16_t get_bitmask() const { return bitmask_; }
 
  protected:
   void write_state(bool state) override;
@@ -89,6 +107,7 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
   uint16_t prepare_binary_value_(uint16_t old_value, uint16_t mask, bool enable);
   void read_current_state_();
   void update_state_from_register_(uint16_t reg_value);
+  void handle_write_result_(bool success);
 };
 
 }  // namespace luxpower_sna
