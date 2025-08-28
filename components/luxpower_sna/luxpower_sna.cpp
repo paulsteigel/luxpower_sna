@@ -1,7 +1,5 @@
 // luxpower_sna.cpp
 #include "luxpower_sna.h"
-#include "switch/switch.h"
-
 namespace esphome {
 namespace luxpower_sna {
 
@@ -10,7 +8,6 @@ const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
   "Battery Discharging > LOAD - Surplus > Grid", "Temperature Over Range", "", "", "Solar + Battery Discharging > LOAD - Surplus > Grid", "", "", "", "", "", "", "", "AC Battery Charging", "", "", "", "", "", "Solar + Grid > Battery Charging",
   "", "", "", "", "", "", "", "", "", "No Grid : Battery > EPS", "", "", "", "", "", "", "", "", "No Grid : Solar > EPS - Surplus > Battery Charging", "", "", "", "", "No Grid : Solar + Battery Discharging > EPS"
 };
-
 const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
   "Charge Forbidden & Discharge Forbidden", "Unknown", "Charge Forbidden & Discharge Allowed", "Charge Allowed & Discharge Allowed",
   "", "", "", "", "", "", "", "", "", "", "", "", "Charge Allowed & Discharge Forbidden"
@@ -18,929 +15,113 @@ const char *LuxpowerSNAComponent::BATTERY_STATUS_TEXTS[17] = {
 
 void LuxpowerSNAComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Luxpower SNA component...");
-  
-  // Initialize state
-  connection_state_ = ConnectionState::DISCONNECTED;
-  bank_state_ = DataBankState::IDLE;
-  current_bank_index_ = 0;
-  last_connection_attempt_ = 0;
-  state_start_time_ = 0;
-  initialization_complete_ = false;
-  expected_response_size_ = 0;
-  processing_async_request_ = false;
-  async_request_start_time_ = 0;
-  
-  // Reserve buffer space
-  response_buffer_.reserve(512);
-
-#ifdef USE_ESP_IDF
-  socket_fd_ = -1;
-  memset(&server_addr_, 0, sizeof(server_addr_));
-#endif
-  
-  // Validate that required input components are configured
-  if (host_input_ == nullptr) {
-    ESP_LOGE(TAG, "Host input not configured - component will not function");
-    mark_failed();
-    return;
-  }
-  if (port_input_ == nullptr) {
-    ESP_LOGE(TAG, "Port input not configured - component will not function");
-    mark_failed();
-    return;
-  }
-  if (dongle_serial_input_ == nullptr) {
-    ESP_LOGE(TAG, "Dongle serial input not configured - component will not function");
-    mark_failed();
-    return;
-  }
-  if (inverter_serial_input_ == nullptr) {
-    ESP_LOGE(TAG, "Inverter serial input not configured - component will not function");
-    mark_failed();
-    return;
-  }
-  
-  ESP_LOGCONFIG(TAG, "Component initialized successfully");
-  initialization_complete_ = true;
-}
-
-bool LuxpowerSNAComponent::validate_runtime_parameters_() {
-  bool valid = true;
-  
-  // Get current values from template inputs
-  std::string host = get_host_from_input_();
-  uint16_t port = get_port_from_input_();
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
-  if (host.empty()) {
-    ESP_LOGV(TAG, "Host input is empty");
-    valid = false;
-  }
-  
-  if (port == 0) {
-    ESP_LOGV(TAG, "Port input is 0");
-    valid = false;
-  }
-  
-  if (dongle_serial.empty()) {
-    ESP_LOGV(TAG, "Dongle serial input is empty");
-    valid = false;
-  } else if (dongle_serial.length() != 10) {
-    ESP_LOGW(TAG, "Dongle serial must be exactly 10 characters, got %zu: '%s'", 
-             dongle_serial.length(), dongle_serial.c_str());
-    valid = false;
-  }
-  
-  if (inverter_serial.empty()) {
-    ESP_LOGV(TAG, "Inverter serial input is empty");
-    valid = false;
-  } else if (inverter_serial.length() != 10) {
-    ESP_LOGW(TAG, "Inverter serial must be exactly 10 characters, got %zu: '%s'", 
-             inverter_serial.length(), inverter_serial.c_str());
-    valid = false;
-  }
-  
-  return valid;
-}
-
-std::string LuxpowerSNAComponent::get_host_from_input_() {
-  if (host_input_ != nullptr && host_input_->has_state()) {
-    return host_input_->state;
-  }
-  return "";
-}
-
-uint16_t LuxpowerSNAComponent::get_port_from_input_() {
-  if (port_input_ != nullptr && port_input_->has_state()) {
-    float port_val = port_input_->state;
-    if (port_val > 0 && port_val <= 65535) {
-      return static_cast<uint16_t>(port_val);
-    }
-  }
-  return 0;
-}
-
-std::string LuxpowerSNAComponent::get_dongle_serial_from_input_() {
-  if (dongle_serial_input_ != nullptr && dongle_serial_input_->has_state()) {
-    return dongle_serial_input_->state;
-  }
-  return "";
-}
-
-std::string LuxpowerSNAComponent::get_inverter_serial_from_input_() {
-  if (inverter_serial_input_ != nullptr && inverter_serial_input_->has_state()) {
-    return inverter_serial_input_->state;
-  }
-  return "";
 }
 
 void LuxpowerSNAComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Luxpower SNA:");
-  
-  if (!initialization_complete_) {
-    ESP_LOGCONFIG(TAG, "  Status: FAILED - Component not initialized");
-    return;
-  }
-  
-  // Show current input values
-  std::string host = get_host_from_input_();
-  uint16_t port = get_port_from_input_();
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
-  ESP_LOGCONFIG(TAG, "  Host: %s", host.empty() ? "Not set" : host.c_str());
-  ESP_LOGCONFIG(TAG, "  Port: %u", port);
-  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", dongle_serial.empty() ? "Not set" : dongle_serial.c_str());
-  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", inverter_serial.empty() ? "Not set" : inverter_serial.c_str());
-  ESP_LOGCONFIG(TAG, "  Update Interval: %.1fs", this->get_update_interval() / 1000.0f);
-  ESP_LOGCONFIG(TAG, "  Current State: %s", get_state_name_(connection_state_));
-#ifdef USE_ESP_IDF
-  ESP_LOGCONFIG(TAG, "  Framework: ESP-IDF");
-#else
-  ESP_LOGCONFIG(TAG, "  Framework: Arduino");
-#endif
-}
-
-void LuxpowerSNAComponent::update_all_entity_states() {
-  if (connection_state_ != ConnectionState::DISCONNECTED || processing_async_request_) {
-    ESP_LOGV(TAG, "Skipping entity state updates - connection busy");
-    return;
-  }
-  
-  if (registered_switches_.empty()) {
-    ESP_LOGV(TAG, "No registered switches to update");
-    return;
-  }
-  
-  ESP_LOGD(TAG, "Updating %d switch states (respecting %.1fs interval)", 
-           registered_switches_.size(), this->get_update_interval() / 1000.0f);
-  
-  // Update switches with staggered timing to be gentle on the inverter
-  for (size_t i = 0; i < registered_switches_.size(); i++) {
-    auto* switch_ptr = registered_switches_[i];
-    if (switch_ptr) {
-      // Stagger the reads: 0ms, 500ms, 1000ms, 1500ms, etc.
-      this->set_timeout(i * 500, [switch_ptr]() {
-        ESP_LOGV(TAG, "Centralized update for switch");
-        switch_ptr->update_state_from_parent();
-      });
-    }
-  }
+  ESP_LOGCONFIG(TAG, "  Host: %s:%u", host_.c_str(), port_);
+  ESP_LOGCONFIG(TAG, "  Dongle Serial: %s", dongle_serial_.c_str());
+  ESP_LOGCONFIG(TAG, "  Inverter Serial: %s", inverter_serial_.c_str());
 }
 
 void LuxpowerSNAComponent::update() {
-  static uint32_t last_update_time = 0;
-  uint32_t now = millis();
-  uint32_t actual_interval = now - last_update_time;
-  last_update_time = now;
-  
-  ESP_LOGI(TAG, "UPDATE CALLED - Actual interval: %lu ms (expected: %lu ms)", 
-           actual_interval, this->get_update_interval());
-  
-  if (!initialization_complete_) {
-    ESP_LOGW(TAG, "Skipping update - component not properly initialized");
+  ESP_LOGD(TAG, "Starting new update cycle.");
+
+  if (!client_.connect(host_.c_str(), port_)) {
+    ESP_LOGW(TAG, "Connection to %s:%u failed. Skipping update.", host_.c_str(), port_);
     return;
   }
-  
-  // Only start data collection if we're truly disconnected and not busy
-  if (connection_state_ != ConnectionState::DISCONNECTED || processing_async_request_) {
-    ESP_LOGD(TAG, "Skipping update - connection busy (state: %s, async: %s)", 
-             get_state_name_(connection_state_), processing_async_request_ ? "yes" : "no");
-    return;
-  }
-  
-  // Validate runtime parameters from template inputs
-  if (!validate_runtime_parameters_()) {
-    ESP_LOGV(TAG, "Skipping update - input parameters not ready or invalid");
-    return;
-  }
-  
-  ESP_LOGI(TAG, "=== Starting sensor data collection cycle (interval: %.1fs) ===", 
-           this->get_update_interval() / 1000.0f);
-  
-  // Reset state machine for new data collection
-  current_bank_index_ = 0;
-  bank_state_ = DataBankState::IDLE;
-  
-  // Start the connection process by moving to CONNECTING state
-  // The loop() method will handle the actual connection
-  if (start_connection_attempt_()) {
-    connection_state_ = ConnectionState::CONNECTING;
-    state_start_time_ = millis();
-    last_connection_attempt_ = millis();
+
+  ESP_LOGD(TAG, "Connection successful. Polling all banks.");
+  bool all_banks_successful = true;
+
+  for (uint8_t bank : banks_) {
+    request_bank_(bank);
     
-    // Schedule entity state updates AFTER this data collection completes
-    // This will run in 25 seconds, giving plenty of time for data collection
-    this->set_timeout("entity_updates", 25000, [this]() {
-      if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
-        ESP_LOGD(TAG, "Starting scheduled entity state updates");
-        this->update_all_entity_states();
-      } else {
-        ESP_LOGW(TAG, "Skipping entity updates - connection still busy (state: %s)", 
-                 get_state_name_(connection_state_));
-      }
-    });
-  } else {
-    ESP_LOGW(TAG, "Failed to start connection attempt");
-  }
-}
-
-void LuxpowerSNAComponent::loop() {
-  if (!initialization_complete_) {
-    return;
-  }
-  
-  // Non-blocking state machine - runs every loop iteration
-  switch (connection_state_) {
-    case ConnectionState::DISCONNECTED:
-      handle_disconnected_state_();
-      break;
-      
-    case ConnectionState::CONNECTING:
-      handle_connecting_state_();
-      break;
-      
-    case ConnectionState::CONNECTED:
-      handle_connected_state_();
-      break;
-      
-    case ConnectionState::REQUESTING_DATA:
-      handle_requesting_data_state_();
-      break;
-      
-    case ConnectionState::WAITING_RESPONSE:
-      handle_waiting_response_state_();
-      break;
-    
-    case ConnectionState::ASYNC_OPERATION:
-      if (tcp_client_ && tcp_client_->connected()) {  // Use tcp_client_ not client_
-        process_single_async_request_();
-      } else {
-        ESP_LOGW(TAG, "Connection failed during async operation");
-        cleanup_failed_async_request_();
-      }
-      break;
-    
-    case ConnectionState::ERROR:
-      handle_error_state_();
-      break;
-  }
-  
-  // Process async requests when disconnected
-  process_async_requests_();
-}
-
-void LuxpowerSNAComponent::process_single_async_request_() {
-  if (async_requests_.empty()) {
-    ESP_LOGW(TAG, "No async requests to process");
-    disconnect_client_();
-    connection_state_ = ConnectionState::DISCONNECTED;
-    processing_async_request_ = false;
-    return;
-  }
-  
-  AsyncRequest request = async_requests_.front();
-  async_requests_.erase(async_requests_.begin());
-  
-  ESP_LOGD(TAG, "Executing single %s request for register %d", 
-           request.type == AsyncRequest::READ ? "READ" : "WRITE", 
-           request.register_address);
-  
-  if (request.type == AsyncRequest::READ) {
-    // Single register read
-    execute_single_read_request_(request);
-  } else if (request.type == AsyncRequest::WRITE) {
-    // Single register write  
-    execute_single_write_request_(request);
-  }
-}
-
-void LuxpowerSNAComponent::execute_single_read_request_(const AsyncRequest& request) {
-  // Create a minimal read request for just this register
-  std::vector<uint8_t> read_command = create_read_command_(request.register_address, 1);
-  
-  if (!send_command_(read_command)) {
-    ESP_LOGW(TAG, "Failed to send single read command");
-    if (request.read_callback) request.read_callback(0);
-    finish_async_operation_();
-    return;
-  }
-  
-  // Set up response handling
-  this->set_timeout("single_read_timeout", 5000, [this, request]() {
-    ESP_LOGW(TAG, "Single read request timed out");
-    if (request.read_callback) request.read_callback(0);
-    finish_async_operation_();
-  });
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::create_read_command_(uint16_t register_address, uint16_t count) {
-  // Create a minimal Modbus RTU read holding registers command
-  std::vector<uint8_t> command;
-  command.push_back(0x01); // Device ID
-  command.push_back(0x03); // Function code: Read Holding Registers
-  command.push_back((register_address >> 8) & 0xFF); // Start address high
-  command.push_back(register_address & 0xFF);        // Start address low
-  command.push_back((count >> 8) & 0xFF);            // Count high
-  command.push_back(count & 0xFF);                   // Count low
-  
-  // Add CRC16 (you'll need to implement this or use existing CRC function)
-  uint16_t crc = calculate_crc16_(command.data(), command.size());
-  command.push_back(crc & 0xFF);        // CRC low
-  command.push_back((crc >> 8) & 0xFF); // CRC high
-  
-  return command;
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::create_write_command_(uint16_t register_address, uint16_t value) {
-  // Create a minimal Modbus RTU write single register command
-  std::vector<uint8_t> command;
-  command.push_back(0x01); // Device ID
-  command.push_back(0x06); // Function code: Write Single Register
-  command.push_back((register_address >> 8) & 0xFF); // Register address high
-  command.push_back(register_address & 0xFF);        // Register address low
-  command.push_back((value >> 8) & 0xFF);            // Value high
-  command.push_back(value & 0xFF);                   // Value low
-  
-  // Add CRC16
-  uint16_t crc = calculate_crc16_(command.data(), command.size());
-  command.push_back(crc & 0xFF);        // CRC low
-  command.push_back((crc >> 8) & 0xFF); // CRC high
-  
-  return command;
-}
-
-void LuxpowerSNAComponent::execute_single_write_request_(const AsyncRequest& request) {
-  // Create a minimal write request for just this register
-  std::vector<uint8_t> write_command = create_write_command_(request.register_address, request.write_value);
-  
-  if (!send_command_(write_command)) {
-    ESP_LOGW(TAG, "Failed to send single write command");
-    if (request.write_callback) request.write_callback(false);
-    finish_async_operation_();
-    return;
-  }
-  
-  // Set up response handling
-  this->set_timeout("single_write_timeout", 5000, [this, request]() {
-    ESP_LOGW(TAG, "Single write request timed out");
-    if (request.write_callback) request.write_callback(false);
-    finish_async_operation_();
-  });
-}
-
-void LuxpowerSNAComponent::finish_async_operation_() {
-  this->cancel_timeout("single_read_timeout");
-  this->cancel_timeout("single_write_timeout");
-  disconnect_client_();
-  connection_state_ = ConnectionState::DISCONNECTED;
-  processing_async_request_ = false;
-  
-  ESP_LOGD(TAG, "Async operation completed, %zu requests remaining", async_requests_.size());
-}
-
-void LuxpowerSNAComponent::handle_disconnected_state_() {
-  uint32_t now = millis();
-  
-  // Prevent too frequent connection attempts
-  if (now - last_connection_attempt_ < 5000) {
-    return;
-  }
-  
-  if (!validate_runtime_parameters_()) {
-    return;
-  }
-  
-  if (start_connection_attempt_()) {
-    connection_state_ = ConnectionState::CONNECTING;
-    state_start_time_ = now;
-    last_connection_attempt_ = now;
-  }
-}
-
-void LuxpowerSNAComponent::handle_connecting_state_() {
-  uint32_t now = millis();
-  
-  if (check_connection_ready_()) {
-    std::string host = get_host_from_input_();
-    uint16_t port = get_port_from_input_();
-    ESP_LOGI(TAG, "Successfully connected to %s:%u", host.c_str(), port);
-    connection_state_ = ConnectionState::CONNECTED;
-    current_bank_index_ = 0;
-    return;
-  }
-  
-  // Check for timeout
-  if (now - state_start_time_ > 10000) {
-    ESP_LOGW(TAG, "Connection timeout after 10 seconds");
-    connection_state_ = ConnectionState::ERROR;
-  }
-}
-
-void LuxpowerSNAComponent::handle_connected_state_() {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-#else
-  if (!client_.connected()) {
-#endif
-    ESP_LOGW(TAG, "Connection lost");
-    connection_state_ = ConnectionState::ERROR;
-    return;
-  }
-  
-  // Handle async requests if we have any
-  if (processing_async_request_ && !async_requests_.empty()) {
-    AsyncRequest &request = async_requests_.front();
-    std::vector<uint8_t> packet;
-    
-    if (request.type == AsyncRequest::READ) {
-      packet = prepare_single_register_read_packet_(request.reg);
-      ESP_LOGD(TAG, "Sending async read request for register %d", request.reg);
-    } else {
-      packet = prepare_single_register_write_packet_(request.reg, request.value);
-      ESP_LOGD(TAG, "Sending async write request for register %d with value %d", request.reg, request.value);
+    if (!receive_response_(bank)) {
+      ESP_LOGW(TAG, "Failed to process bank %d. Aborting rest of update cycle.", bank);
+      all_banks_successful = false;
+      break; 
     }
     
-    if (send_packet_(packet)) {
-      connection_state_ = ConnectionState::WAITING_RESPONSE;
-      state_start_time_ = millis();
-      response_buffer_.clear();
-      expected_response_size_ = 50; // Smaller expected size for single register operations
-    } else {
-      ESP_LOGW(TAG, "Failed to send async request packet");
-      connection_state_ = ConnectionState::ERROR;
-    }
-    return;
+    ESP_LOGD(TAG, "Successfully processed bank %d.", bank);
+    delay(200); 
   }
-  
-  // Start regular data collection if not processing async requests
-  connection_state_ = ConnectionState::REQUESTING_DATA;
-  bank_state_ = DataBankState::IDLE;
-  current_bank_index_ = 0;
+
+  if (all_banks_successful) {
+    ESP_LOGI(TAG, "Update cycle completed successfully.");
+  }
+
+  client_.stop();
+  ESP_LOGD(TAG, "Connection closed.");
 }
 
-void LuxpowerSNAComponent::handle_requesting_data_state_() {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-#else
-  if (!client_.connected()) {
-#endif
-    ESP_LOGW(TAG, "Connection lost during data request");
-    connection_state_ = ConnectionState::ERROR;
-    return;
-  }
-  
-  if (current_bank_index_ >= 5) {
-    // All banks processed successfully
-    ESP_LOGI(TAG, "All data banks processed successfully");
-    disconnect_client_();
-    connection_state_ = ConnectionState::DISCONNECTED;
-    current_bank_index_ = 0;
-    return;
-  }
-  
-  if (send_bank_request_()) {
-    connection_state_ = ConnectionState::WAITING_RESPONSE;
-    state_start_time_ = millis();
-    response_buffer_.clear();
-    expected_response_size_ = 200; // Approximate expected size
-  } else {
-    ESP_LOGW(TAG, "Failed to send bank request");
-    connection_state_ = ConnectionState::ERROR;
-  }
-}
-
-void LuxpowerSNAComponent::handle_waiting_response_state_() {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-#else
-  if (!client_.connected()) {
-#endif
-    ESP_LOGW(TAG, "Connection lost while waiting for response");
-    connection_state_ = ConnectionState::ERROR;
-    return;
-  }
-  
-  // Check for timeout
-  uint32_t now = millis();
-  if (now - state_start_time_ > 5000) {
-    if (processing_async_request_) {
-      ESP_LOGW(TAG, "Response timeout for async request");
-    } else {
-      ESP_LOGW(TAG, "Response timeout for bank %d", banks_[current_bank_index_]);
-    }
-    connection_state_ = ConnectionState::ERROR;
-    return;
-  }
-  
-  // Try to read available data
-  if (read_available_data_()) {
-    // Check if we have enough data to process
-    if (response_buffer_.size() >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) {
-      connection_state_ = ConnectionState::WAITING_RESPONSE;
-    }
-  }
-}
-
-void LuxpowerSNAComponent::cleanup_failed_async_request_() {
-  if (!async_requests_.empty()) {
-    AsyncRequest request = async_requests_.front();
-    async_requests_.erase(async_requests_.begin());
-    
-    // Call the callback with failure result
-    if (request.type == AsyncRequest::READ && request.read_callback) {
-      request.read_callback(0);
-    } else if (request.type == AsyncRequest::WRITE && request.write_callback) {
-      request.write_callback(false);
-    }
-  }
-  
-  disconnect_client_();
-  connection_state_ = ConnectionState::DISCONNECTED;
-  processing_async_request_ = false;
-}
-
-void LuxpowerSNAComponent::handle_processing_response_state_() {
-  if (process_received_data_()) {
-    if (processing_async_request_) {
-      ESP_LOGV(TAG, "Successfully processed async request");
-    } else {
-      ESP_LOGV(TAG, "Successfully processed bank %d (%d/5)", 
-               banks_[current_bank_index_], current_bank_index_ + 1);
-      current_bank_index_++;
-      connection_state_ = ConnectionState::REQUESTING_DATA;
-    }
-  } else {
-    if (processing_async_request_) {
-      ESP_LOGW(TAG, "Failed to process async response");
-    } else {
-      ESP_LOGW(TAG, "Failed to process response for bank %d", banks_[current_bank_index_]);
-    }
-    connection_state_ = ConnectionState::ERROR;
-  }
-}
-
-void LuxpowerSNAComponent::handle_error_state_() {
-  ESP_LOGV(TAG, "Handling error recovery");
-  
-  disconnect_client_();
-  response_buffer_.clear();
-  connection_state_ = ConnectionState::DISCONNECTED;
-  current_bank_index_ = 0;
-  bank_state_ = DataBankState::IDLE;
-  
-  // Clean up async request state if needed
-  if (processing_async_request_) {
-    if (!async_requests_.empty()) {
-      AsyncRequest request = async_requests_.front();
-      async_requests_.erase(async_requests_.begin());
-      
-      // Call callback with failure
-      if (request.type == AsyncRequest::READ && request.read_callback) {
-        request.read_callback(0);
-      } else if (request.type == AsyncRequest::WRITE && request.write_callback) {
-        request.write_callback(false);
-      }
-    }
-    processing_async_request_ = false;
-  }
-}
-
-bool LuxpowerSNAComponent::start_connection_attempt_() {
-  std::string host = get_host_from_input_();
-  uint16_t port = get_port_from_input_();
-  
-  ESP_LOGD(TAG, "Attempting to connect to %s:%u", host.c_str(), port);
-
-#ifdef USE_ESP_IDF
-  // ESP-IDF socket implementation
-  if (socket_fd_ >= 0) {
-    close(socket_fd_);
-  }
-
-  socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-  if (socket_fd_ < 0) {
-    ESP_LOGE(TAG, "Failed to create socket: %d", errno);
-    return false;
-  }
-
-  // Set socket to non-blocking for connection
-  int flags = fcntl(socket_fd_, F_GETFL, 0);
-  fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK);
-
-  // Setup server address
-  server_addr_.sin_family = AF_INET;
-  server_addr_.sin_port = htons(port);
-  
-  if (inet_pton(AF_INET, host.c_str(), &server_addr_.sin_addr) <= 0) {
-    ESP_LOGE(TAG, "Invalid IP address: %s", host.c_str());
-    close(socket_fd_);
-    socket_fd_ = -1;
-    return false;
-  }
-
-  // Start non-blocking connection
-  int result = connect(socket_fd_, (struct sockaddr*)&server_addr_, sizeof(server_addr_));
-  if (result == 0) {
-    // Connected immediately (unlikely but possible)
-    return true;
-  } else if (errno == EINPROGRESS) {
-    // Connection in progress - this is expected for non-blocking
-    return true;
-  } else {
-    ESP_LOGE(TAG, "Failed to start connection: %d", errno);
-    close(socket_fd_);
-    socket_fd_ = -1;
-    return false;
-  }
-
-#else
-  // Arduino WiFiClient implementation
-  return client_.connect(host.c_str(), port);
-#endif
-}
-
-bool LuxpowerSNAComponent::check_connection_ready_() {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
-
-  // Check if connection is ready using select
-  fd_set write_fds;
-  fd_set error_fds;
-  struct timeval timeout = {0, 0}; // Non-blocking
-  
-  FD_ZERO(&write_fds);
-  FD_ZERO(&error_fds);
-  FD_SET(socket_fd_, &write_fds);
-  FD_SET(socket_fd_, &error_fds);
-  
-  int result = select(socket_fd_ + 1, nullptr, &write_fds, &error_fds, &timeout);
-  
-  if (result > 0) {
-    if (FD_ISSET(socket_fd_, &error_fds)) {
-      // Connection failed
-      int error;
-      socklen_t len = sizeof(error);
-      getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, &error, &len);
-      ESP_LOGE(TAG, "Connection failed with error: %d", error);
-      close(socket_fd_);
-      socket_fd_ = -1;
-      return false;
-    }
-    
-    if (FD_ISSET(socket_fd_, &write_fds)) {
-      // Connection successful, set socket back to blocking
-      int flags = fcntl(socket_fd_, F_GETFL, 0);
-      fcntl(socket_fd_, F_SETFL, flags & ~O_NONBLOCK);
-      
-      // Set socket timeouts
-      struct timeval tv;
-      tv.tv_sec = 10;
-      tv.tv_usec = 0;
-      setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-      
-      return true;
-    }
-  }
-  
-  return false; // Still connecting
-
-#else
-  return client_.connected();
-#endif
-}
-
-void LuxpowerSNAComponent::disconnect_client_() {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ >= 0) {
-    close(socket_fd_);
-    socket_fd_ = -1;
-  }
-#else
-  if (client_.connected()) {
-    client_.stop();
-  }
-#endif
-}
-
-bool LuxpowerSNAComponent::send_bank_request_() {
-  uint8_t bank = banks_[current_bank_index_];
-  
-  // Get current serial numbers from template inputs
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
+void LuxpowerSNAComponent::request_bank_(uint8_t bank) {
   uint8_t pkt[38] = {
     0xA1, 0x1A, 0x02, 0x00, 0x20, 0x00, 0x01, 0xC2,
     0,0,0,0,0,0,0,0,0,0, 0x12, 0x00, 0x00, 0x04,
     0,0,0,0,0,0,0,0,0,0, static_cast<uint8_t>(bank), 0x00, 0x28, 0x00, 0x00, 0x00
   };
-  
-  // Copy serial numbers (ensure they're exactly 10 chars)
-  memset(pkt + 8, 0, 10);
-  memset(pkt + 22, 0, 10);
-  memcpy(pkt + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
-  memcpy(pkt + 22, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
-  
+  memcpy(pkt + 8, dongle_serial_.c_str(), 10);
+  memcpy(pkt + 22, inverter_serial_.c_str(), 10);
   uint16_t crc = calculate_crc_(pkt + 20, 16);
   pkt[36] = crc & 0xFF;
   pkt[37] = crc >> 8;
 
-  ESP_LOGV(TAG, "Sending request for bank %d with dongle: %s, inverter: %s", 
-           bank, dongle_serial.c_str(), inverter_serial.c_str());
-
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
-  
-  ssize_t written = send(socket_fd_, pkt, sizeof(pkt), 0);
-  return written == sizeof(pkt);
-
-#else
-  size_t written = client_.write(pkt, sizeof(pkt));
-  client_.flush();
-  return written == sizeof(pkt);
-#endif
+  ESP_LOGV(TAG, "Sending request for bank %d", bank);
+  client_.write(pkt, sizeof(pkt));
 }
 
-bool LuxpowerSNAComponent::read_available_data_() {
-  bool data_received = false;
-
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
+bool LuxpowerSNAComponent::receive_response_(uint8_t bank) {
+  uint8_t buffer[512];
+  uint32_t start = millis();
+  size_t total_read = 0;
   
-  uint8_t buffer[256];
-  ssize_t received = recv(socket_fd_, buffer, sizeof(buffer), MSG_DONTWAIT);
-  
-  if (received > 0) {
-    response_buffer_.insert(response_buffer_.end(), buffer, buffer + received);
-    data_received = true;
-  } else if (received == 0) {
-    ESP_LOGW(TAG, "Connection closed by peer");
-    return false;
-  } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-    ESP_LOGE(TAG, "Receive error: %d", errno);
-    return false;
-  }
-
-#else
-  while (client_.available()) {
-    uint8_t byte = client_.read();
-    response_buffer_.push_back(byte);
-    data_received = true;
-    
-    // Prevent buffer overflow
-    if (response_buffer_.size() > 1024) {
-      ESP_LOGW(TAG, "Response buffer overflow, resetting");
-      response_buffer_.clear();
-      return false;
+  while (millis() - start < 3000) { 
+    if (client_.available()) {
+      int bytes_read = client_.read(buffer + total_read, sizeof(buffer) - total_read);
+      if (bytes_read > 0) { total_read += bytes_read; }
     }
-  }
-#endif
-
-  return data_received;
-}
-
-bool LuxpowerSNAComponent::process_received_data_() {
-  if (response_buffer_.size() < sizeof(LuxHeader)) {
-    ESP_LOGW(TAG, "Response too short: %zu bytes", response_buffer_.size());
-    return false;
+    if (total_read >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) { break; }
+    delay(10);
   }
   
-  LuxHeader *header = reinterpret_cast<LuxHeader *>(response_buffer_.data());
+  if (total_read == 0) {
+    ESP_LOGW(TAG, "No data received for bank %d (timeout)", bank);
+    return false;
+  }
+
+  LuxHeader *header = reinterpret_cast<LuxHeader *>(buffer);
   if (header->prefix != 0x1AA1) {
-    ESP_LOGW(TAG, "Invalid header prefix: 0x%04X", header->prefix);
+    ESP_LOGE(TAG, "Invalid header prefix: 0x%04X", header->prefix);
     return false;
   }
 
-  if (response_buffer_.size() < sizeof(LuxHeader) + sizeof(LuxTranslatedData)) {
-    ESP_LOGW(TAG, "Response missing translated data section");
+  LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData *>(buffer + sizeof(LuxHeader));
+  if (trans->deviceFunction != 0x04) {
+    ESP_LOGE(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
     return false;
   }
 
-  LuxTranslatedData *trans = reinterpret_cast<LuxTranslatedData *>(response_buffer_.data() + sizeof(LuxHeader));
-  
-  size_t total_size = response_buffer_.size();
-  uint16_t crc_calc = calculate_crc_(response_buffer_.data() + sizeof(LuxHeader), total_size - sizeof(LuxHeader) - 2);
-  uint16_t crc_received = response_buffer_[total_size - 2] | (response_buffer_[total_size - 1] << 8);
+  uint16_t crc_calc = calculate_crc_(buffer + sizeof(LuxHeader), total_read - sizeof(LuxHeader) - 2);
+  uint16_t crc_received = buffer[total_read - 2] | (buffer[total_read - 1] << 8);
   if (crc_calc != crc_received) {
-    ESP_LOGW(TAG, "CRC mismatch: calc=0x%04X, recv=0x%04X", crc_calc, crc_received);
+    ESP_LOGE(TAG, "CRC mismatch: calc=0x%04X, recv=0x%04X", crc_calc, crc_received);
     return false;
   }
 
   size_t data_offset = sizeof(LuxHeader) + sizeof(LuxTranslatedData);
-  size_t data_size = total_size - data_offset - 2;
-  
-  // Handle async request responses
-  if (processing_async_request_ && !async_requests_.empty()) {
-    AsyncRequest request = async_requests_.front();
-    async_requests_.erase(async_requests_.begin());
-    processing_async_request_ = false;
-    
-    if (request.type == AsyncRequest::READ) {
-      // Extract register value from response
-      if (data_size >= 2) {
-        uint16_t value = response_buffer_[data_offset] | (response_buffer_[data_offset + 1] << 8);
-        register_cache_[request.reg] = value;
-        ESP_LOGD(TAG, "Read register %d: value = %d", request.reg, value);
-        
-        if (request.read_callback) {
-          request.read_callback(value);
-        }
-      } else {
-        ESP_LOGW(TAG, "Invalid read response size: %zu", data_size);
-        if (request.read_callback) {
-          request.read_callback(0);
-        }
-      }
-    } else {
-      // Write operation
-      ESP_LOGD(TAG, "Write to register %d completed", request.reg);
-      if (request.write_callback) {
-        request.write_callback(true);
-      }
-    }
-    
-    // Disconnect after async operation
-    disconnect_client_();
-    connection_state_ = ConnectionState::DISCONNECTED;
-    return true;
-  }
-  
-  // Handle regular data collection responses
-  if (trans->deviceFunction != 0x04) {
-    ESP_LOGW(TAG, "Invalid device function: 0x%02X", trans->deviceFunction);
-    return false;
-  }
-
-  uint8_t bank = banks_[current_bank_index_];
+  size_t data_size = total_read - data_offset - 2;
   
   switch (bank) {
-    case 0: 
-      if (data_size >= sizeof(LuxLogDataRawSection1)) {
-        process_section1_(*reinterpret_cast<LuxLogDataRawSection1 *>(response_buffer_.data() + data_offset));
-      } else {
-        ESP_LOGW(TAG, "Insufficient data for section 1: %zu < %zu", data_size, sizeof(LuxLogDataRawSection1));
-        return false;
-      }
-      break;
-    case 40: 
-      if (data_size >= sizeof(LuxLogDataRawSection2)) {
-        process_section2_(*reinterpret_cast<LuxLogDataRawSection2 *>(response_buffer_.data() + data_offset));
-      } else {
-        ESP_LOGW(TAG, "Insufficient data for section 2: %zu < %zu", data_size, sizeof(LuxLogDataRawSection2));
-        return false;
-      }
-      break;
-    case 80: 
-      if (data_size >= sizeof(LuxLogDataRawSection3)) {
-        process_section3_(*reinterpret_cast<LuxLogDataRawSection3 *>(response_buffer_.data() + data_offset));
-      } else {
-        ESP_LOGW(TAG, "Insufficient data for section 3: %zu < %zu", data_size, sizeof(LuxLogDataRawSection3));
-        return false;
-      }
-      break;
-    case 120: 
-      if (data_size >= sizeof(LuxLogDataRawSection4)) {
-        process_section4_(*reinterpret_cast<LuxLogDataRawSection4 *>(response_buffer_.data() + data_offset));
-      } else {
-        ESP_LOGW(TAG, "Insufficient data for section 4: %zu < %zu", data_size, sizeof(LuxLogDataRawSection4));
-        return false;
-      }
-      break;
-    case 160: 
-      if (data_size >= sizeof(LuxLogDataRawSection5)) {
-        process_section5_(*reinterpret_cast<LuxLogDataRawSection5 *>(response_buffer_.data() + data_offset));
-      } else {
-        ESP_LOGW(TAG, "Insufficient data for section 5: %zu < %zu", data_size, sizeof(LuxLogDataRawSection5));
-        return false;
-      }
-      break;
-    default: 
-      ESP_LOGW(TAG, "Unknown bank: %d", bank);
-      return false;
+    case 0: if (data_size >= sizeof(LuxLogDataRawSection1)) process_section1_(*reinterpret_cast<LuxLogDataRawSection1 *>(buffer + data_offset)); break;
+    case 40: if (data_size >= sizeof(LuxLogDataRawSection2)) process_section2_(*reinterpret_cast<LuxLogDataRawSection2 *>(buffer + data_offset)); break;
+    case 80: if (data_size >= sizeof(LuxLogDataRawSection3)) process_section3_(*reinterpret_cast<LuxLogDataRawSection3 *>(buffer + data_offset)); break;
+    case 120: if (data_size >= sizeof(LuxLogDataRawSection4)) process_section4_(*reinterpret_cast<LuxLogDataRawSection4 *>(buffer + data_offset)); break;
+    case 160: if (data_size >= sizeof(LuxLogDataRawSection5)) process_section5_(*reinterpret_cast<LuxLogDataRawSection5 *>(buffer + data_offset)); break;
+    default: ESP_LOGW(TAG, "Unknown bank: %d", bank);
   }
-  
   return true;
-}
-
-const char* LuxpowerSNAComponent::get_state_name_(ConnectionState state) {
-  switch (state) {
-    case ConnectionState::DISCONNECTED: return "DISCONNECTED";
-    case ConnectionState::CONNECTING: return "CONNECTING";
-    case ConnectionState::CONNECTED: return "CONNECTED";
-    case ConnectionState::REQUESTING_DATA: return "REQUESTING_DATA";
-    case ConnectionState::WAITING_RESPONSE: return "WAITING_RESPONSE";
-    case ConnectionState::ERROR: return "ERROR";
-    default: return "UNKNOWN";
-  }
 }
 
 uint16_t LuxpowerSNAComponent::calculate_crc_(const uint8_t *data, size_t len) {
@@ -961,190 +142,6 @@ void LuxpowerSNAComponent::publish_text_sensor_(text_sensor::TextSensor *sensor,
   if (sensor != nullptr) sensor->publish_state(value);
 }
 
-// Switch support methods
-void LuxpowerSNAComponent::read_register_async(uint16_t reg, std::function<void(uint16_t)> callback) {
-  AsyncRequest request;
-  request.type = AsyncRequest::READ;
-  request.reg = reg;
-  request.value = 0;
-  request.read_callback = callback;
-  request.timestamp = millis();
-  
-  async_requests_.push_back(request);
-  ESP_LOGD(TAG, "Queued async read request for register %d", reg);
-}
-
-void LuxpowerSNAComponent::write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback) {
-  AsyncRequest request;
-  request.type = AsyncRequest::WRITE;
-  request.reg = reg;
-  request.value = value;
-  request.write_callback = callback;
-  request.timestamp = millis();
-  
-  async_requests_.push_back(request);
-  ESP_LOGD(TAG, "Queued async write request for register %d with value %d", reg, value);
-}
-
-void LuxpowerSNAComponent::process_async_requests_() {
-  // Only process async requests when completely idle
-  if (connection_state_ != ConnectionState::DISCONNECTED || async_requests_.empty()) {
-    return;
-  }
-  
-  if (processing_async_request_) {
-    // Check for timeout
-    uint32_t now = millis();
-    if (now - async_request_start_time_ > 10000) { // 10 second timeout
-      ESP_LOGW(TAG, "Async request timed out, cleaning up");
-      cleanup_failed_async_request_();
-    }
-    return;
-  }
-  
-  // Don't start async requests too close to scheduled sensor updates
-  uint32_t now = millis();
-  static uint32_t last_async_attempt = 0;
-  
-  if (now - last_async_attempt < 3000) { // Minimum 3 seconds between async operations
-    return;
-  }
-  
-  if (!validate_runtime_parameters_()) {
-    ESP_LOGV(TAG, "Cannot process async requests - parameters not ready");
-    return;
-  }
-  
-  ESP_LOGD(TAG, "Processing single async request (%zu total queued)", async_requests_.size());
-  processing_async_request_ = true;
-  async_request_start_time_ = now;
-  last_async_attempt = now;
-  
-  // **CRITICAL**: Start connection for SINGLE OPERATION, not full data collection
-  if (start_connection_attempt_()) {
-    connection_state_ = ConnectionState::ASYNC_OPERATION; // New state!
-    state_start_time_ = now;
-  } else {
-    ESP_LOGW(TAG, "Failed to start connection for async request");
-    processing_async_request_ = false;
-  }
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_read_packet_(uint16_t reg) {
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
-  std::vector<uint8_t> packet = {
-    0xA1, 0x1A,  // Prefix
-    0x02, 0x00,  // Protocol version
-    0x20, 0x00,  // Frame length (32)
-    0x01,        // Address
-    0xC2,        // Function (TRANSLATED_DATA)
-  };
-  
-  // Dongle serial (10 bytes)
-  packet.resize(18, 0);
-  std::memcpy(packet.data() + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
-  
-  // Data length
-  packet.push_back(0x12); // 18 bytes
-  packet.push_back(0x00);
-  
-  // Data frame
-  packet.push_back(0x00); // Address action (WRITE for compatibility)
-  packet.push_back(0x03); // Device function (READ_HOLD)
-  
-  // Inverter serial (10 bytes)
-  size_t serial_start = packet.size();
-  packet.resize(packet.size() + 10, 0);
-  std::memcpy(packet.data() + serial_start, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
-  
-  // Register address (little endian)
-  packet.push_back(reg & 0xFF);
-  packet.push_back((reg >> 8) & 0xFF);
-  
-  // Number of registers to read
-  packet.push_back(0x01); // 1 register
-  packet.push_back(0x00);
-  
-  // Calculate CRC for data frame (from byte 20 onwards)
-  uint16_t crc = calculate_crc_(packet.data() + 20, packet.size() - 20);
-  packet.push_back(crc & 0xFF);
-  packet.push_back((crc >> 8) & 0xFF);
-  
-  return packet;
-}
-
-std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_write_packet_(uint16_t reg, uint16_t value) {
-  std::string dongle_serial = get_dongle_serial_from_input_();
-  std::string inverter_serial = get_inverter_serial_from_input_();
-  
-  std::vector<uint8_t> packet = {
-    0xA1, 0x1A,  // Prefix
-    0x02, 0x00,  // Protocol version
-    0x20, 0x00,  // Frame length (32)
-    0x01,        // Address
-    0xC2,        // Function (TRANSLATED_DATA)
-  };
-  
-  // Dongle serial (10 bytes)
-  packet.resize(18, 0);
-  std::memcpy(packet.data() + 8, dongle_serial.c_str(), std::min(dongle_serial.length(), size_t(10)));
-  
-  // Data length
-  packet.push_back(0x12); // 18 bytes
-  packet.push_back(0x00);
-  
-  // Data frame
-  packet.push_back(0x00); // Address action (WRITE)
-  packet.push_back(0x06); // Device function (WRITE_SINGLE)
-  
-  // Inverter serial (10 bytes)
-  size_t serial_start = packet.size();
-  packet.resize(packet.size() + 10, 0);
-  std::memcpy(packet.data() + serial_start, inverter_serial.c_str(), std::min(inverter_serial.length(), size_t(10)));
-  
-  // Register address (little endian)
-  packet.push_back(reg & 0xFF);
-  packet.push_back((reg >> 8) & 0xFF);
-  
-  // Value to write (little endian)
-  packet.push_back(value & 0xFF);
-  packet.push_back((value >> 8) & 0xFF);
-  
-  // Calculate CRC for data frame (from byte 20 onwards)
-  uint16_t crc = calculate_crc_(packet.data() + 20, packet.size() - 20);
-  packet.push_back(crc & 0xFF);
-  packet.push_back((crc >> 8) & 0xFF);
-  
-  return packet;
-}
-
-bool LuxpowerSNAComponent::send_packet_(const std::vector<uint8_t> &packet) {
-#ifdef USE_ESP_IDF
-  if (socket_fd_ < 0) {
-    return false;
-  }
-  
-  ssize_t written = send(socket_fd_, packet.data(), packet.size(), 0);
-  return written == static_cast<ssize_t>(packet.size());
-#else
-  size_t written = client_.write(packet.data(), packet.size());
-  client_.flush();
-  return written == packet.size();
-#endif
-}
-
-// Switch registration and centralized update methods
-void LuxpowerSNAComponent::register_switch(LuxPowerSwitch* switch_ptr) {
-  if (switch_ptr) {
-    registered_switches_.push_back(switch_ptr);
-    ESP_LOGD(TAG, "Registered switch '%s' for centralized updates (total: %d)", 
-             switch_ptr->get_name().c_str(), registered_switches_.size());
-  }
-}
-
-// Process_sectionX_ methods for publishing data to sensors 
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
   publish_sensor_(lux_current_solar_voltage_2_sensor_, data.v_pv_2 / 10.0f);
@@ -1186,7 +183,7 @@ void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) 
   publish_sensor_(bus1_voltage_sensor_, data.v_bus_1 / 10.0f);
   publish_sensor_(bus2_voltage_sensor_, data.v_bus_2 / 10.0f);
     
-  float lux_grid_voltage_live = data.v_ac_r / 10.0f;
+  float lux_grid_voltage_live = data.v_ac_r;
   int16_t lux_current_solar_output = data.p_pv_1 + data.p_pv_2 + data.p_pv_3;
   float lux_daily_solar = (data.e_pv_1_day + data.e_pv_2_day + data.e_pv_3_day) / 10.0f;
   int16_t lux_power_to_home = data.p_to_user - data.p_rec;
@@ -1293,4 +290,3 @@ void LuxpowerSNAComponent::process_section5_(const LuxLogDataRawSection5 &data) 
 
 }  // namespace luxpower_sna
 }  // namespace esphome
-
