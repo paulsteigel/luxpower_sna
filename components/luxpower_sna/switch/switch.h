@@ -67,7 +67,6 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
   void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
   void set_register_address(uint16_t reg) { register_address_ = reg; }
   void set_bitmask(uint16_t mask) { bitmask_ = mask; }
-  void set_switch_type(const std::string &type) { switch_type_ = type; }
 
   // Component lifecycle
   void setup() override;
@@ -81,7 +80,6 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
   LuxpowerSNAComponent *parent_{nullptr};
   uint16_t register_address_{0};
   uint16_t bitmask_{0};
-  std::string switch_type_;
   
   bool initial_state_read_{false};
   bool pending_write_{false};
