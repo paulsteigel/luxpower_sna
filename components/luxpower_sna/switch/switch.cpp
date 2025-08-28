@@ -31,6 +31,14 @@ void LuxPowerSwitch::setup() {
   this->set_timeout(5000, [this]() {
     this->read_current_state_();
   });
+  
+  // Add periodic state checking every 30 seconds
+  this->set_interval(30000, [this]() {
+    if (parent_ && parent_->is_connection_ready() && !pending_write_) {
+      ESP_LOGD(TAG, "Periodic state check for '%s'", this->get_name().c_str());
+      this->read_current_state_();
+    }
+  });
 }
 
 void LuxPowerSwitch::dump_config() {
