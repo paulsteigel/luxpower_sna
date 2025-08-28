@@ -63,7 +63,7 @@ static const uint16_t R179_UNKNOWN_BIT_00 = 1 << 0;
 
 class LuxPowerSwitch : public switch_::Switch, public Component {
  public:
-  // Configuration
+  // Configuration methods
   void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
   void set_register_address(uint16_t reg) { register_address_ = reg; }
   void set_bitmask(uint16_t mask) { bitmask_ = mask; }
@@ -71,7 +71,6 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
 
   // Component lifecycle
   void setup() override;
-  void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
 
@@ -84,13 +83,13 @@ class LuxPowerSwitch : public switch_::Switch, public Component {
   uint16_t bitmask_{0};
   std::string switch_type_;
   
-  uint32_t last_read_attempt_{0};
-  uint32_t read_interval_{30000};  // Read every 30s to sync state
-  uint16_t cached_register_value_{0};
-  bool has_cached_value_{false};
+  bool initial_state_read_{false};
+  bool pending_write_{false};
+  uint32_t last_write_time_{0};
   
-  // Bit manipulation (from Python prepare_binary_value)
+  // Helper methods
   uint16_t prepare_binary_value_(uint16_t old_value, uint16_t mask, bool enable);
+  void read_current_state_();
   void update_state_from_register_(uint16_t reg_value);
 };
 
