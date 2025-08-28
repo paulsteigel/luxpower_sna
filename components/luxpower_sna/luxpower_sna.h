@@ -132,17 +132,11 @@ class LuxpowerSNAComponent : public PollingComponent {
 
   void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
   void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
-  /*
+  
   bool is_connection_ready() const {
-    return connection_state_ == ConnectionState::CONNECTED && !processing_async_request_;
+    return connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_;
   }
-  */
-
-  bool is_connection_ready() const {
-    return this->connection_state_ != ConnectionState::DISCONNECTED && 
-           this->connection_state_ != ConnectionState::CONNECTING &&
-           this->connection_state_ != ConnectionState::ERROR;
-  }  
+  
   // Alternative method names in case you're using different naming
   bool is_connected() const {
     return is_connection_ready();
