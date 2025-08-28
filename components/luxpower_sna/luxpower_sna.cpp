@@ -177,6 +177,16 @@ void LuxpowerSNAComponent::update() {
     
     ESP_LOGD(TAG, "Starting new data collection cycle");
     connection_state_ = ConnectionState::DISCONNECTED; // Will be handled in loop()
+    
+    // Schedule entity state updates after sensor data collection
+    // This will run after the regular data collection completes
+    this->set_timeout(30000, [this]() {  // 30 seconds after sensor update starts
+      if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
+        ESP_LOGD(TAG, "Starting scheduled entity state updates");
+        this->update_all_entity_states();
+      }
+    });
+    
   } else {
     ESP_LOGV(TAG, "Data collection already in progress, state: %s", get_state_name_(connection_state_));
   }
@@ -938,6 +948,43 @@ bool LuxpowerSNAComponent::send_packet_(const std::vector<uint8_t> &packet) {
   client_.flush();
   return written == packet.size();
 #endif
+}
+
+// Switch registration and centralized update methods
+void LuxpowerSNAComponent::register_switch(LuxPowerSwitch* switch_ptr) {
+  if (switch_ptr) {
+    registered_switches_.push_back(switch_ptr);
+    ESP_LOGD(TAG, "Registered switch '%s' for centralized updates (total: %d)", 
+             switch_ptr->get_name().c_str(), registered_switches_.size());
+  }
+}
+
+void LuxpowerSNAComponent::update_all_entity_states() {
+  if (connection_state_ != ConnectionState::DISCONNECTED || processing_async_request_) {
+    ESP_LOGV(TAG, "Skipping entity state updates - connection busy");
+    return;
+  }
+  
+  if (registered_switches_.empty()) {
+    ESP_LOGV(TAG, "No registered switches to update");
+    return;
+  }
+  
+  ESP_LOGD(TAG, "Starting centralized entity state updates for %d switches", registered_switches_.size());
+  
+  // Update switches with staggered timing to be gentle on the inverter
+  for (size_t i = 0; i < registered_switches_.size(); i++) {
+    auto* switch_ptr = registered_switches_[i];
+    if (switch_ptr && !switch_ptr->is_pending_write()) {
+      // Stagger the reads: 0ms, 500ms, 1000ms, 1500ms, etc.
+      this->set_timeout(i * 500, [switch_ptr]() {
+        ESP_LOGV(TAG, "Centralized update for switch '%s'", switch_ptr->get_name().c_str());
+        switch_ptr->update_state_from_parent();
+      });
+    } else if (switch_ptr && switch_ptr->is_pending_write()) {
+      ESP_LOGV(TAG, "Skipping switch '%s' - write operation pending", switch_ptr->get_name().c_str());
+    }
+  }
 }
 
 // Process_sectionX_ methods for publishing data to sensors 
