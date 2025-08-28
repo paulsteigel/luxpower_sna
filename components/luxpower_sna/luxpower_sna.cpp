@@ -189,6 +189,39 @@ void LuxpowerSNAComponent::update_all_entity_states() {
   }
 }
 
+void LuxpowerSNAComponent::update() {
+  if (!initialization_complete_) {
+    ESP_LOGW(TAG, "Skipping update - component not properly initialized");
+    return;
+  }
+  
+  // Only trigger new data collection if we're disconnected and not processing async requests
+  if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
+    // Validate runtime parameters from template inputs
+    if (!validate_runtime_parameters_()) {
+      ESP_LOGV(TAG, "Skipping update - input parameters not ready or invalid");
+      return;
+    }
+    
+    ESP_LOGD(TAG, "Starting new data collection cycle (interval: %.1fs)", this->get_update_interval() / 1000.0f);
+    connection_state_ = ConnectionState::DISCONNECTED; // Will be handled in loop()
+    
+    // Schedule entity state updates after sensor data collection completes
+    // Use a reasonable delay to ensure sensor data collection is done
+    this->set_timeout(15000, [this]() {  // 15 seconds should be enough for sensor collection
+      if (connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_) {
+        ESP_LOGD(TAG, "Starting scheduled entity state updates");
+        this->update_all_entity_states();
+      } else {
+        ESP_LOGV(TAG, "Skipping entity updates - connection still busy");
+      }
+    });
+    
+  } else {
+    ESP_LOGV(TAG, "Data collection already in progress, state: %s", get_state_name_(connection_state_));
+  }
+}
+
 void LuxpowerSNAComponent::loop() {
   if (!initialization_complete_) {
     return;
