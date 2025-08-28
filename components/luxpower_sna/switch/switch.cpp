@@ -79,6 +79,31 @@ void LuxPowerSwitch::write_state(bool state) {
   this->write_state_internal_(state);
 }
 
+void LuxPowerSwitch::verify_write_result_() {
+  if (!parent_ || !parent_->is_connection_ready()) {
+    // Skip verification if parent is busy
+    return;
+  }
+  
+  ESP_LOGV(SWITCH_TAG, "Verifying write result for '%s'", this->get_name().c_str());
+  
+  parent_->read_register_async(register_address_, [this](uint16_t value) {
+    bool actual_state = (value & bitmask_) != 0;
+    bool ui_state = this->state;
+    
+    if (actual_state != ui_state) {
+      ESP_LOGW(SWITCH_TAG, "State mismatch for '%s': UI=%s, Actual=%s - correcting UI", 
+               this->get_name().c_str(), 
+               ui_state ? "ON" : "OFF", 
+               actual_state ? "ON" : "OFF");
+      this->publish_state(actual_state);
+    } else {
+      ESP_LOGD(SWITCH_TAG, "State verified for '%s': %s", 
+               this->get_name().c_str(), actual_state ? "ON" : "OFF");
+    }
+  });
+}
+
 // New internal method that doesn't update UI (already updated above)
 void LuxPowerSwitch::write_state_internal_(bool state) {
   ESP_LOGI(SWITCH_TAG, "Executing write for '%s': %s (register %d, mask 0x%04X)", 
@@ -117,11 +142,12 @@ void LuxPowerSwitch::write_state_internal_(bool state) {
 }
 
 void LuxPowerSwitch::update_state_from_parent() {
-  // Only update if we're not in the middle of a write operation
+  // Don't update UI if we have a recent write operation
   if (pending_write_) {
     uint32_t time_since_write = millis() - last_write_time_;
-    if (time_since_write < 5000) {  // Wait 5 seconds after write before allowing updates
-      ESP_LOGV(SWITCH_TAG, "Skipping state update for '%s' - recent write operation", this->get_name().c_str());
+    if (time_since_write < 8000) {  // Give 8 seconds for write to complete and verify
+      ESP_LOGV(SWITCH_TAG, "Skipping centralized update for '%s' - recent write operation", 
+               this->get_name().c_str());
       return;
     }
   }
@@ -134,6 +160,7 @@ void LuxPowerSwitch::update_state_from_parent() {
   
   this->read_current_state_();
 }
+
 
 void LuxPowerSwitch::read_current_state_() {
   if (!parent_) {
