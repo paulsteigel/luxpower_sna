@@ -4,25 +4,25 @@
 namespace esphome {
 namespace luxpower_sna {
 
-static const char *const TAG = "luxpower_sna.switch";
+static const char *const SWITCH_TAG = "luxpower_sna.switch";  // Changed from TAG to SWITCH_TAG
 
 void LuxPowerSwitch::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up LuxPower Switch: %s", switch_type_.c_str());
+  ESP_LOGCONFIG(SWITCH_TAG, "Setting up LuxPower Switch: %s", switch_type_.c_str());
   
   if (parent_ == nullptr) {
-    ESP_LOGE(TAG, "Parent component not set!");
+    ESP_LOGE(SWITCH_TAG, "Parent component not set!");
     mark_failed();
     return;
   }
   
   if (register_address_ == 0) {
-    ESP_LOGE(TAG, "Register address not set!");
+    ESP_LOGE(SWITCH_TAG, "Register address not set!");
     mark_failed();
     return;
   }
   
   if (bitmask_ == 0) {
-    ESP_LOGE(TAG, "Bitmask not set!");
+    ESP_LOGE(SWITCH_TAG, "Bitmask not set!");
     mark_failed();
     return;
   }
@@ -34,49 +34,49 @@ void LuxPowerSwitch::setup() {
 }
 
 void LuxPowerSwitch::dump_config() {
-  ESP_LOGCONFIG(TAG, "LuxPower Switch '%s':", switch_type_.c_str());
-  ESP_LOGCONFIG(TAG, "  Register: %d (0x%04X)", register_address_, register_address_);
-  ESP_LOGCONFIG(TAG, "  Bitmask: 0x%04X", bitmask_);
+  ESP_LOGCONFIG(SWITCH_TAG, "LuxPower Switch '%s':", switch_type_.c_str());
+  ESP_LOGCONFIG(SWITCH_TAG, "  Register: %d (0x%04X)", register_address_, register_address_);
+  ESP_LOGCONFIG(SWITCH_TAG, "  Bitmask: 0x%04X", bitmask_);
   
   if (parent_ == nullptr) {
-    ESP_LOGCONFIG(TAG, "  Status: FAILED - No parent component");
+    ESP_LOGCONFIG(SWITCH_TAG, "  Status: FAILED - No parent component");
   } else {
-    ESP_LOGCONFIG(TAG, "  Status: OK");
+    ESP_LOGCONFIG(SWITCH_TAG, "  Status: OK");
   }
   
   LOG_SWITCH("", "LuxPower Switch", this);
 }
 
 void LuxPowerSwitch::write_state(bool state) {
-  ESP_LOGD(TAG, "write_state called for '%s' with state: %s", switch_type_.c_str(), state ? "ON" : "OFF");
+  ESP_LOGD(SWITCH_TAG, "write_state called for '%s' with state: %s", switch_type_.c_str(), state ? "ON" : "OFF");
   
   if (parent_ == nullptr) {
-    ESP_LOGE(TAG, "Parent component is null!");
+    ESP_LOGE(SWITCH_TAG, "Parent component is null!");
     return;
   }
   
   // Prevent too frequent writes
   uint32_t now = millis();
   if (pending_write_ && (now - last_write_time_ < 2000)) {
-    ESP_LOGW(TAG, "Write request too soon after previous write for '%s', ignoring", switch_type_.c_str());
+    ESP_LOGW(SWITCH_TAG, "Write request too soon after previous write for '%s', ignoring", switch_type_.c_str());
     // Revert UI state
     this->publish_state(!state);
     return;
   }
   
-  ESP_LOGI(TAG, "Setting '%s' to %s", switch_type_.c_str(), state ? "ON" : "OFF");
+  ESP_LOGI(SWITCH_TAG, "Setting '%s' to %s", switch_type_.c_str(), state ? "ON" : "OFF");
   
   pending_write_ = true;
   last_write_time_ = now;
 
   // First, read the current register value
   parent_->read_register_async(register_address_, [this, state](uint16_t current_value) {
-    ESP_LOGD(TAG, "Current register %d value: 0x%04X", this->register_address_, current_value);
+    ESP_LOGD(SWITCH_TAG, "Current register %d value: 0x%04X", this->register_address_, current_value);
     
     // Calculate new value with bit manipulation
     uint16_t new_value = this->prepare_binary_value_(current_value, this->bitmask_, state);
     
-    ESP_LOGD(TAG, "Writing register %d for '%s': 0x%04X -> 0x%04X (bitmask: 0x%04X)", 
+    ESP_LOGD(SWITCH_TAG, "Writing register %d for '%s': 0x%04X -> 0x%04X (bitmask: 0x%04X)", 
              this->register_address_, this->switch_type_.c_str(), current_value, new_value, this->bitmask_);
     
     // Only write if the value actually needs to change
@@ -86,7 +86,7 @@ void LuxPowerSwitch::write_state(bool state) {
         this->pending_write_ = false;
         
         if (success) {
-          ESP_LOGI(TAG, "Successfully set '%s' to %s", this->switch_type_.c_str(), state ? "ON" : "OFF");
+          ESP_LOGI(SWITCH_TAG, "Successfully set '%s' to %s", this->switch_type_.c_str(), state ? "ON" : "OFF");
           this->publish_state(state);
           
           // Schedule a verification read after a short delay
@@ -95,7 +95,7 @@ void LuxPowerSwitch::write_state(bool state) {
           });
           
         } else {
-          ESP_LOGE(TAG, "Failed to write register for '%s'", this->switch_type_.c_str());
+          ESP_LOGE(SWITCH_TAG, "Failed to write register for '%s'", this->switch_type_.c_str());
           
           // Read current state to sync with actual hardware state
           this->set_timeout(500, [this]() {
@@ -105,7 +105,7 @@ void LuxPowerSwitch::write_state(bool state) {
       });
     } else {
       // Value is already correct, just update UI
-      ESP_LOGD(TAG, "Register %d already has correct value for '%s'", this->register_address_, this->switch_type_.c_str());
+      ESP_LOGD(SWITCH_TAG, "Register %d already has correct value for '%s'", this->register_address_, this->switch_type_.c_str());
       this->pending_write_ = false;
       this->publish_state(state);
     }
@@ -114,14 +114,14 @@ void LuxPowerSwitch::write_state(bool state) {
 
 void LuxPowerSwitch::read_current_state_() {
   if (parent_ == nullptr) {
-    ESP_LOGW(TAG, "Cannot read state - parent component not available");
+    ESP_LOGW(SWITCH_TAG, "Cannot read state - parent component not available");
     return;
   }
   
-  ESP_LOGV(TAG, "Reading current state for '%s' from register %d", switch_type_.c_str(), register_address_);
+  ESP_LOGV(SWITCH_TAG, "Reading current state for '%s' from register %d", switch_type_.c_str(), register_address_);
   
   parent_->read_register_async(register_address_, [this](uint16_t value) {
-    ESP_LOGD(TAG, "Read register %d for '%s': 0x%04X", this->register_address_, this->switch_type_.c_str(), value);
+    ESP_LOGD(SWITCH_TAG, "Read register %d for '%s': 0x%04X", this->register_address_, this->switch_type_.c_str(), value);
     this->update_state_from_register_(value);
   });
 }
@@ -142,7 +142,7 @@ void LuxPowerSwitch::update_state_from_register_(uint16_t reg_value) {
   
   // Only publish if this is the initial read or if the state actually changed
   if (!initial_state_read_ || current_state != state) {
-    ESP_LOGD(TAG, "State update for '%s': %s (register: 0x%04X, mask: 0x%04X, masked_value: 0x%04X)", 
+    ESP_LOGD(SWITCH_TAG, "State update for '%s': %s (register: 0x%04X, mask: 0x%04X, masked_value: 0x%04X)", 
              switch_type_.c_str(), current_state ? "ON" : "OFF", reg_value, bitmask_, reg_value & bitmask_);
     publish_state(current_state);
   }
