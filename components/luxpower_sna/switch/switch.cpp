@@ -16,6 +16,9 @@ void LuxPowerSwitch::setup() {
   ESP_LOGCONFIG(SWITCH_TAG, "Setting up LuxPower Switch: %s", switch_type_.c_str());
   ESP_LOGD(SWITCH_TAG, "Parent component address: %p", parent_);
   
+  // Debug connection state during setup
+  parent_->debug_connection_state();
+  
   // Try to get initial state
   if (parent_->is_connection_ready()) {
     ESP_LOGD(SWITCH_TAG, "Connection ready, reading initial state");
@@ -56,12 +59,17 @@ void LuxPowerSwitch::write_state(bool state) {
     return;
   }
   
-  ESP_LOGD(SWITCH_TAG, "Checking connection status...");
+  // Debug connection state when switch is toggled
+  ESP_LOGD(SWITCH_TAG, "Debugging connection state before write:");
+  parent_->debug_connection_state();
+  
   bool connection_ready = parent_->is_connection_ready();
   ESP_LOGD(SWITCH_TAG, "Connection ready: %s", connection_ready ? "YES" : "NO");
   
   if (!connection_ready) {
     ESP_LOGE(SWITCH_TAG, "Parent component not available or not connected");
+    // Revert the switch state in UI since we can't process the request
+    this->publish_state(!state);
     return;
   }
 
