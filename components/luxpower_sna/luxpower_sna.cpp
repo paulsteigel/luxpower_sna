@@ -956,34 +956,6 @@ void LuxpowerSNAComponent::register_switch(LuxPowerSwitch* switch_ptr) {
   }
 }
 
-void LuxpowerSNAComponent::update_all_entity_states() {
-  if (connection_state_ != ConnectionState::DISCONNECTED || processing_async_request_) {
-    ESP_LOGV(TAG, "Skipping entity state updates - connection busy");
-    return;
-  }
-  
-  if (registered_switches_.empty()) {
-    ESP_LOGV(TAG, "No registered switches to update");
-    return;
-  }
-  
-  ESP_LOGD(TAG, "Updating %d switch states (respecting %.1fs interval)", 
-           registered_switches_.size(), this->get_update_interval() / 1000.0f);
-  
-  // Update switches with staggered timing to be gentle on the inverter
-  for (size_t i = 0; i < registered_switches_.size(); i++) {
-    auto* switch_ptr = registered_switches_[i];
-    if (switch_ptr) {
-      // Stagger the reads: 0ms, 500ms, 1000ms, 1500ms, etc.
-      this->set_timeout(i * 500, [switch_ptr]() {
-        ESP_LOGV(TAG, "Centralized update for switch");
-        switch_ptr->update_state_from_parent();
-      });
-    }
-  }
-}
-
-
 // Process_sectionX_ methods for publishing data to sensors 
 void LuxpowerSNAComponent::process_section1_(const LuxLogDataRawSection1 &data) {
   publish_sensor_(lux_current_solar_voltage_1_sensor_, data.v_pv_1 / 10.0f);
