@@ -136,21 +136,29 @@ void LuxPowerSwitch::write_state(bool state) {
 }
 
 void LuxPowerSwitch::read_current_state_() {
-  if (parent_ == nullptr) {
-    ESP_LOGW(SWITCH_TAG, "Cannot read state - parent component not available");
+  ESP_LOGD(TAG, "Reading current state for switch '%s' (register %d)", 
+           this->get_name().c_str(), register_address_);
+  
+  if (!parent_ || !parent_->is_connection_ready()) {
+    ESP_LOGW(TAG, "Cannot read state - parent not ready");
     return;
   }
   
-  ESP_LOGV(SWITCH_TAG, "Reading current state for '%s' from register %d", 
-           this->get_name().c_str(), register_address_);
-  
   parent_->read_register_async(register_address_, [this](uint16_t value) {
-    ESP_LOGD(SWITCH_TAG, "Read register %d for '%s': 0x%04X", 
-             this->register_address_, this->get_name().c_str(), value);
-    this->update_state_from_register_(value);
+    bool new_state = (value != 0);
+    ESP_LOGD(TAG, "Read register %d = %d, switch state: %s", 
+             register_address_, value, new_state ? "ON" : "OFF");
+    
+    if (this->state != new_state) {
+      ESP_LOGI(TAG, "Switch '%s' state changed from %s to %s", 
+               this->get_name().c_str(), 
+               this->state ? "ON" : "OFF", 
+               new_state ? "ON" : "OFF");
+    }
+    
+    this->publish_state(new_state);
   });
 }
-
 uint16_t LuxPowerSwitch::prepare_binary_value_(uint16_t old_value, uint16_t mask, bool enable) {
   if (enable) {
     // Set the bits specified by mask
