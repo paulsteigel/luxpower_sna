@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/switch/switch.h"
-#include "../luxpower_sna.h"
+#include "luxpower_sna.h" 
 
 namespace esphome {
 namespace luxpower_sna {
