@@ -52,7 +52,7 @@ enum class ConnectionState {
   CONNECTED,
   REQUESTING_DATA,
   WAITING_RESPONSE,
-  PROCESSING_RESPONSE,
+  ASYNC_OPERATION,  // NEW: For single register operations
   ERROR
 };
 
@@ -136,6 +136,7 @@ class LuxpowerSNAComponent : public PollingComponent {
   bool is_connection_ready() const {
     return connection_state_ == ConnectionState::DISCONNECTED && !processing_async_request_;
   }
+
   
   // Alternative method names in case you're using different naming
   bool is_connected() const {
