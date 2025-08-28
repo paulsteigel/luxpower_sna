@@ -124,6 +124,9 @@ class LuxpowerSNAComponent : public PollingComponent {
   void loop() override;  // Non-blocking processing
 
   // Methods for switch support
+  void register_switch(class LuxPowerSwitch* switch_ptr);
+  void update_all_entity_states();
+
   void read_register_async(uint16_t reg, std::function<void(uint16_t)> callback);
   void write_register_async(uint16_t reg, uint16_t value, std::function<void(bool)> callback);
   /*
@@ -302,7 +305,10 @@ class LuxpowerSNAComponent : public PollingComponent {
   template_::TemplateNumber *port_input_{nullptr};
   template_::TemplateText *dongle_serial_input_{nullptr};
   template_::TemplateText *inverter_serial_input_{nullptr};
-
+  
+  // for switches and other
+  std::vector<class LuxPowerSwitch*> registered_switches_;
+  
   // Framework-specific connection management
 #ifdef USE_ESP_IDF
   int socket_fd_{-1};
