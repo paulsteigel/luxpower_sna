@@ -26,14 +26,11 @@ void LuxPowerSwitch::setup() {
     return;
   }
   
-  // Read initial state after 5 seconds (allow parent to establish connection)
-  this->set_timeout(5000, [this]() {
-    ESP_LOGD(SWITCH_TAG, "Reading initial state for '%s'", this->get_name().c_str());
-    this->read_current_state_();
-  });
-  
+  // No individual timer - will be updated by parent component according to YAML interval
   ESP_LOGD(SWITCH_TAG, "Switch '%s' registered for centralized updates (reg %d, mask 0x%04X)", 
            this->get_name().c_str(), register_address_, bitmask_);
+  
+  // Initial state will be read during first centralized update cycle
 }
 
 void LuxPowerSwitch::dump_config() {
@@ -105,7 +102,12 @@ void LuxPowerSwitch::update_state_from_parent() {
     }
   }
   
-  ESP_LOGV(SWITCH_TAG, "Centralized state update for '%s'", this->get_name().c_str());
+  if (!initial_state_read_) {
+    ESP_LOGD(SWITCH_TAG, "Reading initial state for '%s'", this->get_name().c_str());
+  } else {
+    ESP_LOGV(SWITCH_TAG, "Centralized state update for '%s'", this->get_name().c_str());
+  }
+  
   this->read_current_state_();
 }
 
