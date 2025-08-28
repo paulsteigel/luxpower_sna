@@ -276,7 +276,18 @@ void LuxpowerSNAComponent::loop() {
     case ConnectionState::PROCESSING_RESPONSE:
       handle_processing_response_state_();
       break;
-      
+    
+    case ConnectionState::ASYNC_OPERATION:
+      if (client_ && client_->connected()) {
+        // Process ONLY the single async request, don't start data collection
+        process_single_async_request_();
+      } else {
+        // Connection failed
+        ESP_LOGW(TAG, "Connection failed during async operation");
+        cleanup_failed_async_request_();
+      }
+      break;
+    
     case ConnectionState::ERROR:
       handle_error_state_();
       break;
@@ -284,6 +295,79 @@ void LuxpowerSNAComponent::loop() {
   
   // Process async requests when disconnected
   process_async_requests_();
+}
+
+void LuxpowerSNAComponent::process_single_async_request_() {
+  if (async_requests_.empty()) {
+    ESP_LOGW(TAG, "No async requests to process");
+    disconnect_client_();
+    connection_state_ = ConnectionState::DISCONNECTED;
+    processing_async_request_ = false;
+    return;
+  }
+  
+  AsyncRequest request = async_requests_.front();
+  async_requests_.erase(async_requests_.begin());
+  
+  ESP_LOGD(TAG, "Executing single %s request for register %d", 
+           request.type == AsyncRequest::READ ? "READ" : "WRITE", 
+           request.register_address);
+  
+  if (request.type == AsyncRequest::READ) {
+    // Single register read
+    execute_single_read_request_(request);
+  } else if (request.type == AsyncRequest::WRITE) {
+    // Single register write  
+    execute_single_write_request_(request);
+  }
+}
+
+void LuxpowerSNAComponent::execute_single_read_request_(const AsyncRequest& request) {
+  // Create a minimal read request for just this register
+  std::vector<uint8_t> read_command = create_read_command_(request.register_address, 1);
+  
+  if (!send_command_(read_command)) {
+    ESP_LOGW(TAG, "Failed to send single read command");
+    if (request.read_callback) request.read_callback(0);
+    finish_async_operation_();
+    return;
+  }
+  
+  // Set up response handling
+  this->set_timeout("single_read_timeout", 5000, [this, request]() {
+    ESP_LOGW(TAG, "Single read request timed out");
+    if (request.read_callback) request.read_callback(0);
+    finish_async_operation_();
+  });
+}
+
+void LuxpowerSNAComponent::execute_single_write_request_(const AsyncRequest& request) {
+  // Create a minimal write request for just this register
+  std::vector<uint8_t> write_command = create_write_command_(request.register_address, request.write_value);
+  
+  if (!send_command_(write_command)) {
+    ESP_LOGW(TAG, "Failed to send single write command");
+    if (request.write_callback) request.write_callback(false);
+    finish_async_operation_();
+    return;
+  }
+  
+  // Set up response handling
+  this->set_timeout("single_write_timeout", 5000, [this, request]() {
+    ESP_LOGW(TAG, "Single write request timed out");
+    if (request.write_callback) request.write_callback(false);
+    finish_async_operation_();
+  });
+}
+
+void LuxpowerSNAComponent::finish_async_operation_() {
+  this->cancel_timeout("single_read_timeout");
+  this->cancel_timeout("single_write_timeout");
+  disconnect_client_();
+  connection_state_ = ConnectionState::DISCONNECTED;
+  processing_async_request_ = false;
+  
+  ESP_LOGD(TAG, "Async operation completed, %zu requests remaining", async_requests_.size());
 }
 
 void LuxpowerSNAComponent::handle_disconnected_state_() {
@@ -861,67 +945,43 @@ void LuxpowerSNAComponent::process_async_requests_() {
     return;
   }
   
-  // Don't interfere with regular sensor data collection
-  uint32_t now = millis();
-  static uint32_t last_async_attempt = 0;
-  
-  // Wait longer between async operations to be gentler on the inverter
-  if (now - last_async_attempt < 5000) { // 5 second minimum between async operations
-    return;
-  }
-  
-  // Don't start async requests too close to the next scheduled sensor update
-  uint32_t time_until_next_update = this->get_update_interval() - (now % this->get_update_interval());
-  if (time_until_next_update < 10000) { // Don't start if next update is within 10 seconds
-    ESP_LOGV(TAG, "Delaying async request - next sensor update in %lu seconds", 
-             time_until_next_update / 1000);
-    return;
-  }
-  
   if (processing_async_request_) {
     // Check for timeout
-    if (now - async_request_start_time_ > 15000) { // 15 second timeout
+    uint32_t now = millis();
+    if (now - async_request_start_time_ > 10000) { // 10 second timeout
       ESP_LOGW(TAG, "Async request timed out, cleaning up");
-      processing_async_request_ = false;
-      disconnect_client_();
-      connection_state_ = ConnectionState::DISCONNECTED;
-      
-      // Clean up the failed request
-      if (!async_requests_.empty()) {
-        AsyncRequest request = async_requests_.front();
-        async_requests_.erase(async_requests_.begin());
-        
-        if (request.type == AsyncRequest::READ && request.read_callback) {
-          request.read_callback(0);
-        } else if (request.type == AsyncRequest::WRITE && request.write_callback) {
-          request.write_callback(false);
-        }
-      }
+      cleanup_failed_async_request_();
     }
     return;
   }
   
-  // Validate parameters before attempting connection
+  // Don't start async requests too close to scheduled sensor updates
+  uint32_t now = millis();
+  static uint32_t last_async_attempt = 0;
+  
+  if (now - last_async_attempt < 3000) { // Minimum 3 seconds between async operations
+    return;
+  }
+  
   if (!validate_runtime_parameters_()) {
     ESP_LOGV(TAG, "Cannot process async requests - parameters not ready");
     return;
   }
   
-  ESP_LOGD(TAG, "Starting async request processing (%zu requests queued)", async_requests_.size());
+  ESP_LOGD(TAG, "Processing single async request (%zu total queued)", async_requests_.size());
   processing_async_request_ = true;
   async_request_start_time_ = now;
   last_async_attempt = now;
   
-  // Start connection for async operation
+  // **CRITICAL**: Start connection for SINGLE OPERATION, not full data collection
   if (start_connection_attempt_()) {
-    connection_state_ = ConnectionState::CONNECTING;
+    connection_state_ = ConnectionState::ASYNC_OPERATION; // New state!
     state_start_time_ = now;
   } else {
     ESP_LOGW(TAG, "Failed to start connection for async request");
     processing_async_request_ = false;
   }
 }
-
 
 std::vector<uint8_t> LuxpowerSNAComponent::prepare_single_register_read_packet_(uint16_t reg) {
   std::string dongle_serial = get_dongle_serial_from_input_();
