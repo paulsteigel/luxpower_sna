@@ -272,10 +272,6 @@ void LuxpowerSNAComponent::loop() {
     case ConnectionState::WAITING_RESPONSE:
       handle_waiting_response_state_();
       break;
-      
-    case ConnectionState::PROCESSING_RESPONSE:
-      handle_processing_response_state_();
-      break;
     
     case ConnectionState::ASYNC_OPERATION:
       if (client_ && client_->connected()) {
@@ -508,9 +504,27 @@ void LuxpowerSNAComponent::handle_waiting_response_state_() {
   if (read_available_data_()) {
     // Check if we have enough data to process
     if (response_buffer_.size() >= sizeof(LuxHeader) + sizeof(LuxTranslatedData) + 2) {
-      connection_state_ = ConnectionState::PROCESSING_RESPONSE;
+      connection_state_ = ConnectionState::WAITING_RESPONSE;
     }
   }
+}
+
+void LuxpowerSNAComponent::cleanup_failed_async_request_() {
+  if (!async_requests_.empty()) {
+    AsyncRequest request = async_requests_.front();
+    async_requests_.erase(async_requests_.begin());
+    
+    // Call the callback with failure result
+    if (request.type == AsyncRequest::READ && request.read_callback) {
+      request.read_callback(0);
+    } else if (request.type == AsyncRequest::WRITE && request.write_callback) {
+      request.write_callback(false);
+    }
+  }
+  
+  disconnect_client_();
+  connection_state_ = ConnectionState::DISCONNECTED;
+  processing_async_request_ = false;
 }
 
 void LuxpowerSNAComponent::handle_processing_response_state_() {
@@ -890,7 +904,6 @@ const char* LuxpowerSNAComponent::get_state_name_(ConnectionState state) {
     case ConnectionState::CONNECTED: return "CONNECTED";
     case ConnectionState::REQUESTING_DATA: return "REQUESTING_DATA";
     case ConnectionState::WAITING_RESPONSE: return "WAITING_RESPONSE";
-    case ConnectionState::PROCESSING_RESPONSE: return "PROCESSING_RESPONSE";
     case ConnectionState::ERROR: return "ERROR";
     default: return "UNKNOWN";
   }
