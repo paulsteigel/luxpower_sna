@@ -153,7 +153,7 @@ class LuxpowerSNAComponent;
 // ---------------------------------------------------------------------------
 // Switch entity
 // ---------------------------------------------------------------------------
-class LuxpowerSNASwitch : public switch_::Switch {
+class LuxpowerSNASwitch : public switch_::Switch, public Component {
  public:
     void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
     void set_register(uint16_t reg)  { register_addr_ = reg; }
@@ -176,7 +176,7 @@ class LuxpowerSNASwitch : public switch_::Switch {
 // ---------------------------------------------------------------------------
 // Number entity
 // ---------------------------------------------------------------------------
-class LuxpowerSNANumber : public number::Number {
+class LuxpowerSNANumber : public number::Number, public Component {
  public:
     void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
     void set_register(uint16_t reg)   { register_addr_ = reg; }
@@ -208,7 +208,7 @@ class LuxpowerSNANumber : public number::Number {
 // ---------------------------------------------------------------------------
 // Button entity  (restart, reset_all_settings)
 // ---------------------------------------------------------------------------
-class LuxpowerSNAButton : public button::Button {
+class LuxpowerSNAButton : public button::Button, public Component {
  public:
     enum class Action : uint8_t { RESTART, RESET_ALL };
 
