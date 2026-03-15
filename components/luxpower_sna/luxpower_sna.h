@@ -8,6 +8,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/hal.h"         // millis()
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/switch/switch.h"
@@ -15,7 +16,7 @@
 
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
-#include <fcntl.h>
+// ioctl(FIONBIO) is used instead of fcntl(O_NONBLOCK) for IDF socket compatibility
 #include <queue>
 #include <vector>
 #include <cstring>
@@ -80,9 +81,10 @@ struct Bank1 {
     int32_t  e_inv_all, e_rec_all, e_chg_all, e_dischg_all, e_eps_all;
     int32_t  e_to_grid_all, e_to_user_all;
     uint32_t fault_code, warning_code;
-    int16_t  t_inner, t_rad_1, t_rad_2, t_bat;
-    uint16_t _reserved;
-    uint32_t uptime;
+    int16_t  t_inner, t_rad_1, t_rad_2, t_bat;  // regs 64-67
+    uint16_t _reserved68;                         // reg 68 (hold register bank, not used in INPUT)
+    uint32_t uptime;                              // regs 69-70
+    uint8_t  _tail[18];                           // regs 71-79 (padding to complete 40-register bank)
 };  // 80 bytes = 40 registers
 
 // Bank 2: registers 80-119
