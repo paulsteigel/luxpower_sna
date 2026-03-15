@@ -1,0 +1,281 @@
+# ============================================================
+# LuxPower SNA – ESPHome IDF-compatible example configuration
+# ============================================================
+#
+# Framework note: this component requires the Arduino framework.
+# If you previously had `framework: type: esp-idf`, remove it.
+# The lwip socket layer (lwip/sockets.h) works identically on
+# both Arduino-IDF and pure IDF builds inside ESPHome.
+#
+# ESPHome 2024.x+ supports both frameworks; the component now
+# uses lwip sockets directly, so it is framework-agnostic.
+# ============================================================
+
+esphome:
+  name: lux-esp32
+  platform: ESP32
+  board: esp32dev
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: components   # place the luxpower_sna folder here
+
+# ── Hub (one per inverter) ───────────────────────────────────
+luxpower_sna:
+  id: lux_hub
+  host: "192.168.1.100"   # Dongle IP address
+  port: 8000
+  dongle_serial: "1234567890"      # must be exactly 10 chars
+  inverter_serial: "SNA1234567"    # must be exactly 10 chars
+  update_interval: 20s             # READ_INPUT poll cycle
+  hold_update_interval: 60s        # READ_HOLD refresh cycle
+
+# ── Sensors ─────────────────────────────────────────────────
+sensor:
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+
+    # Live power
+    lux_current_solar_output:
+      name: "Solar Power"
+    lux_battery_percent:
+      name: "Battery SOC"
+    lux_battery_voltage:
+      name: "Battery Voltage"
+    lux_home_consumption_live:
+      name: "Home Consumption"
+    lux_power_to_grid_live:
+      name: "Power To Grid"
+    lux_power_from_grid_live:
+      name: "Power From Grid"
+    lux_battery_charge:
+      name: "Battery Charging"
+    lux_battery_discharge:
+      name: "Battery Discharging"
+
+    # Daily energy
+    lux_daily_solar:
+      name: "Solar Today"
+    lux_daily_battery_charge:
+      name: "Battery Charged Today"
+    lux_daily_battery_discharge:
+      name: "Battery Discharged Today"
+    lux_power_from_grid_daily:
+      name: "Grid Import Today"
+    lux_power_to_grid_daily:
+      name: "Grid Export Today"
+    lux_home_consumption:
+      name: "Home Consumption Today"
+
+    # All-time totals
+    lux_total_solar:
+      name: "Solar Total"
+    lux_power_from_grid_total:
+      name: "Grid Import Total"
+    lux_power_to_grid_total:
+      name: "Grid Export Total"
+
+    # Battery health
+    lux_battery_current:
+      name: "Battery Current"
+    lux_battery_temperature_live:
+      name: "Battery Temperature"
+    lux_battery_cycle_count:
+      name: "Battery Cycles"
+    max_cell_volt:
+      name: "Cell Voltage Max"
+    min_cell_volt:
+      name: "Cell Voltage Min"
+
+    # Inverter
+    lux_internal_temp:
+      name: "Inverter Temp"
+    lux_grid_voltage_live:
+      name: "Grid Voltage"
+    lux_grid_frequency_live:
+      name: "Grid Frequency"
+    lux_fault_code:
+      name: "Fault Code"
+    lux_warning_code:
+      name: "Warning Code"
+
+    # Text
+    lux_status_text:
+      name: "Inverter Status"
+    lux_battery_status_text:
+      name: "Battery Status"
+
+# ── Switches ────────────────────────────────────────────────
+# Bitmask constants (from LXPPacket.py):
+#   NORMAL_OR_STANDBY       = 0x0200
+#   POWER_BACKUP_ENABLE     = 0x0001
+#   FEED_IN_GRID            = 0x8000
+#   AC_CHARGE_ENABLE        = 0x0080
+#   CHARGE_PRIORITY         = 0x0800
+#   FORCED_DISCHARGE_ENABLE = 0x0400
+#   SEAMLESS_EPS_SWITCHING  = 0x0100
+#   DCI_ENABLE              = 0x4000
+#   GFCI_ENABLE             = 0x2000
+#   GRID_ON_POWER_SS        = 0x0040
+#   ANTI_ISLAND_ENABLE      = 0x0010
+#   DRMS_ENABLE             = 0x0004
+#   OVF_LOAD_DERATE_ENABLE  = 0x0002
+#   CHARGE_LAST   (reg110)  = 0x0010
+#   ENABLE_PEAK_SHAVING (179)= 0x0080
+
+switch:
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Normal / Standby"
+    register: 21
+    bitmask: 0x0200
+    icon: "mdi:power"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "AC Charge Enable"
+    register: 21
+    bitmask: 0x0080
+    icon: "mdi:battery-charging"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Feed In Grid"
+    register: 21
+    bitmask: 0x8000
+    icon: "mdi:transmission-tower-export"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Charge Priority"
+    register: 21
+    bitmask: 0x0800
+    icon: "mdi:battery-arrow-up"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Power Backup Enable"
+    register: 21
+    bitmask: 0x0001
+    icon: "mdi:home-battery"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Seamless EPS Switching"
+    register: 21
+    bitmask: 0x0100
+    icon: "mdi:power-plug-off"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Charge Last"
+    register: 110
+    bitmask: 0x0010
+    icon: "mdi:battery-clock"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Grid Peak-Shaving"
+    register: 179
+    bitmask: 0x0080
+    icon: "mdi:chart-bell-curve"
+
+# ── Numbers ─────────────────────────────────────────────────
+number:
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "System Charge Power Rate"
+    register: 64
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:battery-charging-80"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "System Discharge Power Rate"
+    register: 65
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:battery-arrow-down"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "AC Charge Power Rate"
+    register: 66
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:transmission-tower-import"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "AC Charge Battery Level"
+    register: 67
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:battery-charging-100"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "On-grid Discharge Cut-off SOC"
+    register: 105
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:battery-low"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Forced Discharge Power Rate"
+    register: 82
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:battery-arrow-down"
+
+  # Voltage numbers use divisor: 10 (stored as tenths)
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Charge Voltage"
+    register: 99
+    min_value: 40
+    max_value: 60
+    step: 0.1
+    divisor: 10
+    unit_of_measurement: "V"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "Discharge Cut-off Voltage"
+    register: 100
+    min_value: 40
+    max_value: 55
+    step: 0.1
+    divisor: 10
+    unit_of_measurement: "V"
+
+  # Signed register (CT clamp offset)
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    name: "CT Clamp Offset"
+    register: 119
+    min_value: -199
+    max_value: 199
+    step: 1
+    signed: true
+    unit_of_measurement: "W"
+    icon: "mdi:current-ac"
