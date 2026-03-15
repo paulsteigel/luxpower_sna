@@ -4,14 +4,15 @@ from esphome.components import switch
 from esphome.const import CONF_ID
 
 from . import luxpower_sna_ns, CONF_LUXPOWER_SNA_ID
-from . import LuxpowerSNAComponent  # noqa
+
+# Re-declare via namespace lookup (idempotent in ESPHome codegen – safe to call
+# again here; avoids circular-import issues with importing from __init__.py)
+LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.Component)
+LuxpowerSNASwitch    = luxpower_sna_ns.class_("LuxpowerSNASwitch", switch.Switch)
 
 CONF_REGISTER = "register"
 CONF_BITMASK  = "bitmask"
 
-LuxpowerSNASwitch = luxpower_sna_ns.class_("LuxpowerSNASwitch", switch.Switch)
-
-# Single .extend() call – avoids double-chain issues across ESPHome versions
 CONFIG_SCHEMA = switch.switch_schema(LuxpowerSNASwitch).extend({
     cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
     cv.Required(CONF_REGISTER):          cv.int_range(min=0, max=239),
