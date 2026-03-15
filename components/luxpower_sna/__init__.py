@@ -49,5 +49,5 @@ async def to_code(config):
         raise cv.Invalid("inverter_serial must be exactly 10 characters")
     cg.add(var.set_inverter_serial(inverter))
 
-    cg.add(var.set_update_interval_ms(config[CONF_UPDATE_INTERVAL]))
-    cg.add(var.set_hold_update_interval_ms(config[CONF_HOLD_UPDATE_INTERVAL]))
+    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
+    cg.add(var.set_hold_update_interval(config[CONF_HOLD_UPDATE_INTERVAL]))
