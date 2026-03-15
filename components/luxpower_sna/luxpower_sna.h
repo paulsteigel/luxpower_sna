@@ -221,6 +221,24 @@ class LuxpowerSNAComponent : public Component {
     void set_update_interval_ms(uint32_t ms)     { update_interval_ms_ = ms; }
     void set_hold_update_interval_ms(uint32_t ms){ hold_interval_ms_ = ms; }
 
+    // ---- Runtime reconfiguration ----------------------------------------
+    // Call these from text/number entity on_value lambdas, then call reconnect().
+    // They are safe to call at any time; if currently connected, the existing
+    // socket is closed and a new connection is attempted with the new params.
+    void reconnect() {
+        ESP_LOGI(TAG, "reconnect() called – closing socket and resetting state");
+        close_socket_();           // sets state_ = DISCONNECTED
+        last_connect_ms_ = 0;      // connect immediately on next loop()
+        initial_hold_done_ = false; // re-fetch hold registers after reconnect
+    }
+
+    // Returns true when config is complete enough to attempt a connection
+    bool is_config_ready() const {
+        return !host_.empty()
+            && dongle_serial_.size() == 10
+            && inverter_serial_.size() == 10;
+    }
+
     // ---- Called by switches / numbers to request a register write ----
     void queue_write(uint16_t reg, uint16_t value);
 
