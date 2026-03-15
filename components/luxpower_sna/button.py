@@ -37,7 +37,7 @@ CONF_ACTION = "action"
 ACTIONS = ["restart", "reset_all"]
 
 LuxpowerSNAButton = luxpower_sna_ns.class_(
-    "LuxpowerSNAButton", button.Button, cg.Component
+    "LuxpowerSNAButton", button.Button
 )
 ButtonAction = luxpower_sna_ns.enum("LuxpowerSNAButton::Action", is_class=True)
 
@@ -46,13 +46,11 @@ ACTION_MAP = {
     "reset_all": ButtonAction.RESET_ALL,
 }
 
-CONFIG_SCHEMA = cv.All(
-    button.button_schema(LuxpowerSNAButton).extend(
+CONFIG_SCHEMA = button.button_schema(LuxpowerSNAButton).extend(
         LUXPOWER_SNA_COMPONENT_SCHEMA
     ).extend({
         cv.Required(CONF_ACTION): cv.one_of(*ACTIONS, lower=True),
-    })
-)
+})
 
 
 async def to_code(config):
