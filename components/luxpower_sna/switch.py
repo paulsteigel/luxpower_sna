@@ -55,20 +55,20 @@ LuxpowerSNASwitch = luxpower_sna_ns.class_(
     "LuxpowerSNASwitch", switch.Switch, cg.Component
 )
 
-CONFIG_SCHEMA = switch.SWITCH_SCHEMA.extend(
-    LUXPOWER_SNA_COMPONENT_SCHEMA
-).extend({
-    cv.GenerateID(): cv.declare_id(LuxpowerSNASwitch),
-    cv.Required(CONF_REGISTER): cv.int_range(min=0, max=239),
-    cv.Required(CONF_BITMASK):  cv.hex_int,
-}).extend(cv.COMPONENT_SCHEMA)
+CONFIG_SCHEMA = cv.All(
+    switch.switch_schema(LuxpowerSNASwitch).extend(
+        LUXPOWER_SNA_COMPONENT_SCHEMA
+    ).extend({
+        cv.Required(CONF_REGISTER): cv.int_range(min=0, max=239),
+        cv.Required(CONF_BITMASK):  cv.hex_int,
+    }).extend(cv.COMPONENT_SCHEMA)
+)
 
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    var = cg.new_Pvariable(config[CONF_ID])
+    var = await switch.new_switch(config)
     await cg.register_component(var, config)
-    await switch.register_switch(var, config)
 
     cg.add(var.set_parent(hub))
     cg.add(var.set_register(config[CONF_REGISTER]))
