@@ -14,7 +14,7 @@ YAML usage:
     - platform: luxpower_sna
       luxpower_sna_id: lux_hub
       normal_or_standby:
-        name: "Normal or Standby"
+        name: "Normal / Standby"
       ac_charge_enable:
         name: "AC Charge Enable"
       feed_in_grid:
