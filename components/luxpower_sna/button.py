@@ -51,14 +51,12 @@ CONFIG_SCHEMA = cv.All(
         LUXPOWER_SNA_COMPONENT_SCHEMA
     ).extend({
         cv.Required(CONF_ACTION): cv.one_of(*ACTIONS, lower=True),
-    }).extend(cv.COMPONENT_SCHEMA)
 )
 
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     var = await button.new_button(config)
-    await cg.register_component(var, config)
 
     cg.add(var.set_parent(hub))
     cg.add(var.set_action(ACTION_MAP[config[CONF_ACTION]]))
