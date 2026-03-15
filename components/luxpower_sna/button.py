@@ -51,6 +51,7 @@ CONFIG_SCHEMA = cv.All(
         LUXPOWER_SNA_COMPONENT_SCHEMA
     ).extend({
         cv.Required(CONF_ACTION): cv.one_of(*ACTIONS, lower=True),
+    })
 )
 
 
