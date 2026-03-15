@@ -61,14 +61,12 @@ CONFIG_SCHEMA = cv.All(
     ).extend({
         cv.Required(CONF_REGISTER): cv.int_range(min=0, max=239),
         cv.Required(CONF_BITMASK):  cv.hex_int,
-    }).extend(cv.COMPONENT_SCHEMA)
 )
 
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     var = await switch.new_switch(config)
-    await cg.register_component(var, config)
 
     cg.add(var.set_parent(hub))
     cg.add(var.set_register(config[CONF_REGISTER]))
