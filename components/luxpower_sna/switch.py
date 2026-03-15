@@ -61,6 +61,7 @@ CONFIG_SCHEMA = cv.All(
     ).extend({
         cv.Required(CONF_REGISTER): cv.int_range(min=0, max=239),
         cv.Required(CONF_BITMASK):  cv.hex_int,
+    })
 )
 
 
