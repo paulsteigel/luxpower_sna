@@ -626,7 +626,7 @@ void LuxpowerSNAComponent::process_bank0_(const Bank0 &d) {
     pub(grid_v_r_,    d.v_ac_r / 10.0f);
     pub(grid_v_s_,    d.v_ac_s / 10.0f);
     pub(grid_v_t_,    d.v_ac_t / 10.0f);
-    pub(grid_v_live_, (float)d.v_ac_r);   // raw = volts (no /10 for HA compatibility)
+    pub(grid_v_live_, d.v_ac_r / 10.0f);  // same as v_ac_r: raw register unit is 0.1V
     pub(grid_freq_,   d.f_ac / 100.0f);
     // Inverter AC
     pub(p_inv_,        d.p_inv);
@@ -707,6 +707,8 @@ void LuxpowerSNAComponent::process_bank1_(const Bank1 &d) {
 void LuxpowerSNAComponent::process_bank2_(const Bank2 &d) {
     // Python uses /100 for most models, /10 for HV batteries (FAAB/EAAB/ACAB/CFAA/CCAA).
     // Default /10 here. If BMS current shows 10x too high, change to /100.0f.
+    // Python default /100 (most models). /10 for HV batteries (FAAB/EAAB/ACAB).
+    // SNA is HV → /10 is correct. Change to /100.0f if values look 10x too large.
     pub(bms_max_chg_,   d.max_chg_curr / 10.0f);
     pub(bms_max_dischg_,d.max_dischg_curr / 10.0f);
     pub(chg_volt_ref_,  d.charge_volt_ref / 10.0f);
