@@ -94,6 +94,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_BITSHIFT, default=0):        cv.int_range(min=0, max=15),
         cv.Optional(CONF_DIVISOR,  default=1):        cv.positive_int,
         cv.Optional(CONF_SIGNED,   default=False):    cv.boolean,
+    })
 )
 
 
