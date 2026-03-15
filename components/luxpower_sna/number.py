@@ -79,11 +79,10 @@ CONF_DIVISOR   = "divisor"
 CONF_SIGNED    = "signed"
 
 LuxpowerSNANumber = luxpower_sna_ns.class_(
-    "LuxpowerSNANumber", number.Number, cg.Component
+    "LuxpowerSNANumber", number.Number
 )
 
-CONFIG_SCHEMA = cv.All(
-    number.number_schema(LuxpowerSNANumber).extend(
+CONFIG_SCHEMA = number.number_schema(LuxpowerSNANumber).extend(
         LUXPOWER_SNA_COMPONENT_SCHEMA
     ).extend({
         cv.Required(CONF_REGISTER):  cv.int_range(min=0, max=239),
@@ -94,8 +93,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_BITSHIFT, default=0):        cv.int_range(min=0, max=15),
         cv.Optional(CONF_DIVISOR,  default=1):        cv.positive_int,
         cv.Optional(CONF_SIGNED,   default=False):    cv.boolean,
-    })
-)
+})
 
 
 async def to_code(config):
