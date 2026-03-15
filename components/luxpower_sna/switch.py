@@ -13,7 +13,7 @@ YAML usage:
   switch:
     - platform: luxpower_sna
       luxpower_sna_id: lux_hub
-      normal_standby:
+      normal_or_standby:
         name: "Normal / Standby"
       ac_charge_enable:
         name: "AC Charge Enable"
@@ -29,7 +29,7 @@ YAML usage:
         name: "Forced Discharge"
       charge_last:
         name: "Charge Last"
-      grid_peak_shaving:
+      enable_peak_shaving:
         name: "Grid Peak Shaving"
 """
 
@@ -45,7 +45,7 @@ LuxpowerSNASwitch    = luxpower_sna_ns.class_("LuxpowerSNASwitch", switch.Switch
 
 # (name, register, bitmask) – mirrors HA integration switch.py
 SWITCHES = {
-    "normal_standby":        ("Normal / Standby",        21, 0x0200),
+    "normal_or_standby":        ("Normal / Standby",        21, 0x0200),
     "ac_charge_enable":      ("AC Charge Enable",         21, 0x0080),
     "feed_in_grid":          ("Feed In Grid",             21, 0x8000),
     "charge_priority":       ("Charge Priority",          21, 0x0800),
@@ -61,7 +61,7 @@ SWITCHES = {
     "ovf_load_derate_enable":("OVF Load Derate Enable",   21, 0x0002),
     "charge_last":           ("Charge Last",             110, 0x0010),
     "take_load_together":    ("Take Load Together",      110, 0x0400),
-    "grid_peak_shaving":     ("Grid Peak Shaving",       179, 0x0080),
+    "enable_peak_shaving":     ("Grid Peak Shaving",       179, 0x0080),
 }
 
 CONFIG_SCHEMA = cv.Schema({
