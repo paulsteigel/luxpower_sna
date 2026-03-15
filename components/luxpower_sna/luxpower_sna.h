@@ -218,8 +218,8 @@ class LuxpowerSNAComponent : public Component {
     void set_port(uint16_t p)                    { port_ = p; }
     void set_dongle_serial(const std::string &s) { dongle_serial_ = s; }
     void set_inverter_serial(const std::string &s){ inverter_serial_ = s; }
-    void set_update_interval_ms(uint32_t ms)     { update_interval_ms_ = ms; }
-    void set_hold_update_interval_ms(uint32_t ms){ hold_interval_ms_ = ms; }
+    void set_update_interval(uint32_t ms)         { update_interval_ms_ = ms; }
+    void set_hold_update_interval(uint32_t ms)    { hold_interval_ms_ = ms; }
 
     // ---- Runtime reconfiguration ----------------------------------------
     // Call these from text/number entity on_value lambdas, then call reconnect().
