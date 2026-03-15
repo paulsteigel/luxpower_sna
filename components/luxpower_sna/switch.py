@@ -5,19 +5,23 @@ from esphome.const import CONF_ID
 
 from . import luxpower_sna_ns, CONF_LUXPOWER_SNA_ID
 
-# Re-declare via namespace lookup (idempotent in ESPHome codegen – safe to call
-# again here; avoids circular-import issues with importing from __init__.py)
 LuxpowerSNAComponent = luxpower_sna_ns.class_("LuxpowerSNAComponent", cg.Component)
 LuxpowerSNASwitch    = luxpower_sna_ns.class_("LuxpowerSNASwitch", switch.Switch)
 
 CONF_REGISTER = "register"
 CONF_BITMASK  = "bitmask"
 
-CONFIG_SCHEMA = switch.switch_schema(LuxpowerSNASwitch).extend({
-    cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
-    cv.Required(CONF_REGISTER):          cv.int_range(min=0, max=239),
-    cv.Required(CONF_BITMASK):           cv.hex_int,
-})
+# cv.All: first schema validates switch entity fields (name, icon, id...),
+# second schema validates our custom keys with ALLOW_EXTRA so switch keys
+# are not rejected.
+CONFIG_SCHEMA = cv.All(
+    switch.switch_schema(LuxpowerSNASwitch),
+    cv.Schema({
+        cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
+        cv.Required(CONF_REGISTER):          cv.int_range(min=0, max=239),
+        cv.Required(CONF_BITMASK):           cv.hex_int,
+    }, extra=cv.ALLOW_EXTRA),
+)
 
 
 async def to_code(config):
