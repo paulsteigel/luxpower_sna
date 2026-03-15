@@ -13,6 +13,8 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/number/number.h"
+#include "esphome/components/button/button.h"
+#include "esphome/core/time.h"
 
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -203,6 +205,62 @@ class LuxpowerSNANumber : public number::Number {
 };
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Button entity  (restart, reset_all_settings)
+// ---------------------------------------------------------------------------
+class LuxpowerSNAButton : public button::Button {
+ public:
+    enum class Action : uint8_t { RESTART, RESET_ALL };
+
+    void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
+    void set_action(Action a)                      { action_ = a; }
+
+ protected:
+    void press_action() override;
+
+ private:
+    LuxpowerSNAComponent *parent_{nullptr};
+    Action action_{Action::RESTART};
+};
+
+// ---------------------------------------------------------------------------
+// Time entity  – maps to a single hold register, encoding = minute*256 + hour
+// Exposed as a text entity ("HH:MM") since ESPHome has no native time-input.
+// on_hold_update() parses the cached register and calls publish_state().
+// control()  (called when user sets value in HA) encodes and queues a write.
+// ---------------------------------------------------------------------------
+class LuxpowerSNATime : public Component {
+ public:
+    void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
+    void set_register(uint16_t reg)               { register_addr_ = reg; }
+    void set_name(const std::string &n)           { name_ = n; }
+
+    /// Called by hub when hold registers are refreshed
+    void on_hold_update(const uint16_t *hold_regs);
+
+    /// Set time from string "HH:MM" – called by lambda in YAML
+    void set_time(const std::string &hhmm);
+
+    /// Get current value as "HH:MM" string
+    std::string get_time() const { return current_hhmm_; }
+
+    uint16_t get_register() const { return register_addr_; }
+
+ private:
+    LuxpowerSNAComponent *parent_{nullptr};
+    uint16_t register_addr_{0};
+    std::string name_;
+    std::string current_hhmm_{"00:00"};
+
+    static uint16_t encode_(uint8_t hour, uint8_t minute) {
+        return (uint16_t)((minute << 8) | hour);
+    }
+    static void decode_(uint16_t val, uint8_t &hour, uint8_t &minute) {
+        hour   = val & 0x00FF;
+        minute = (val >> 8) & 0xFF;
+    }
+};
+
 // Hub / main component
 // ---------------------------------------------------------------------------
 class LuxpowerSNAComponent : public Component {
@@ -250,6 +308,12 @@ class LuxpowerSNAComponent : public Component {
     // ---- Platform registration ----
     void register_switch(LuxpowerSNASwitch *sw)  { switches_.push_back(sw); }
     void register_number(LuxpowerSNANumber *num) { numbers_.push_back(num); }
+    void register_button(LuxpowerSNAButton *btn) { /* no list needed, buttons are fire-and-forget */ }
+    void register_time(LuxpowerSNATime *t)       { times_.push_back(t); }
+
+    // ---- Actions called by buttons ----
+    void action_restart();
+    void action_reset_all();
 
     // ---- Sensor setters (Section 1 – bank 0) ----
     void set_lux_status_text_sensor(text_sensor::TextSensor *s)         { lux_status_text_ = s; }
@@ -439,6 +503,7 @@ class LuxpowerSNAComponent : public Component {
     // ---- Platform entities ----
     std::vector<LuxpowerSNASwitch*> switches_;
     std::vector<LuxpowerSNANumber*> numbers_;
+    std::vector<LuxpowerSNATime*>   times_;
 
     // ---- Status texts ----
     static const char *STATUS_TEXTS[193];
