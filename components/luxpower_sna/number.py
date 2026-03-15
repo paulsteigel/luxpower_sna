@@ -82,32 +82,31 @@ LuxpowerSNANumber = luxpower_sna_ns.class_(
     "LuxpowerSNANumber", number.Number, cg.Component
 )
 
-CONFIG_SCHEMA = number.NUMBER_SCHEMA.extend(
-    LUXPOWER_SNA_COMPONENT_SCHEMA
-).extend({
-    cv.GenerateID(): cv.declare_id(LuxpowerSNANumber),
-    cv.Required(CONF_REGISTER):  cv.int_range(min=0, max=239),
-    cv.Required(CONF_MIN_VALUE): cv.float_,
-    cv.Required(CONF_MAX_VALUE): cv.float_,
-    cv.Optional(CONF_STEP, default=1.0):     cv.positive_float,
-    cv.Optional(CONF_BITMASK,  default=0xFFFF): cv.hex_int,
-    cv.Optional(CONF_BITSHIFT, default=0):   cv.int_range(min=0, max=15),
-    cv.Optional(CONF_DIVISOR,  default=1):   cv.positive_int,
-    cv.Optional(CONF_SIGNED,   default=False): cv.boolean,
-}).extend(cv.COMPONENT_SCHEMA)
+CONFIG_SCHEMA = cv.All(
+    number.number_schema(LuxpowerSNANumber).extend(
+        LUXPOWER_SNA_COMPONENT_SCHEMA
+    ).extend({
+        cv.Required(CONF_REGISTER):  cv.int_range(min=0, max=239),
+        cv.Required(CONF_MIN_VALUE): cv.float_,
+        cv.Required(CONF_MAX_VALUE): cv.float_,
+        cv.Optional(CONF_STEP,     default=1.0):     cv.positive_float,
+        cv.Optional(CONF_BITMASK,  default=0xFFFF):  cv.hex_int,
+        cv.Optional(CONF_BITSHIFT, default=0):        cv.int_range(min=0, max=15),
+        cv.Optional(CONF_DIVISOR,  default=1):        cv.positive_int,
+        cv.Optional(CONF_SIGNED,   default=False):    cv.boolean,
+    }).extend(cv.COMPONENT_SCHEMA)
+)
 
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await number.register_number(
-        var,
+    var = await number.new_number(
         config,
         min_value=config[CONF_MIN_VALUE],
         max_value=config[CONF_MAX_VALUE],
         step=config[CONF_STEP],
     )
+    await cg.register_component(var, config)
 
     cg.add(var.set_parent(hub))
     cg.add(var.set_register(config[CONF_REGISTER]))
