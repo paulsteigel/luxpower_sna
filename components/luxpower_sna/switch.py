@@ -1,66 +1,28 @@
-"""
-ESPHome switch platform for LuxPower SNA.
-
-Each switch maps to a bitmask within a holding register.
-Pattern: READ hold_reg → apply bitmask → WRITE_SINGLE
-
-Example YAML:
-  switch:
-    - platform: luxpower_sna
-      luxpower_sna_id: lux_hub
-      name: "AC Charge Enable"
-      register: 21
-      bitmask: 0x0080
-      icon: "mdi:battery-charging"
-
-Bitmasks (reg 21):
-  NORMAL_OR_STANDBY       = 0x0200    POWER_BACKUP_ENABLE     = 0x0001
-  FEED_IN_GRID            = 0x8000    SEAMLESS_EPS_SWITCHING  = 0x0100
-  AC_CHARGE_ENABLE        = 0x0080    CHARGE_PRIORITY         = 0x0800
-  FORCED_DISCHARGE_ENABLE = 0x0400    DCI_ENABLE              = 0x4000
-  GFCI_ENABLE             = 0x2000    GRID_ON_POWER_SS        = 0x0040
-  NEUTRAL_DETECT_ENABLE   = 0x0020    ANTI_ISLAND_ENABLE      = 0x0010
-  DRMS_ENABLE             = 0x0004    OVF_LOAD_DERATE_ENABLE  = 0x0002
-
-Register 110:
-  TAKE_LOAD_TOGETHER = 0x0400    CHARGE_LAST = 0x0010
-
-Register 179:
-  ENABLE_PEAK_SHAVING = 0x0080
-"""
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import switch
 from esphome.const import CONF_ID
 
-from . import (
-    luxpower_sna_ns,
-    LUXPOWER_SNA_COMPONENT_SCHEMA,
-    CONF_LUXPOWER_SNA_ID,
-)
+from . import luxpower_sna_ns, CONF_LUXPOWER_SNA_ID
+from . import LuxpowerSNAComponent  # noqa
 
 CONF_REGISTER = "register"
 CONF_BITMASK  = "bitmask"
 
-# Switch already inherits Component – do NOT add cg.Component here
 LuxpowerSNASwitch = luxpower_sna_ns.class_("LuxpowerSNASwitch", switch.Switch)
 
-# No cv.All() wrapper – extend directly so all keys (name, icon, ...) pass through
-CONFIG_SCHEMA = switch.switch_schema(LuxpowerSNASwitch).extend(
-    LUXPOWER_SNA_COMPONENT_SCHEMA
-).extend({
-    cv.Required(CONF_REGISTER): cv.int_range(min=0, max=239),
-    cv.Required(CONF_BITMASK):  cv.hex_int,
+# Single .extend() call – avoids double-chain issues across ESPHome versions
+CONFIG_SCHEMA = switch.switch_schema(LuxpowerSNASwitch).extend({
+    cv.GenerateID(CONF_LUXPOWER_SNA_ID): cv.use_id(LuxpowerSNAComponent),
+    cv.Required(CONF_REGISTER):          cv.int_range(min=0, max=239),
+    cv.Required(CONF_BITMASK):           cv.hex_int,
 })
 
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_LUXPOWER_SNA_ID])
     var = await switch.new_switch(config)
-
     cg.add(var.set_parent(hub))
     cg.add(var.set_register(config[CONF_REGISTER]))
     cg.add(var.set_bitmask(config[CONF_BITMASK]))
-
     cg.add(hub.register_switch(var))
