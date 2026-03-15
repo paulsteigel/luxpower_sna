@@ -1,8 +1,10 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_HOST, CONF_PORT, CONF_UPDATE_INTERVAL
+from esphome.const import CONF_ID, CONF_UPDATE_INTERVAL
+# CONF_HOST / CONF_PORT do not exist in esphome.const – define locally
+CONF_HOST             = "host"
+CONF_PORT             = "port"
 
-# "network" does not exist in ESPHome – only "wifi" is needed
 DEPENDENCIES = ["wifi"]
 AUTO_LOAD = ["sensor", "text_sensor", "switch", "number"]
 MULTI_CONF = True
@@ -21,9 +23,6 @@ LUXPOWER_SNA_COMPONENT_SCHEMA = cv.Schema({
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID():                    cv.declare_id(LuxpowerSNAComponent),
-    # All four connection params are Optional – they can be left blank here
-    # and set at runtime via text/number entities (see example.yaml).
-    # If provided here they are compiled in as defaults.
     cv.Optional(CONF_HOST,            default=""): cv.string,
     cv.Optional(CONF_PORT,            default=8000): cv.port,
     cv.Optional(CONF_DONGLE_SERIAL,   default=""): cv.string,
