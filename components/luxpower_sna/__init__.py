@@ -21,10 +21,13 @@ LUXPOWER_SNA_COMPONENT_SCHEMA = cv.Schema({
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID():                    cv.declare_id(LuxpowerSNAComponent),
-    cv.Required(CONF_HOST):             cv.string,
-    cv.Required(CONF_PORT):             cv.port,
-    cv.Required(CONF_DONGLE_SERIAL):    cv.string,
-    cv.Required(CONF_INVERTER_SERIAL):  cv.string,
+    # All four connection params are Optional – they can be left blank here
+    # and set at runtime via text/number entities (see example.yaml).
+    # If provided here they are compiled in as defaults.
+    cv.Optional(CONF_HOST,            default=""): cv.string,
+    cv.Optional(CONF_PORT,            default=8000): cv.port,
+    cv.Optional(CONF_DONGLE_SERIAL,   default=""): cv.string,
+    cv.Optional(CONF_INVERTER_SERIAL, default=""): cv.string,
     cv.Optional(CONF_UPDATE_INTERVAL,      default="20s"): cv.update_interval,
     cv.Optional(CONF_HOLD_UPDATE_INTERVAL, default="60s"): cv.update_interval,
 }).extend(cv.COMPONENT_SCHEMA)
@@ -38,12 +41,12 @@ async def to_code(config):
     cg.add(var.set_port(config[CONF_PORT]))
 
     dongle = config[CONF_DONGLE_SERIAL]
-    if len(dongle) != 10:
+    if dongle and len(dongle) != 10:
         raise cv.Invalid("dongle_serial must be exactly 10 characters")
     cg.add(var.set_dongle_serial(dongle))
 
     inverter = config[CONF_INVERTER_SERIAL]
-    if len(inverter) != 10:
+    if inverter and len(inverter) != 10:
         raise cv.Invalid("inverter_serial must be exactly 10 characters")
     cg.add(var.set_inverter_serial(inverter))
 
