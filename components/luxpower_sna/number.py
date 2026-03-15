@@ -94,7 +94,6 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_BITSHIFT, default=0):        cv.int_range(min=0, max=15),
         cv.Optional(CONF_DIVISOR,  default=1):        cv.positive_int,
         cv.Optional(CONF_SIGNED,   default=False):    cv.boolean,
-    }).extend(cv.COMPONENT_SCHEMA)
 )
 
 
@@ -106,7 +105,6 @@ async def to_code(config):
         max_value=config[CONF_MAX_VALUE],
         step=config[CONF_STEP],
     )
-    await cg.register_component(var, config)
 
     cg.add(var.set_parent(hub))
     cg.add(var.set_register(config[CONF_REGISTER]))
