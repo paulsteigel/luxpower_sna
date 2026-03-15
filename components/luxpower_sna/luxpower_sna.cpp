@@ -60,6 +60,10 @@ void LuxpowerSNAComponent::setup() {
     ESP_LOGCONFIG(TAG, "LuxPower SNA setup…");
     memset(recv_buf_, 0, sizeof(recv_buf_));
     recv_buf_len_ = 0;
+    // Initialize timing so the first input poll happens after one full interval,
+    // not immediately. The initial hold poll fires right after connect via initial_hold_done_.
+    last_input_poll_ms_ = millis();
+    last_hold_poll_ms_  = millis();
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -202,30 +206,41 @@ bool LuxpowerSNAComponent::start_connect_() {
         return false;
     }
 
-    // Non-blocking
-    int flags = fcntl(sock_fd_, F_GETFL, 0);
-    fcntl(sock_fd_, F_SETFL, flags | O_NONBLOCK);
+    // Non-blocking via ioctl(FIONBIO) – more reliable than fcntl(O_NONBLOCK) on IDF
+    int non_blocking = 1;
+    ioctl(sock_fd_, FIONBIO, &non_blocking);
 
-    // Disable Nagle (lower latency for small packets)
+    // Disable Nagle for lower latency on small packets
     int yes = 1;
     setsockopt(sock_fd_, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
 
+    // Use getaddrinfo so both IP strings ("192.168.1.x") and hostnames work
+    struct addrinfo hints{};
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = nullptr;
+    int gai = getaddrinfo(host_.c_str(), nullptr, &hints, &res);
+    if (gai != 0 || res == nullptr) {
+        ESP_LOGE(TAG, "DNS lookup failed for %s (err=%d)", host_.c_str(), gai);
+        close_socket_();
+        return false;
+    }
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port_);
-    inet_pton(AF_INET, host_.c_str(), &addr.sin_addr);
+    addr.sin_addr   = reinterpret_cast<struct sockaddr_in *>(res->ai_addr)->sin_addr;
+    freeaddrinfo(res);
 
-    int ret = connect(sock_fd_, (struct sockaddr *)&addr, sizeof(addr));
+    int ret = connect(sock_fd_, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
     if (ret == 0) {
-        // Immediate connect (rare on real networks)
         ESP_LOGI(TAG, "Connected immediately to %s:%u", host_.c_str(), port_);
         state_ = State::IDLE;
         return true;
     }
     if (errno == EINPROGRESS) {
-        return true;  // will check with check_connect_()
+        return true;  // check_connect_() will confirm
     }
-    ESP_LOGE(TAG, "connect() failed: %d", errno);
+    ESP_LOGE(TAG, "connect() failed: errno=%d", errno);
     close_socket_();
     return false;
 }
@@ -239,7 +254,13 @@ bool LuxpowerSNAComponent::check_connect_() {
     struct timeval tv{0, 0};
 
     int ret = select(sock_fd_ + 1, nullptr, &wfds, &efds, &tv);
-    if (ret <= 0) return false;  // Not ready yet (or error in select)
+    if (ret < 0) {
+        // select() itself failed (e.g. EBADF) – socket is invalid
+        ESP_LOGE(TAG, "select() error %d during connect check", errno);
+        close_socket_();
+        return false;
+    }
+    if (ret == 0) return false;  // Not ready yet – still connecting
 
     int err = 0;
     socklen_t errlen = sizeof(err);
