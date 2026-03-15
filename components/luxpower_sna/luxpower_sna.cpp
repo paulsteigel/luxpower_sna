@@ -596,8 +596,9 @@ void LuxpowerSNAComponent::process_write_single_(uint16_t reg, uint16_t value) {
 // Notify all switches / numbers of updated hold registers
 // ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::notify_hold_listeners_() {
-    for (auto *sw : switches_)  sw->on_hold_update(hold_regs_);
+    for (auto *sw  : switches_) sw->on_hold_update(hold_regs_);
     for (auto *num : numbers_)  num->on_hold_update(hold_regs_);
+    for (auto *t   : times_)    t->on_hold_update(hold_regs_);
 }
 
 // ---------------------------------------------------------------------------
@@ -810,6 +811,73 @@ void LuxpowerSNANumber::on_hold_update(const uint16_t *hold_regs) {
         displayed = (float)((raw & bitmask_) >> bitshift_) / divisor_;
     }
     publish_state(displayed);
+}
+
+
+// ---------------------------------------------------------------------------
+// LuxpowerSNAButton
+// ---------------------------------------------------------------------------
+void LuxpowerSNAButton::press_action() {
+    if (!parent_) return;
+    switch (action_) {
+        case Action::RESTART:
+            parent_->action_restart();
+            break;
+        case Action::RESET_ALL:
+            parent_->action_reset_all();
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hub button actions
+// ---------------------------------------------------------------------------
+void LuxpowerSNAComponent::action_restart() {
+    ESP_LOGW(TAG, "Inverter RESTART – writing reg 11 = 128");
+    queue_write(11, 128);
+    // Force reconnect after a short delay; inverter will reboot
+    // close_socket_ will be called naturally when the inverter drops the connection
+}
+
+void LuxpowerSNAComponent::action_reset_all() {
+    ESP_LOGW(TAG, "Inverter RESET ALL SETTINGS – writing reg 11 = 2");
+    queue_write(11, 2);
+}
+
+// ---------------------------------------------------------------------------
+// LuxpowerSNATime
+// ---------------------------------------------------------------------------
+void LuxpowerSNATime::on_hold_update(const uint16_t *hold_regs) {
+    if (register_addr_ >= 240) return;
+    uint16_t raw = hold_regs[register_addr_];
+    uint8_t hour, minute;
+    decode_(raw, hour, minute);
+    if (hour > 23) hour = 0;
+    if (minute > 59) minute = 0;
+    char buf[6];
+    snprintf(buf, sizeof(buf), "%02u:%02u", hour, minute);
+    current_hhmm_ = buf;
+}
+
+void LuxpowerSNATime::set_time(const std::string &hhmm) {
+    if (!parent_) return;
+    // Parse "HH:MM"
+    if (hhmm.size() < 5 || hhmm[2] != ':') {
+        ESP_LOGW(TAG, "Time '%s' invalid format, expected HH:MM", hhmm.c_str());
+        return;
+    }
+    int hour   = atoi(hhmm.substr(0, 2).c_str());
+    int minute = atoi(hhmm.substr(3, 2).c_str());
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        ESP_LOGW(TAG, "Time '%s' out of range", hhmm.c_str());
+        return;
+    }
+    uint16_t encoded = encode_((uint8_t)hour, (uint8_t)minute);
+    ESP_LOGI(TAG, "Set time reg=%u → %02d:%02d (raw=0x%04X)", register_addr_, hour, minute, encoded);
+    parent_->queue_write(register_addr_, encoded);
+    char buf[6];
+    snprintf(buf, sizeof(buf), "%02d:%02d", hour, minute);
+    current_hhmm_ = buf;
 }
 
 }  // namespace luxpower_sna
