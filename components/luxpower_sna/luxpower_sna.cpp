@@ -83,6 +83,15 @@ void LuxpowerSNAComponent::dump_config() {
 void LuxpowerSNAComponent::loop() {
     uint32_t now = esphome::millis();
 
+    // ── Guard: do nothing until config is complete ───────────────────────
+    if (!is_config_ready()) {
+        if (now - last_connect_ms_ >= 10000) {   // log at most every 10s
+            last_connect_ms_ = now;
+            ESP_LOGW(TAG, "Config incomplete – waiting for host/dongle/inverter serial via HA");
+        }
+        return;
+    }
+
     // ── Handle disconnection / reconnect ──────────────────────────────────
     if (state_ == State::DISCONNECTED) {
         if (now - last_connect_ms_ >= 10000) {
