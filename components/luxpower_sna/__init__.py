@@ -6,7 +6,7 @@ CONF_HOST             = "host"
 CONF_PORT             = "port"
 
 DEPENDENCIES = ["wifi"]
-AUTO_LOAD = ["sensor", "text_sensor", "switch", "number"]
+AUTO_LOAD = ["sensor", "text_sensor", "switch", "number", "button"]
 MULTI_CONF = True
 
 luxpower_sna_ns = cg.esphome_ns.namespace("luxpower_sna")
