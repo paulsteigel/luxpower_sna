@@ -53,7 +53,7 @@ luxpower_sna:
   host: "192.168.1.100"        # Dongle IP (or leave blank for runtime config)
   port: 8000
   dongle_serial: "BA12345678"  # Exactly 10 characters
-  inverter_serial: "3253631886" # Exactly 10 characters
+  inverter_serial: "1234567890" # Exactly 10 characters
   update_interval: 20s         # READ_INPUT polling interval
   hold_update_interval: 60s    # READ_HOLD refresh interval (switches/numbers)
 ```
