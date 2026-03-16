@@ -2,19 +2,15 @@
 # LuxPower SNA – Full Package YAML
 # ============================================================
 # EN: Copy this file to your ESPHome config folder and include:
-#   substitutions:
-#     luxid: "lux_1234567890"   # lux_{inverter_serial}
+# in the esphome yaml file the following 2 lines
 #   packages:
 #     luxpower: !include commons/luxpower_package.yaml
 #
 # VI: Sao chép file này vào thư mục ESPHome config và include:
-#   substitutions:
-#     luxid: "lux_123456789"   # lux_{serial_biến_tần}
+# trong esphome yaml file 2 dòng lệnh sau đây
 #   packages:
 #     luxpower: !include commons/luxpower_package.yaml
 #
-# Lovelace entity migration (one command / một lệnh):
-#   sed -i 's/sensor\.lux_OLD_/sensor.DEVICE_lux_NEW_/g' lovelace.yaml
 # ============================================================
 
 substitutions:
