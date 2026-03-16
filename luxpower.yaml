@@ -1,448 +1,309 @@
-# known issue: 
-# too many sensors will be problematic on esp8266, so use what needed only
-# This can also work in combination with other component but dont try to use too many sensors.
+# ============================================================
+# LuxPower SNA – Full package file
+# Include in main YAML:
+#   substitutions:
+#     luxid: "lux_3173633222"
+#   packages:
+#     luxpower: !include commons/luxpower_sensors.yaml
+#
+# One-command Lovelace migration:
+#   sed -i 's/sensor\.lux_3173633222_/sensor.homehna_lux_3173633222_/g' lovelace.yaml
+# ============================================================
 
-substitutions:
-  name: luxpower
-
-esphome:
-  name: ${name}
-
-# Board configuration (uncomment one)
-#esp32:
-#  board: lolin_s2_mini
-esp8266:
-  board: d1_mini
-
-external_components:
-  - source: github://paulsteigel/luxpower_sna@main
-    refresh: 0s
-
-logger:
-  level: DEBUG
-
-wifi:
-  ap:
-    ssid: "ESP32S2Lolin"
-
-ota:
-  port: 8266
-  password: "your_ota_password"
-
-captive_portal:
-
+# ── Hub ─────────────────────────────────────────────────────
 luxpower_sna:
-  id: ${name}_luxpower_hub
-  host: "your_wifi_dongle_ip"
-  port: 8000
-  dongle_serial: "your_dongle_serial"
-  inverter_serial_number: "your_inverter_serial"
-  update_interval: 20s # better make it in 60s interval for not terrifying lux's dongle
+  id: lux_hub
+  update_interval: 20s
+  hold_update_interval: 60s
+  # host/dongle_serial/inverter_serial set at runtime via text entities below
 
-sensor:
-  - platform: luxpower_sna    
-    luxpower_sna_id: ${name}_luxpower_hub
-    # System Sensors
-    lux_firmware_version:
-      name: "${name}_Lux Firmware Version"
-      id: "${name}_firmware_version"
-    
-    lux_inverter_model:
-      name: "${name}_Lux Inverter Model"
-      id: "${name}_inverter_model"
-    
-    # Status Text Sensors
-    lux_status_text:
-      name: "${name}_Lux Status"
-      id: "${name}_status_text"
-    
-    lux_battery_status_text:
-      name: "${name}_Battery Status"
-      id: "${name}_battery_status_text"
-    
-    inverter_serial_number:
-      name: "${name}_Inverter Serial"
-      id: "${name}_inverter_serial"
-    
-    # ========================
-    # SECTION 1: BANK 0 SENSORS
-    # ========================
-    lux_current_solar_voltage_1:
-      name: "${name}_Solar Voltage 1"
-      id: "${name}_solar_voltage_1"
-    
-    lux_current_solar_voltage_2:
-      name: "${name}_Solar Voltage 2"
-      id: "${name}_solar_voltage_2"
-    
-    lux_current_solar_voltage_3:
-      name: "${name}_Solar Voltage 3"
-      id: "${name}_solar_voltage_3"
-    
-    lux_battery_voltage:
-      name: "${name}_Battery Voltage"
-      id: "${name}_battery_voltage"
-    
-    lux_battery_percent:
-      name: "${name}_Battery Percent"
-      id: "${name}_battery_percent"
-    
-    soh:
-      name: "${name}_Battery Health"
-      id: "${name}_battery_health"
-    
-    lux_internal_fault:
-      name: "${name}_Internal Fault"
-      id: "${name}_internal_fault"
-    
-    lux_current_solar_output_1:
-      name: "${name}_Solar Output 1"
-      id: "${name}_solar_output_1"
-    
-    lux_current_solar_output_2:
-      name: "${name}_Solar Output 2"
-      id: "${name}_solar_output_2"
-    
-    lux_current_solar_output_3:
-      name: "${name}_Solar Output 3"
-      id: "${name}_solar_output_3"
-    
-    lux_battery_charge:
-      name: "${name}_Battery Charge"
-      id: "${name}_battery_charge"
-    
-    lux_battery_discharge:
-      name: "${name}_Battery Discharge"
-      id: "${name}_battery_discharge"
-    
-    lux_grid_voltage_r:
-      name: "${name}_Grid Voltage R"
-      id: "${name}_grid_voltage_r"
-    
-    lux_grid_voltage_s:
-      name: "${name}_Grid Voltage S"
-      id: "${name}_grid_voltage_s"
-    
-    lux_grid_voltage_t:
-      name: "${name}_Grid Voltage T"
-      id: "${name}_grid_voltage_t"
-    
-    lux_grid_frequency_live:
-      name: "${name}_Grid Frequency"
-      id: "${name}_grid_frequency"
-    
-    lux_grid_voltage_live:
-      name: "${name}_Grid Voltage Avg"
-      id: "${name}_grid_voltage_avg"
-    
-    lux_power_from_inverter_live:
-      name: "${name}_Inverter Output"
-      id: "${name}_inverter_output"
-    
-    lux_power_to_inverter_live:
-      name: "${name}_Inverter Input"
-      id: "${name}_inverter_input"
-    
-    lux_power_current_clamp:
-      name: "${name}_CT Clamp Power"
-      id: "${name}_ct_clamp"
-    
-    grid_power_factor:
-      name: "${name}_Power Factor"
-      id: "${name}_power_factor"
-    
-    eps_voltage_r:
-      name: "${name}_EPS Voltage R"
-      id: "${name}_eps_voltage_r"
-    
-    eps_voltage_s:
-      name: "${name}_EPS Voltage S"
-      id: "${name}_eps_voltage_s"
-    
-    eps_voltage_t:
-      name: "${name}_EPS Voltage T"
-      id: "${name}_eps_voltage_t"
-    
-    eps_frequency:
-      name: "${name}_EPS Frequency"
-      id: "${name}_eps_frequency"
-    
-    lux_power_to_eps:
-      name: "${name}_EPS Power"
-      id: "${name}_eps_power"
-    
-    lux_power_to_grid_live:
-      name: "${name}_Grid Export"
-      id: "${name}_grid_export"
-    
-    lux_power_from_grid_live:
-      name: "${name}_Grid Import"
-      id: "${name}_grid_import"
-    
-    lux_daily_solar_array_1:
-      name: "${name}_Solar Daily 1"
-      id: "${name}_solar_daily_1"
-    
-    lux_daily_solar_array_2:
-      name: "${name}_Solar Daily 2"
-      id: "${name}_solar_daily_2"
-    
-    lux_daily_solar_array_3:
-      name: "${name}_Solar Daily 3"
-      id: "${name}_solar_daily_3"
-    
-    lux_power_from_inverter_daily:
-      name: "${name}_Inverter Output Daily"
-      id: "${name}_inverter_output_daily"
-    
-    lux_power_to_inverter_daily:
-      name: "${name}_Inverter Input Daily"
-      id: "${name}_inverter_input_daily"
-    
-    lux_daily_battery_charge:
-      name: "${name}_Battery Charge Daily"
-      id: "${name}_battery_charge_daily"
-    
-    lux_daily_battery_discharge:
-      name: "${name}_Battery Discharge Daily"
-      id: "${name}_battery_discharge_daily"
-    
-    lux_power_to_eps_daily:
-      name: "${name}_EPS Output Daily"
-      id: "${name}_eps_daily"
-    
-    lux_power_to_grid_daily:
-      name: "${name}_Grid Export Daily"
-      id: "${name}_grid_export_daily"
-    
-    lux_power_from_grid_daily:
-      name: "${name}_Grid Import Daily"
-      id: "${name}_grid_import_daily"
-    
-    bus1_voltage:
-      name: "${name}_Bus 1 Voltage"
-      id: "${name}_bus1_voltage"
-    
-    bus2_voltage:
-      name: "${name}_Bus 2 Voltage"
-      id: "${name}_bus2_voltage"
-    
-    lux_current_solar_output:
-      name: "${name}_Solar Output Total"
-      id: "${name}_solar_output_total"
-    
-    lux_daily_solar:
-      name: "${name}_Solar Daily Total"
-      id: "${name}_solar_daily_total"
-    
-    lux_power_to_home:
-      name: "${name}_Home Power"
-      id: "${name}_home_power"
-    
-    lux_battery_flow:
-      name: "${name}_Battery Flow"
-      id: "${name}_battery_flow"
-    
-    lux_grid_flow:
-      name: "${name}_Grid Flow"
-      id: "${name}_grid_flow"
-    
-    lux_home_consumption_live:
-      name: "${name}_Home Consumption Live"
-      id: "${name}_home_consumption_live"
-    
-    lux_home_consumption:
-      name: "${name}_Home Consumption Daily"
-      id: "${name}_home_consumption_daily"
-    
-    # =========================
-    # SECTION 2: BANK 40 SENSORS
-    # =========================
-    lux_total_solar_array_1:
-      name: "${name}_Solar Total 1"
-      id: "${name}_solar_total_1"
-    
-    lux_total_solar_array_2:
-      name: "${name}_Solar Total 2"
-      id: "${name}_solar_total_2"
-    
-    lux_total_solar_array_3:
-      name: "${name}_Solar Total 3"
-      id: "${name}_solar_total_3"
-    
-    lux_power_from_inverter_total:
-      name: "${name}_Inverter Output Total"
-      id: "${name}_inverter_output_total"
-    
-    lux_power_to_inverter_total:
-      name: "${name}_Inverter Input Total"
-      id: "${name}_inverter_input_total"
-    
-    lux_total_battery_charge:
-      name: "${name}_Battery Charge Total"
-      id: "${name}_battery_charge_total"
-    
-    lux_total_battery_discharge:
-      name: "${name}_Battery Discharge Total"
-      id: "${name}_battery_discharge_total"
-    
-    lux_power_to_eps_total:
-      name: "${name}_EPS Output Total"
-      id: "${name}_eps_total"
-    
-    lux_power_to_grid_total:
-      name: "${name}_Grid Export Total"
-      id: "${name}_grid_export_total"
-    
-    lux_power_from_grid_total:
-      name: "${name}_Grid Import Total"
-      id: "${name}_grid_import_total"
-    
-    lux_fault_code:
-      name: "${name}_Fault Code"
-      id: "${name}_fault_code"
-    
-    lux_warning_code:
-      name: "${name}_Warning Code"
-      id: "${name}_warning_code"
-    
-    lux_internal_temp:
-      name: "${name}_Internal Temp"
-      id: "${name}_internal_temp"
-    
-    lux_radiator1_temp:
-      name: "${name}_Radiator 1 Temp"
-      id: "${name}_radiator1_temp"
-    
-    lux_radiator2_temp:
-      name: "${name}_Radiator 2 Temp"
-      id: "${name}_radiator2_temp"
-    
-    lux_battery_temperature_live:
-      name: "${name}_Battery Temp"
-      id: "${name}_battery_temp"
-    
-    lux_uptime:
-      name: "${name}_Uptime"
-      id: "${name}_uptime"
-    
-    lux_total_solar:
-      name: "${name}_Solar Total"
-      id: "${name}_solar_total"
-    
-    lux_home_consumption_total:
-      name: "${name}_Home Consumption Total"
-      id: "${name}_home_consumption_total"
-    
-    # ========================
-    # SECTION 3: BANK 80 SENSORS
-    # ========================
-    lux_bms_limit_charge:
-      name: "${name}_BMS Charge Limit"
-      id: "${name}_bms_charge_limit"
-    
-    lux_bms_limit_discharge:
-      name: "${name}_BMS Discharge Limit"
-      id: "${name}_bms_discharge_limit"
-    
-    charge_voltage_ref:
-      name: "${name}_Charge Voltage Ref"
-      id: "${name}_charge_voltage_ref"
-    
+# ── Runtime config ───────────────────────────────────────────
+text:
+  - platform: template
+    id: lux_config_host
+    name: "Inverter Host"
+    icon: "mdi:ip-network"
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      then:
+        - lambda: |-
+            id(lux_hub).set_host(x);
+            if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
+
+  - platform: template
+    id: lux_config_dongle
+    name: "Dongle Serial"
+    icon: "mdi:identifier"
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      then:
+        - lambda: |-
+            if (x.size() != 10) {
+              ESP_LOGW("lux_cfg", "dongle_serial must be 10 chars (got %d)", (int)x.size());
+              return;
+            }
+            id(lux_hub).set_dongle_serial(x);
+            if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
+
+  - platform: template
+    id: lux_config_inverter
+    name: "Inverter Serial"
+    icon: "mdi:identifier"
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      then:
+        - lambda: |-
+            if (x.size() != 10) {
+              ESP_LOGW("lux_cfg", "inverter_serial must be 10 chars (got %d)", (int)x.size());
+              return;
+            }
+            id(lux_hub).set_inverter_serial(x);
+            if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
+
+number:
+  - platform: template
+    id: lux_config_port
+    name: "Inverter Port"
+    icon: "mdi:ethernet"
+    optimistic: true
+    restore_value: true
+    initial_value: 8000
+    min_value: 1
+    max_value: 65535
+    step: 1
+    mode: box
+    on_value:
+      then:
+        - lambda: |-
+            id(lux_hub).set_port((uint16_t)x);
+            if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    charge_power_percent:
+      name: "${luxid}_System Charge Power Rate"
+    discharge_power_percent:
+      name: "${luxid}_System Discharge Power Rate"
+    ac_charge_power_percent:
+      name: "${luxid}_AC Charge Power Rate"
+    ac_charge_soc_limit:
+      name: "${luxid}_AC Charge Battery Level"
+    discharge_cutoff_soc:
+      name: "${luxid}_On-grid Discharge Cut-off SOC"
+    forced_discharge_power_percent:
+      name: "${luxid}_Forced Discharge Power Rate"
+    priority_charge_rate:
+      name: "${luxid}_Priority Charge Rate"
+    priority_charge_soc:
+      name: "${luxid}_Priority Charge Level"
+    charge_voltage:
+      name: "${luxid}_Charge Voltage"
     discharge_cutoff_voltage:
-      name: "${name}_Discharge Cutoff"
-      id: "${name}_discharge_cutoff"
-    
-    battery_status_inv:
-      name: "${name}_Battery Status Code"
-      id: "${name}_battery_status_code"
-    
-    lux_battery_count:
-      name: "${name}_Battery Count"
-      id: "${name}_battery_count"
-    
-    lux_battery_capacity_ah:
-      name: "${name}_Battery Capacity"
-      id: "${name}_battery_capacity"
-    
+      name: "${luxid}_Discharge Cut-off Voltage"
+    ct_clamp_offset:
+      name: "${luxid}_CT Clamp Offset"
+
+switch:
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    normal_or_standby:
+      name: "${luxid}_Normal or Standby"
+      icon: "mdi:power"
+    ac_charge_enable:
+      name: "${luxid}_AC Charge Enable"
+      icon: "mdi:battery-charging"
+    feed_in_grid:
+      name: "${luxid}_Feed In Grid"
+      icon: "mdi:transmission-tower-export"
+    charge_priority:
+      name: "${luxid}_Charge Priority"
+      icon: "mdi:battery-arrow-up"
+    power_backup_enable:
+      name: "${luxid}_Power Backup Enable"
+      icon: "mdi:home-battery"
+    seamless_eps_switching:
+      name: "${luxid}_Seamless EPS Switching"
+      icon: "mdi:power-plug-off"
+    charge_last:
+      name: "${luxid}_Charge Last"
+      icon: "mdi:battery-clock"
+    enable_peak_shaving:
+      name: "${luxid}_Grid Peak Shaving"
+      icon: "mdi:chart-bell-curve"
+
+button:
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    restart:
+      name: "${luxid}_Inverter Restart"
+    reset_all:
+      name: "${luxid}_Reset All Settings"
+
+# ── Numeric sensors ──────────────────────────────────────────
+sensor:
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+
+    # Grid
+    lux_grid_voltage_live:
+      name: "${luxid} Grid Voltage Live"
+    lux_grid_frequency_live:
+      name: "${luxid} Grid Frequency Live"
+    lux_power_from_grid_daily:
+      name: "${luxid} Power From Grid Daily"
+    lux_power_to_grid_daily:
+      name: "${luxid} Power To Grid Daily"
+    lux_grid_flow:
+      name: "${luxid} Grid Flow Live"
+    lux_power_from_inverter_live:
+      name: "${luxid} Power From Inverter Live"
+    lux_power_to_inverter_live:
+      name: "${luxid} Power To Inverter Live"
+    lux_power_from_grid_total:
+      name: "${luxid} Power From Grid Total"
+    lux_power_to_grid_total:
+      name: "${luxid} Power To Grid Total"
+
+    # Battery
+    lux_battery_percent:
+      name: "${luxid} Battery"
+    lux_battery_voltage:
+      name: "${luxid} Battery Voltage Live"
+    lux_battery_flow:
+      name: "${luxid} Battery Flow Live"
+    lux_battery_charge:
+      name: "${luxid} Battery Charge Live"
+    lux_battery_discharge:
+      name: "${luxid} Battery Discharge Live"
+    lux_daily_battery_charge:
+      name: "${luxid} Battery Charge Daily"
+    lux_daily_battery_discharge:
+      name: "${luxid} Battery Discharge Daily"
+    lux_total_battery_charge:
+      name: "${luxid} Battery Charge Total"
+    lux_total_battery_discharge:
+      name: "${luxid} Battery Discharge Total"
+    lux_battery_temperature_live:
+      name: "${luxid} Battery Temperature Live"
     lux_battery_current:
-      name: "${name}_Battery Current"
-      id: "${name}_battery_current"
-    
-    max_cell_volt:
-      name: "${name}_Max Cell Voltage"
-      id: "${name}_max_cell_volt"
-    
-    min_cell_volt:
-      name: "${name}_Min Cell Voltage"
-      id: "${name}_min_cell_volt"
-    
-    max_cell_temp:
-      name: "${name}_Max Cell Temp"
-      id: "${name}_max_cell_temp"
-    
-    min_cell_temp:
-      name: "${name}_Min Cell Temp"
-      id: "${name}_min_cell_temp"
-    
+      name: "${luxid} Battery Current Live"
+    lux_battery_capacity_ah:
+      name: "${luxid} Battery Capacity Ah"
     lux_battery_cycle_count:
-      name: "${name}_Battery Cycles"
-      id: "${name}_battery_cycles"
-    
+      name: "${luxid} Battery Cycle Count"
+    soh:
+      name: "${luxid} Battery Soh"
+    lux_internal_fault:
+      name: "${luxid} Internal Fault"
+
+    # Solar
+    lux_current_solar_output:
+      name: "${luxid} Solar Output Live"
+    lux_daily_solar:
+      name: "${luxid} Solar Output Daily"
+    lux_total_solar:
+      name: "${luxid} Solar Output Total"
+    lux_current_solar_output_1:
+      name: "${luxid} Solar Output Array 1 Live"
+    lux_current_solar_output_2:
+      name: "${luxid} Solar Output Array 2 Live"
+#    lux_current_solar_output_3:
+#      name: "${luxid} Solar Output Array 3 Live"
+    lux_daily_solar_array_1:
+      name: "${luxid} Solar Output Array 1 Daily"
+    lux_daily_solar_array_2:
+      name: "${luxid} Solar Output Array 2 Daily"
+#    lux_daily_solar_array_3:
+#      name: "${luxid} Solar Output Array 3 Daily"
+    lux_current_solar_voltage_1:
+      name: "${luxid} Solar Voltage Array 1 Live"
+    lux_current_solar_voltage_2:
+      name: "${luxid} Solar Voltage Array 2 Live"
+#    lux_current_solar_voltage_3:
+#      name: "${luxid} Solar Voltage Array 3 Live"
+
+    # Home consumption
+    lux_home_consumption_live:
+      name: "${luxid} Home Consumption Live"
+    lux_home_consumption:
+      name: "${luxid} Home Consumption Daily"
+    lux_home_consumption_total:
+      name: "${luxid} Home Consumption Total"
     lux_home_consumption_2_live:
-      name: "${name}_Home Consumption 2"
-      id: "${name}_home_consumption_2"
-    
-    # =========================
-    # SECTION 4: BANK 120 SENSORS
-    # =========================
-    lux_current_generator_voltage:
-      name: "${name}_Generator Voltage"
-      id: "${name}_generator_voltage"
-    
-    lux_current_generator_frequency:
-      name: "${name}_Generator Frequency"
-      id: "${name}_generator_frequency"
-    
-    lux_current_generator_power:
-      name: "${name}_Generator Power"
-      id: "${name}_generator_power"
-    
-    lux_current_generator_power_daily:
-      name: "${name}_Generator Daily"
-      id: "${name}_generator_daily"
-    
-    lux_current_generator_power_all:
-      name: "${name}_Generator Total"
-      id: "${name}_generator_total"
-    
-    lux_current_eps_L1_voltage:
-      name: "${name}_EPS L1 Voltage"
-      id: "${name}_eps_l1_voltage"
-    
-    lux_current_eps_L2_voltage:
-      name: "${name}_EPS L2 Voltage"
-      id: "${name}_eps_l2_voltage"
-    
-    lux_current_eps_L1_watt:
-      name: "${name}_EPS L1 Power"
-      id: "${name}_eps_l1_power"
-    
-    lux_current_eps_L2_watt:
-      name: "${name}_EPS L2 Power"
-      id: "${name}_eps_l2_power"
-    
-    # =========================
-    # SECTION 5: BANK 160 SENSORS
-    # =========================
+      name: "${luxid} Home Consumption 2 Live"
     p_load_ongrid:
-      name: "${name}_On-grid Load"
-      id: "${name}_ongrid_load"
-    
-    e_load_day:
-      name: "${name}_Load Daily"
-      id: "${name}_load_daily"
-    
-    e_load_all_l:
-      name: "${name}_Load Total"
-      id: "${name}_load_total"
+      name: "${luxid} Power From Inverter To Home Daily"
+
+    # Temperatures
+    lux_internal_temp:
+      name: "${luxid} Internal Temperature Live"
+    lux_radiator1_temp:
+      name: "${luxid} Radiator 1 Temperature Live"
+    lux_radiator2_temp:
+      name: "${luxid} Radiator 2 Temperature Live"
+
+    # Fault / Status
+    lux_fault_code:
+      name: "${luxid} Fault Code"
+    lux_warning_code:
+      name: "${luxid} Warning Code"
+    lux_uptime:
+      name: "${luxid} Uptime"
+
+    # BMS
+#    max_cell_volt:
+#      name: "${luxid} Cell Voltage Max"
+#    min_cell_volt:
+#      name: "${luxid} Cell Voltage Min"
+#    max_cell_temp:
+#      name: "${luxid} Cell Temperature Max"
+#    min_cell_temp:
+#      name: "${luxid} Cell Temperature Min"
+#    lux_bms_limit_charge:
+#      name: "${luxid} Bms Limit Charge"
+#    lux_bms_limit_discharge:
+#      name: "${luxid} Bms Limit Discharge"
+
+    # Generator
+#    lux_current_generator_voltage:
+#      name: "${luxid} Generator Voltage Live"
+#    lux_current_generator_frequency:
+#      name: "${luxid} Generator Frequency Live"
+#    lux_current_generator_power:
+#      name: "${luxid} Generator Power Live"
+#    lux_current_generator_power_daily:
+#      name: "${luxid} Generator Power Daily"
+#    lux_current_generator_power_all:
+#      name: "${luxid} Generator Power Total"
+
+    # Grid/Power details
+    lux_power_to_eps:
+      name: "${luxid} Power To Eps Live"
+    lux_power_to_eps_daily:
+      name: "${luxid} Power To Eps Daily"
+    lux_power_to_eps_total:
+      name: "${luxid} Power To Eps Total"
+    grid_power_factor:
+      name: "${luxid} Grid Power Factor"
+    lux_power_current_clamp:
+      name: "${luxid} Current Clamp"
+    bus1_voltage:
+      name: "${luxid} Bus1 Voltage"
+    bus2_voltage:
+      name: "${luxid} Bus2 Voltage"
+
+  - platform: luxpower_sna
+    luxpower_sna_id: lux_hub
+    lux_status_text:
+      name: "${luxid} Status"
+    lux_battery_status_text:
+      name: "${luxid} Battery Status"
