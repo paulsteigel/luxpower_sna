@@ -1,248 +1,182 @@
-Hi All Hobyists,
-This component to help you (at your owned risk) run an esphome LuxPower logger from a remote site and publish data to a Home Assistant server via MQTT, I’ve started working on a solution based on insights from the excellent LuxPython_DEV project, which provides a Python-based integration for Home Assistant.
-While that integration works well, it requires users to open a port and configure port forwarding to the WiFi dongle on the remote router. This setup might be fine in some countries, but in parts of Vietnam—where ISPs often assign non-public (local) WAN IPs—remote access becomes impossible.
-As a first milestone, I now have a working ESP32-based LuxPower logger using ESPHome firmware. It supports read-only mode and can expose almost all available sensors from the LuxPower Integration.
-To use this custom component, simply add the following to your ESPHome YAML configuration:
-# External component definitions:
-external_components: # skip this line if you already have this
-```
-#Add the two following lines
+# LuxPower SNA – ESPHome Component
+
+[![ESPHome](https://img.shields.io/badge/ESPHome-2024.x%2B-blue)](https://esphome.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-paulsteigel%2Fluxpower_sna-lightgrey)](https://github.com/paulsteigel/luxpower_sna)
+
+An ESPHome external component for monitoring and controlling **LuxPower SNA/SNA-G2 inverters** directly from an ESP32, without requiring a Home Assistant server or MQTT broker.
+
+Designed for locations (such as parts of Vietnam) where ISPs assign non-public WAN IPs, making port forwarding impossible for the official Python integration.
+
+---
+
+## ✨ Features
+
+- **Full read access** to all inverter sensor banks (0–4: live, daily, total, BMS, generator)
+- **Write support** — switches, numbers, and buttons to control the inverter
+- **Runtime configuration** — set host IP and serial numbers from HA UI without reflashing
+- **IDF & Arduino compatible** — uses lwip sockets directly, no WiFiClient dependency
+- **Persistent TCP connection** — mirrors the official Python integration behaviour; handles heartbeats automatically
+- **State machine polling** — non-blocking, no `delay()`, safe on single-core ESP32-S2
+- **Auto-reconnect** — reconnects on connection drop with 10s retry
+
+---
+
+## 📋 Requirements
+
+- ESP32 (any variant: S2, S3, classic, C3…)
+- ESPHome **2024.5+**
+- LuxPower SNA / SNA-G2 inverter with WiFi dongle on local network
+
+---
+
+## 🚀 Quick Start
+
+### 1. Add external component
+
+```yaml
+external_components:
   - source: github://paulsteigel/luxpower_sna@main
-    refresh: 0s   
-#Definition for the component
-# Input components for dynamic configuration
+    refresh: 0s
+```
+
+### 2. Declare the hub
+
+```yaml
+luxpower_sna:
+  id: lux_hub
+  host: "192.168.1.100"        # Dongle IP (or leave blank for runtime config)
+  port: 8000
+  dongle_serial: "BA12345678"  # Exactly 10 characters
+  inverter_serial: "3253631886" # Exactly 10 characters
+  update_interval: 20s         # READ_INPUT polling interval
+  hold_update_interval: 60s    # READ_HOLD refresh interval (switches/numbers)
+```
+
+### 3. Add sensors, switches, numbers
+
+See [`luxpower_package.yaml`](luxpower_package.yaml) for a full working example.
+
+---
+
+## ⚙️ Runtime Configuration (no reflash needed)
+
+Leave `host`/`dongle_serial`/`inverter_serial` blank in YAML and set them at runtime via HA UI or web_server. Values are stored in ESP32 flash (NVS) and survive reboots.
+
+```yaml
+luxpower_sna:
+  id: lux_hub
+  update_interval: 20s
+  hold_update_interval: 60s
+
 text:
   - platform: template
-    id: input_host_ip_address
-    name: "Inverter Host IP"
-    optimistic: true
-    initial_value: "192.168.4.1"
+    id: lux_config_host
+    name: "Inverter Host"
+    entity_category: config
     mode: text
-
-  - platform: template
-    id: input_dongle_serial
-    name: "Dongle Serial Number"
     optimistic: true
-    initial_value: "SW12345678"
-    mode: text
-
-  - platform: template
-    id: input_inverter_serial
-    name: "Inverter Serial Number"
-    optimistic: true
-    initial_value: "LX87654321"
-    mode: text
-
-number:
-  - platform: template
-    id: input_port_number
-    name: "Inverter Port"
-    optimistic: true
-    initial_value: 8000
-    min_value: 1
-    max_value: 65535
-    step: 1
-    mode: box
-
-# Your component using the inputs
-luxpower_sna:
-  id: ${name}_luxpower_hub
-  host: input_host_ip_address
-  port: input_port_number
-  dongle_serial: input_dongle_serial
-  inverter_serial: input_inverter_serial
-  update_interval: 30s
-
-# Definition sensors, you should be selective on the following sensor, keep what you need for later Lovelace UI CARD
-sensor:
-  - platform: luxpower_sna
-    id: my_luxpower_sna # Replace with the ID of your luxpower_sna component
-    update_interval: 20s
-
-    # --- PV Sensors ---
-    pv1_voltage:
-      name: "PV1 Voltage"
-    pv2_voltage:
-      name: "PV2 Voltage"
-    pv3_voltage:
-      name: "PV3 Voltage"
-    pv1_power:
-      name: "PV1 Power"
-    pv2_power:
-      name: "PV2 Power"
-    pv3_power:
-      name: "PV3 Power"
-
-    # --- Battery Sensors ---
-    battery_voltage:
-      name: "Battery Voltage"
-    battery_current:
-      name: "Battery Current"
-    soc:
-      name: "Battery SOC"
-    soh:
-      name: "Battery SOH"
-    charge_power:
-      name: "Charge Power"
-    discharge_power:
-      name: "Discharge Power"
-    charge_voltage_ref:
-      name: "Charge Voltage Ref"
-    discharge_cutoff_voltage:
-      name: "Discharge Cutoff Voltage"
-    max_charge_current:
-      name: "Max Charge Current"
-    max_discharge_current:
-      name: "Max Discharge Current"
-    battery_count:
-      name: "Battery Count"
-    battery_capacity:
-      name: "Battery Capacity"
-    battery_status_inv:
-      name: "Battery Status"
-    max_cell_voltage:
-      name: "Max Cell Voltage"
-    min_cell_voltage:
-      name: "Min Cell Voltage"
-    max_cell_temp:
-      name: "Max Cell Temp"
-    min_cell_temp:
-      name: "Min Cell Temp"
-    cycle_count:
-      name: "Cycle Count"
-
-    # --- Grid Sensors ---
-    power_from_grid:
-      name: "Power From Grid"
-    power_to_grid:
-      name: "Power To Grid"
-    grid_voltage_r:
-      name: "Grid Voltage R"
-    grid_voltage_s:
-      name: "Grid Voltage S"
-    grid_voltage_t:
-      name: "Grid Voltage T"
-    grid_frequency:
-      name: "Grid Frequency"
-    power_factor:
-      name: "Power Factor"
-
-    # --- Inverter & System Sensors ---
-    inverter_power:
-      name: "Inverter Power"
-    p_load2:
-      name: "P Load2"
-    bus1_voltage:
-      name: "Bus1 Voltage"
-    bus2_voltage:
-      name: "Bus2 Voltage"
-    temp_inner:
-      name: "Temp Inner"
-    temp_radiator:
-      name: "Temp Radiator"
-    temp_radiator2:
-      name: "Temp Radiator 2"
-    temp_battery:
-      name: "Temp Battery"
-    uptime:
-      name: "Uptime"
-
-    # --- EPS (Backup) Sensors ---
-    eps_active_power:
-      name: "EPS Active Power"
-    eps_apparent_power:
-      name: "EPS Apparent Power"
-    eps_voltage_r:
-      name: "EPS Voltage R"
-    eps_voltage_s:
-      name: "EPS Voltage S"
-    eps_voltage_t:
-      name: "EPS Voltage T"
-    eps_frequency:
-      name: "EPS Frequency"
-    eps_L1_volt:
-      name: "EPS L1 Voltage"
-    eps_L2_volt:
-      name: "EPS L2 Voltage"
-    eps_L1_watt:
-      name: "EPS L1 Power"
-    eps_L2_watt:
-      name: "EPS L2 Power"
-
-    # --- Generator Sensors ---
-    gen_input_volt:
-      name: "Gen Input Voltage"
-    gen_input_freq:
-      name: "Gen Input Frequency"
-    gen_power_watt:
-      name: "Gen Power"
-      
-    # --- Daily Energy Sensors (kWh) ---
-    pv1_energy_today:
-      name: "PV1 Energy Today"
-    pv2_energy_today:
-      name: "PV2 Energy Today"
-    pv3_energy_today:
-      name: "PV3 Energy Today"
-    inverter_energy_today:
-      name: "Inverter Energy Today"
-    ac_charging_today:
-      name: "AC Charging Today"
-    charging_today:
-      name: "Charging Today"
-    discharging_today:
-      name: "Discharging Today"
-    eps_today:
-      name: "EPS Today"
-    exported_today:
-      name: "Exported Today"
-    grid_today:
-      name: "Grid Today"
-    gen_power_day:
-      name: "Gen Power Today"
-
-    # --- Total Energy Sensors (kWh) ---
-    total_pv1_energy:
-      name: "Total PV1 Energy"
-    total_pv2_energy:
-      name: "Total PV2 Energy"
-    total_pv3_energy:
-      name: "Total PV3 Energy"
-    total_inverter_output:
-      name: "Total Inverter Output"
-    total_recharge_energy:
-      name: "Total Recharge Energy"
-    total_charged:
-      name: "Total Charged"
-    total_discharged:
-      name: "Total Discharged"
-    total_eps_energy:
-      name: "Total EPS Energy"
-    total_exported:
-      name: "Total Exported"
-    total_imported:
-      name: "Total Imported"
-    gen_power_all:
-      name: "Total Gen Power"
-
-# 2. Define the text sensor for the inverter serial
-text_sensor:
-  - platform: luxpower_sna
-    luxpower_sna_id: luxpower_hub
-    inverter_serial:
-      name: "Inverter Serial Number"
+    restore_value: true
+    initial_value: ""
+    on_value:
+      then:
+        - lambda: |-
+            id(lux_hub).set_host(x);
+            if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
 ```
 
-Here’s a snapshot of the sensor list on my combined ESP32-S2 Lolin logger for JKBMS and LuxPower:
+---
 
-<img width="340" height="784" alt="image" src="https://github.com/user-attachments/assets/ed58fca8-83d4-4c9d-bacf-e270755629cc" />
+## 📡 Supported Platforms
 
-<br>
-After successfully boot up, put the host address, serrial numbers.. here
-<img width="331" height="312" alt="image" src="https://github.com/user-attachments/assets/9aafc655-097d-43d5-b838-f6a4b3fbda20" />
+| Platform | Description |
+|----------|-------------|
+| `sensor` | All numeric sensors (voltage, power, energy, temperature…) |
+| `text_sensor` | Status text, battery status (defined inside `sensor:` block) |
+| `switch` | Bitmask-based hold register switches (reg 21, 110, 179) |
+| `number` | Hold register number entities (charge rate, SOC limit, voltage…) |
+| `button` | Inverter restart, reset all settings |
 
-I'm excited to share that the logger is already functional in read-only mode, and it integrates almost all the sensors available in the official LuxPower Integration.
-In the coming days, I’ll begin adding support for buttons, switches, and time-based control—making it possible to fully control your LuxPower inverter just as easily as with the original Integration by @guybw's team. I also plan to design a Lovelace card to improve the Home Assistant dashboard experience. 🔗 Component link: https://github.com/paulsteigel/luxpower_sna
+---
 
-**With credits to:**
-+ https://github.com/guybw/LuxPython_DEV
+## 🔀 Switch Reference (Register 21 bitmasks)
+
+| Key | Description | Bitmask |
+|-----|-------------|---------|
+| `normal_or_standby` | Normal / Standby mode | 0x0200 |
+| `ac_charge_enable` | AC Charge Enable | 0x0080 |
+| `feed_in_grid` | Feed In Grid | 0x8000 |
+| `charge_priority` | Charge Priority | 0x0800 |
+| `power_backup_enable` | Power Backup Enable | 0x0001 |
+| `seamless_eps_switching` | Seamless EPS Switching | 0x0100 |
+| `forced_discharge_enable` | Force Discharge Enable | 0x0400 |
+| `charge_last` | Charge Last (reg 110) | 0x0010 |
+| `enable_peak_shaving` | Grid Peak Shaving (reg 179) | 0x0080 |
+
+---
+
+## 🔢 Number Reference
+
+| Key | Register | Unit | Divisor |
+|-----|----------|------|---------|
+| `charge_power_percent` | 64 | % | 1 |
+| `discharge_power_percent` | 65 | % | 1 |
+| `ac_charge_power_percent` | 66 | % | 1 |
+| `ac_charge_soc_limit` | 67 | % | 1 |
+| `discharge_cutoff_soc` | 105 | % | 1 |
+| `charge_voltage` | 99 | V | 10 |
+| `discharge_cutoff_voltage` | 100 | V | 10 |
+| `ct_clamp_offset` | 119 | W | 10 (signed) |
+| `grid_peak_shaving_power` | 206 | kW | 10 |
+
+---
+
+## 🗂️ Sensor Banks
+
+| Bank | Registers | Contents |
+|------|-----------|----------|
+| 0 | 0–39 | Live: PV voltage/power, battery, grid, EPS, daily energy |
+| 1 | 40–79 | Totals: lifetime energy counters, fault/warning codes, temperature, uptime |
+| 2 | 80–119 | BMS: cell voltage/temp, battery status, current, capacity |
+| 3 | 120–159 | Generator input, EPS L1/L2 |
+| 4 | 160–199 | On-grid load power, daily/total load energy |
+
+---
+
+## 🔧 Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| No data, connection refused | Wrong IP or port | Check dongle IP in router DHCP |
+| CRC mismatch errors | Serial numbers wrong | Verify 10-char dongle + inverter serial |
+| Values 10× too high (BMS current) | Model uses /100 scale | Change `/10.0f` → `/100.0f` in cpp |
+| Entity not found after OTA | Slug changed | Check `name:` field — slug = lowercase + underscores |
+
+---
+
+## 📦 File Structure
+
+```
+luxpower_sna/
+  __init__.py       # Hub component registration
+  luxpower_sna.h    # C++ class declarations
+  luxpower_sna.cpp  # C++ implementation
+  sensor.py         # Sensor + text_sensor platform
+  switch.py         # Switch platform
+  number.py         # Number platform
+  button.py         # Button platform
+  time.py           # Time-slot helper (AC charge, force discharge)
+```
+
+---
+
+## 🙏 Credits
+
+- [guybw/LuxPython_DEV](https://github.com/guybw/LuxPython_DEV) — original Python HA integration, protocol documentation and register map
+- [syssi/esphome-jk-bms](https://github.com/syssi/esphome-jk-bms) — ESPHome component architecture reference
+
+---
+
+## 📄 License
+
+MIT — use at your own risk. Not affiliated with LuxPower.
