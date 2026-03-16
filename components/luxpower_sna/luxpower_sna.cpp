@@ -828,6 +828,9 @@ void LuxpowerSNAButton::press_action() {
         case Action::RESET_ALL:
             parent_->action_reset_all();
             break;
+        case Action::SCAN_DONGLE:
+            parent_->action_scan_dongle();
+            break;
     }
 }
 
@@ -880,6 +883,117 @@ void LuxpowerSNATime::set_time(const std::string &hhmm) {
     char buf[6];
     snprintf(buf, sizeof(buf), "%02d:%02d", hour, minute);
     current_hhmm_ = buf;
+}
+// ---------------------------------------------------------------------------
+// Scan LAN for Lux dongle on port 8000
+// ---------------------------------------------------------------------------
+
+bool LuxpowerSNAComponent::scan_host_port_(const std::string &ip, uint16_t port, uint32_t timeout_ms) {
+  int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (fd < 0) {
+    return false;
+  }
+
+  int non_blocking = 1;
+  ioctl(fd, FIONBIO, &non_blocking);
+
+  int yes = 1;
+  setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+
+  struct sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+
+  if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) {
+    close(fd);
+    return false;
+  }
+
+  int ret = connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
+  if (ret == 0) {
+    close(fd);
+    return true;
+  }
+
+  if (errno != EINPROGRESS) {
+    close(fd);
+    return false;
+  }
+
+  fd_set wfds, efds;
+  FD_ZERO(&wfds);
+  FD_ZERO(&efds);
+  FD_SET(fd, &wfds);
+  FD_SET(fd, &efds);
+
+  struct timeval tv{};
+  tv.tv_sec = timeout_ms / 1000;
+  tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+  ret = select(fd + 1, nullptr, &wfds, &efds, &tv);
+  if (ret <= 0) {
+    close(fd);
+    return false;
+  }
+
+  int err = 0;
+  socklen_t errlen = sizeof(err);
+  getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
+  close(fd);
+
+  return err == 0;
+}
+
+bool LuxpowerSNAComponent::try_probe_lux_dongle_(const std::string &ip, uint16_t port, uint32_t timeout_ms) {
+  // Minimal probe for now:
+  // if TCP/8000 is open, treat it as a candidate.
+  // Can be made stricter later by sending a Lux packet and checking response.
+  return scan_host_port_(ip, port, timeout_ms);
+}
+
+void LuxpowerSNAComponent::action_scan_dongle() {
+  ESP_LOGI(TAG, "Starting dongle scan on port %u...", port_);
+
+  // Stop current socket/session while scanning
+  close_socket_();
+
+  // Determine subnet from STA IP, assume /24
+  esp_netif_ip_info_t ip_info{};
+  if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK) {
+    ESP_LOGW(TAG, "Unable to get STA IP info; using current host subnet fallback");
+  }
+
+  uint8_t a = ip4_addr1(&ip_info.ip);
+  uint8_t b = ip4_addr2(&ip_info.ip);
+  uint8_t c = ip4_addr3(&ip_info.ip);
+  uint8_t self = ip4_addr4(&ip_info.ip);
+
+  if (a == 0 && b == 0 && c == 0) {
+    // fallback if IP info unavailable
+    a = 192; b = 168; c = 100;
+    ESP_LOGW(TAG, "Falling back to subnet %u.%u.%u.0/24", a, b, c);
+  }
+
+  for (uint16_t i = 1; i <= 254; i++) {
+    if (i == self) continue;
+
+    char ipbuf[20];
+    snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, i);
+    std::string candidate = ipbuf;
+
+    ESP_LOGD(TAG, "Probing %s:%u", candidate.c_str(), port_);
+
+    if (try_probe_lux_dongle_(candidate, port_, 150)) {
+      ESP_LOGI(TAG, "Dongle candidate found at %s:%u", candidate.c_str(), port_);
+      host_ = candidate;
+      reconnect();
+      return;
+    }
+
+    delay(5);
+  }
+
+  ESP_LOGW(TAG, "No dongle found on %u.%u.%u.0/24 port %u", a, b, c, port_);
 }
 
 }  // namespace luxpower_sna
