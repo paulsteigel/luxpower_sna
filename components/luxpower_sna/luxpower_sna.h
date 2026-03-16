@@ -18,6 +18,10 @@
 
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+// for scanning dongle ip address
+#include "esp_netif.h"
+#include "lwip/ip4_addr.h"
+
 // ioctl(FIONBIO) is used instead of fcntl(O_NONBLOCK) for IDF socket compatibility
 #include <queue>
 #include <vector>
