@@ -6,8 +6,9 @@
 #   packages:
 #     luxpower: !include commons/luxpower_sensors.yaml
 #
-# One-command Lovelace migration:
-#   sed -i 's/sensor\.lux_3173633222_/sensor.homehna_lux_3173633222_/g' lovelace.yaml
+# Tại esphome chỉ cần thêm đoạn này: (bỏ dấu #)
+#packages:
+#  luxpower_pkg: !include ./commons/luxpower.yaml
 # ============================================================
 substitutions:
   luxid: lux_3253631886
