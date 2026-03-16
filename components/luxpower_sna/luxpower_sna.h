@@ -210,10 +210,12 @@ class LuxpowerSNANumber : public number::Number, public Component {
 // ---------------------------------------------------------------------------
 class LuxpowerSNAButton : public button::Button, public Component {
  public:
-    enum class Action : uint8_t { RESTART, RESET_ALL };
+    //enum class Action : uint8_t { RESTART, RESET_ALL };
+    enum class Action : uint8_t { RESTART, RESET_ALL, SCAN_DONGLE };
 
     void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
     void set_action(Action a)                      { action_ = a; }
+    void action_scan_dongle();
 
  protected:
     void press_action() override;
@@ -221,6 +223,10 @@ class LuxpowerSNAButton : public button::Button, public Component {
  private:
     LuxpowerSNAComponent *parent_{nullptr};
     Action action_{Action::RESTART};
+    // for scanning dongle address on demand
+    bool scan_host_port_(const std::string &ip, uint16_t port, uint32_t timeout_ms);
+    bool try_probe_lux_dongle_(const std::string &ip, uint16_t port, uint32_t timeout_ms);
+
 };
 
 // ---------------------------------------------------------------------------
