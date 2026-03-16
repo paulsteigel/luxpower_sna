@@ -11,7 +11,7 @@ Designed for locations (such as parts of Vietnam) where ISPs assign non-public W
 ---
 
 ## ✨ Features
-
+Control view:
 - **Full read access** to all inverter sensor banks (0–4: live, daily, total, BMS, generator)
 - **Write support** — switches, numbers, and buttons to control the inverter
 - **Runtime configuration** — set host IP and serial numbers from HA UI without reflashing
