@@ -13,7 +13,9 @@ Designed for locations (such as parts of Vietnam) where ISPs assign non-public W
 ## ✨ Features
 Here are some snapshots of the control views:
 ![Set up connection info](docs/images/z7584216112635_9206f501577d9b2cd16d628bec415ae2.jpg)
-![Lovelace view](docs/images/lovelace.jpg)
+Lovelace view: Copy and replace the entity name in the lovelace.yaml for displaying
+![Lovelace view](docs/images/docs/images/z7625537015460_91f3f0b315d76ef5f0e5f3b220b229f9.jpg)
+
 - **Full read access** to all inverter sensor banks (0–4: live, daily, total, BMS, generator)
 - **Write support** — switches, numbers, and buttons to control the inverter
 - **Runtime configuration** — set host IP and serial numbers from HA UI without reflashing
