@@ -47,7 +47,7 @@ luxpower_sna:
   host: "192.168.1.100"        # IP của dongle (hoặc để trống để cấu hình runtime)
   port: 8000
   dongle_serial: "BA12345678"  # Đúng 10 ký tự
-  inverter_serial: "3253631886" # Đúng 10 ký tự
+  inverter_serial: "1234567890" # Đúng 10 ký tự
   update_interval: 20s         # Chu kỳ đọc READ_INPUT
   hold_update_interval: 60s    # Chu kỳ refresh READ_HOLD (switch/number)
 ```
