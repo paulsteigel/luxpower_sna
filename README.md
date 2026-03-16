@@ -61,7 +61,7 @@ See [`luxpower_package.yaml`](luxpower_package.yaml) for a full working example.
 
 ## ⚙️ Runtime Configuration (no reflash needed)
 
-
+![alt text](image.png)
 Leave `host`/`dongle_serial`/`inverter_serial` blank in YAML and set them at runtime via HA UI or web_server. Values are stored in ESP32 flash (NVS) and survive reboots.
 
 ```yaml
