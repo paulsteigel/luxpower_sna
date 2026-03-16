@@ -12,6 +12,7 @@ ButtonAction = luxpower_sna_ns.enum("LuxpowerSNAButton::Action", is_class=True)
 BUTTONS = {
     "restart":   (ButtonAction.RESTART,   "mdi:restart"),
     "reset_all": (ButtonAction.RESET_ALL, "mdi:restore"),
+    "scan_luxpower_dongle": (ButtonAction.SCAN_DONGLE, "mdi:search"),
 }
 
 CONFIG_SCHEMA = cv.Schema({
