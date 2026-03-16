@@ -21,6 +21,7 @@
 // for scanning dongle ip address
 #include "esp_netif.h"
 #include "lwip/ip4_addr.h"
+#include "esphome/components/text/text.h"
 
 // ioctl(FIONBIO) is used instead of fcntl(O_NONBLOCK) for IDF socket compatibility
 #include <queue>
@@ -280,8 +281,10 @@ class LuxpowerSNAComponent : public Component {
     void loop()        override;
     void dump_config() override;
     float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
+    void apply_scanned_host_(const std::string &ip); // helper for setting text into host
 
     // ---- Configuration setters ----
+    void set_host_text(text::Text *t) { host_text_ = t; }
     void set_host(const std::string &h)          { host_ = h; }
     void set_port(uint16_t p)                    { port_ = p; }
     void set_dongle_serial(const std::string &s) { dongle_serial_ = s; }
@@ -433,6 +436,7 @@ class LuxpowerSNAComponent : public Component {
 
  private:
     // ---- Socket helpers ----
+    text::Text *host_text_{nullptr};
     bool  start_connect_();
     bool  check_connect_();        // returns true when connected
     void  close_socket_();
