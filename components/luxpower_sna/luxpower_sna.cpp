@@ -985,15 +985,29 @@ void LuxpowerSNAComponent::action_scan_dongle() {
 
     if (try_probe_lux_dongle_(candidate, port_, 150)) {
       ESP_LOGI(TAG, "Dongle candidate found at %s:%u", candidate.c_str(), port_);
-      host_ = candidate;
-      reconnect();
-      return;
+        apply_scanned_host_(candidate);
+        return;
     }
 
     delay(5);
   }
 
   ESP_LOGW(TAG, "No dongle found on %u.%u.%u.0/24 port %u", a, b, c, port_);
+}
+
+void LuxpowerSNAComponent::apply_scanned_host_(const std::string &ip) {
+  ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
+
+  this->set_host(ip);
+
+  // Push value into template text entity if attached
+  if (host_text_ != nullptr) {
+    host_text_->publish_state(ip);
+  }
+
+  if (this->is_config_ready()) {
+    this->reconnect();
+  }
 }
 
 }  // namespace luxpower_sna
