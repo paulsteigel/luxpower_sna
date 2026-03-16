@@ -9,7 +9,13 @@
 # One-command Lovelace migration:
 #   sed -i 's/sensor\.lux_3173633222_/sensor.homehna_lux_3173633222_/g' lovelace.yaml
 # ============================================================
-
+substitutions:
+  luxid: lux_3253631886
+  
+external_components:
+  - source: github://paulsteigel/luxpower_sna@main
+    refresh: 0s   
+    
 # ── Hub ─────────────────────────────────────────────────────
 luxpower_sna:
   id: lux_hub
@@ -301,6 +307,8 @@ sensor:
     bus2_voltage:
       name: "${luxid} Bus2 Voltage"
 
+# ── Text sensors  ← SEPARATE BLOCK, not inside sensor: ───────
+#text_sensor:
   - platform: luxpower_sna
     luxpower_sna_id: lux_hub
     lux_status_text:
