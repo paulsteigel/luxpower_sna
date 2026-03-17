@@ -52,21 +52,21 @@ static const uint8_t  LUX_ACTION_WRITE        = 0x00;  // used for ALL requests 
 #pragma pack(push, 1)
 
 struct LuxHeader {
-    uint16_t prefix;          // 0xA1 0x1A  (LE: 0x1AA1)
-    uint16_t protocol;        // 2
-    uint16_t frame_length;    // total_length - 6
-    uint8_t  address;         // 0x01
+    uint16_t prefix;
+    uint16_t protocol;
+    uint16_t frame_length;
+    uint8_t  address;
     uint8_t  tcp_function;
     char     dongle[10];
     uint16_t data_length;
 };  // 20 bytes
 
 struct LuxTranslatedData {
-    uint8_t  address;         // ACTION_WRITE = 0
+    uint8_t  address;
     uint8_t  device_function;
     char     serial[10];
     uint16_t reg_start;
-    uint8_t  value_length;    // present when protocol==2 && !WRITE_SINGLE
+    uint8_t  value_length;
 };  // 15 bytes
 
 // Bank 0: registers 0-39
@@ -91,55 +91,55 @@ struct Bank1 {
     int32_t  e_inv_all, e_rec_all, e_chg_all, e_dischg_all, e_eps_all;
     int32_t  e_to_grid_all, e_to_user_all;
     uint32_t fault_code, warning_code;
-    int16_t  t_inner, t_rad_1, t_rad_2, t_bat;  // regs 64-67
-    uint16_t _reserved68;                         // reg 68 (hold register bank, not used in INPUT)
-    uint32_t uptime;                              // regs 69-70
-    uint8_t  _tail[18];                           // regs 71-79 (padding to complete 40-register bank)
+    int16_t  t_inner, t_rad_1, t_rad_2, t_bat;
+    uint16_t _reserved68;
+    uint32_t uptime;
+    uint8_t  _tail[18];
 };  // 80 bytes = 40 registers
 
 // Bank 2: registers 80-119
 struct Bank2 {
     uint16_t _r80;
     int16_t  max_chg_curr, max_dischg_curr, charge_volt_ref, dischg_cut_volt;
-    uint8_t  _placeholder[20];   // reg 85-94
-    int16_t  bat_status_inv;     // reg 95
-    int16_t  bat_count;          // reg 96
-    int16_t  bat_capacity;       // reg 97
-    int16_t  bat_current;        // reg 98
+    uint8_t  _placeholder[20];
+    int16_t  bat_status_inv;
+    int16_t  bat_count;
+    int16_t  bat_capacity;
+    int16_t  bat_current;
     int16_t  _r99, _r100;
-    int16_t  max_cell_volt;      // reg 101
-    int16_t  min_cell_volt;      // reg 102
-    int16_t  max_cell_temp;      // reg 103
-    int16_t  min_cell_temp;      // reg 104
+    int16_t  max_cell_volt;
+    int16_t  min_cell_volt;
+    int16_t  max_cell_temp;
+    int16_t  min_cell_temp;
     uint16_t _r105;
-    int16_t  bat_cycle_count;    // reg 106
-    uint8_t  _r107_113[14];      // reg 107-113
-    int16_t  p_load2;            // reg 114
-    uint8_t  _r115_119[10];      // reg 115-119
+    int16_t  bat_cycle_count;
+    uint8_t  _r107_113[14];
+    int16_t  p_load2;
+    uint8_t  _r115_119[10];
 };  // 80 bytes
 
 // Bank 3: registers 120-159
 struct Bank3 {
     uint16_t _r120;
-    int16_t  gen_input_volt;     // reg 121
-    int16_t  gen_input_freq;     // reg 122
-    int16_t  gen_power_watt;     // reg 123
-    int16_t  gen_power_day;      // reg 124
-    int16_t  gen_power_all;      // reg 125
+    int16_t  gen_input_volt;
+    int16_t  gen_input_freq;
+    int16_t  gen_power_watt;
+    int16_t  gen_power_day;
+    int16_t  gen_power_all;
     uint16_t _r126;
-    int16_t  eps_L1_volt;        // reg 127
-    int16_t  eps_L2_volt;        // reg 128
-    int16_t  eps_L1_watt;        // reg 129
-    int16_t  eps_L2_watt;        // reg 130
-    uint8_t  _r131_159[58];      // reg 131-159
+    int16_t  eps_L1_volt;
+    int16_t  eps_L2_volt;
+    int16_t  eps_L1_watt;
+    int16_t  eps_L2_watt;
+    uint8_t  _r131_159[58];
 };  // 80 bytes
 
 // Bank 4: registers 160-199
 struct Bank4 {
-    uint8_t  _r160_169[20];      // reg 160-169 (10 regs)
-    int16_t  p_load_ongrid;      // reg 170
-    int16_t  e_load_day;         // reg 171
-    int16_t  e_load_all_l;       // reg 172
+    uint8_t  _r160_169[20];
+    int16_t  p_load_ongrid;
+    int16_t  e_load_day;
+    int16_t  e_load_all_l;
     uint8_t  _r173_199[54];
 };  // 80 bytes
 
@@ -168,8 +168,6 @@ class LuxpowerSNASwitch : public switch_::Switch, public Component {
     void set_bitmask(uint16_t mask)  { bitmask_ = mask; }
     uint16_t get_register() const    { return register_addr_; }
     uint16_t get_bitmask()  const    { return bitmask_; }
-
-    /// Called by hub when hold register data arrives
     void on_hold_update(const uint16_t *hold_regs);
 
  protected:
@@ -193,8 +191,6 @@ class LuxpowerSNANumber : public number::Number, public Component {
     void set_divisor(uint16_t div)    { divisor_ = div; }
     void set_signed(bool s)           { is_signed_ = s; }
     uint16_t get_register() const     { return register_addr_; }
-
-    /// Called by hub when hold register data arrives
     void on_hold_update(const uint16_t *hold_regs);
 
  protected:
@@ -213,9 +209,11 @@ class LuxpowerSNANumber : public number::Number, public Component {
 };
 
 // ---------------------------------------------------------------------------
-// Button entity  (restart, reset_all_settings, scan_dongle)
+// Button entity
 // NOTE: Scan logic lives entirely in LuxpowerSNAComponent.
-//       press_action() simply delegates to parent_->action_scan_dongle().
+//       Button only holds the action enum and delegates via parent_.
+//       Do NOT add scan_host_port_, try_probe_lux_dongle_, do_scan_,
+//       or scan_task_fn_ here.
 // ---------------------------------------------------------------------------
 class LuxpowerSNAButton : public button::Button, public Component {
  public:
@@ -233,7 +231,7 @@ class LuxpowerSNAButton : public button::Button, public Component {
 };
 
 // ---------------------------------------------------------------------------
-// Time entity  – maps to a single hold register, encoding = minute*256 + hour
+// Time entity
 // ---------------------------------------------------------------------------
 class LuxpowerSNATime : public Component {
  public:
@@ -241,15 +239,9 @@ class LuxpowerSNATime : public Component {
     void set_register(uint16_t reg)               { register_addr_ = reg; }
     void set_name(const std::string &n)           { name_ = n; }
 
-    /// Called by hub when hold registers are refreshed
     void on_hold_update(const uint16_t *hold_regs);
-
-    /// Set time from string "HH:MM" – called by lambda in YAML
     void set_time(const std::string &hhmm);
-
-    /// Get current value as "HH:MM" string
     std::string get_time() const { return current_hhmm_; }
-
     uint16_t get_register() const { return register_addr_; }
 
  private:
@@ -279,13 +271,13 @@ class LuxpowerSNAComponent : public Component {
     float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
     // ---- Configuration setters ----
-    void set_host_text(text::Text *t)             { host_text_ = t; }
-    void set_host(const std::string &h)           { host_ = h; }
-    void set_port(uint16_t p)                     { port_ = p; }
-    void set_dongle_serial(const std::string &s)  { dongle_serial_ = s; }
+    void set_host_text(text::Text *t)            { host_text_ = t; }
+    void set_host(const std::string &h)          { host_ = h; }
+    void set_port(uint16_t p)                    { port_ = p; }
+    void set_dongle_serial(const std::string &s) { dongle_serial_ = s; }
     void set_inverter_serial(const std::string &s){ inverter_serial_ = s; }
-    void set_update_interval(uint32_t ms)          { update_interval_ms_ = ms; }
-    void set_hold_update_interval(uint32_t ms)     { hold_interval_ms_ = ms; }
+    void set_update_interval(uint32_t ms)         { update_interval_ms_ = ms; }
+    void set_hold_update_interval(uint32_t ms)    { hold_interval_ms_ = ms; }
 
     // ---- Runtime reconfiguration ----
     void reconnect() {
@@ -301,7 +293,7 @@ class LuxpowerSNAComponent : public Component {
             && inverter_serial_.size() == 10;
     }
 
-    // ---- Called by switches / numbers to request a register write ----
+    // ---- Write queue ----
     void queue_write(uint16_t reg, uint16_t value);
 
     uint16_t get_hold_register(uint16_t reg) const {
@@ -317,7 +309,7 @@ class LuxpowerSNAComponent : public Component {
     // ---- Actions called by buttons ----
     void action_restart();
     void action_reset_all();
-    void action_scan_dongle();  // ← scan logic lives here, not in Button
+    void action_scan_dongle();  // ← all scan logic here, NOT in Button
 
     // ---- Sensor setters (Section 1 – bank 0) ----
     void set_lux_status_text_sensor(text_sensor::TextSensor *s)         { lux_status_text_ = s; }
@@ -427,7 +419,7 @@ class LuxpowerSNAComponent : public Component {
     void set_e_load_all_l_sensor(sensor::Sensor *s)   { e_load_all_ = s; }
 
  private:
-    // ---- Socket helpers ----
+    // ---- Socket ----
     text::Text *host_text_{nullptr};
     bool  start_connect_();
     bool  check_connect_();
@@ -460,25 +452,36 @@ class LuxpowerSNAComponent : public Component {
     static uint16_t crc16_(const uint8_t *data, size_t len);
 
     // ---- Publish helpers ----
-    static void pub(sensor::Sensor      *s, float v)              { if (s) s->publish_state(v); }
+    static void pub(sensor::Sensor         *s, float v)            { if (s) s->publish_state(v); }
     static void pub(text_sensor::TextSensor *s, const std::string &v) { if (s) s->publish_state(v); }
 
-    // ---- Scan helpers (FreeRTOS task) ----
-    // ScanParams is defined here; the .cpp must NOT redefine it.
+    // ---- Apply scan result (called from loop() on main thread) ----
+    void apply_scanned_host_(const std::string &ip);
+
+    // ---- Scan internals (FreeRTOS task, batch parallel connect)
+    // ScanParams is defined here in the header — do NOT redefine in .cpp.
     struct ScanParams {
-        uint8_t a, b, c, self_octet;
+        uint8_t  a, b, c, self_octet;
         uint16_t port;
         LuxpowerSNAComponent *hub;
     };
-    void apply_scanned_host_(const std::string &ip);
-    void do_scan_(uint8_t a, uint8_t b, uint8_t c, uint8_t self_octet, uint16_t port);
     static void scan_task_fn_(void *param);
+    // Note: port is passed explicitly so task doesn't race with port_ changes
+    void do_scan_(uint8_t a, uint8_t b, uint8_t c, uint8_t self_octet, uint16_t port);
 
     // ---- Scan state (written by task, read by loop()) ----
+    // ESP32-S2 is single-core so volatile is sufficient; no mutex needed.
     volatile bool scanning_{false};
     volatile bool scan_result_pending_{false};
     volatile bool scan_found_{false};
-    char found_ip_buf_[20]{};
+    char     found_ip_buf_[20]{};
+    uint32_t scan_start_ms_{0};                    // watchdog: time scan started
+    static const uint32_t SCAN_TIMEOUT_MS = 30000; // 30s; reset if task dies silently
+    // Deferred apply: set in loop(), applied on NEXT loop() tick
+    // so apply_scanned_host_ runs outside the scan_result_pending_ block,
+    // avoiding on_value lambda → reconnect() re-entrant loop.
+    bool        deferred_apply_{false};
+    std::string deferred_ip_{};
 
     // ---- State machine ----
     enum class State : uint8_t {
@@ -536,7 +539,6 @@ class LuxpowerSNAComponent : public Component {
     text_sensor::TextSensor *lux_status_text_{nullptr};
     text_sensor::TextSensor *lux_bat_status_text_{nullptr};
     text_sensor::TextSensor *scan_status_text_{nullptr};
-
     sensor::Sensor *pv_v1_{nullptr}, *pv_v2_{nullptr}, *pv_v3_{nullptr};
     sensor::Sensor *bat_v_{nullptr}, *bat_soc_{nullptr}, *bat_soh_{nullptr};
     sensor::Sensor *internal_fault_{nullptr};

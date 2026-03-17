@@ -81,18 +81,42 @@ void LuxpowerSNAComponent::dump_config() {
 void LuxpowerSNAComponent::loop() {
     uint32_t now = esphome::millis();
 
-    // ── Pick up scan result from FreeRTOS task (single-core safe handoff) ──
+    // ── Watchdog: unstick scanning_ if task died without setting scan_result_pending_ ──
+    if (scanning_ && !scan_result_pending_ && (now - scan_start_ms_ > SCAN_TIMEOUT_MS)) {
+        ESP_LOGW(TAG, "Scan watchdog: task silent >30s, resetting scanning_");
+        scanning_ = false;
+        pub(scan_status_text_, "Error: scan timeout");
+    }
+
+    // ── Step 1: pick up raw result flag set by FreeRTOS scan task ────────────────
     if (scan_result_pending_) {
         scan_result_pending_ = false;
         scanning_            = false;
         if (scan_found_) {
-            std::string ip(found_ip_buf_);
-            pub(scan_status_text_, "Found: " + ip);
-            apply_scanned_host_(ip);
+            deferred_ip_    = std::string(found_ip_buf_);
+            deferred_apply_ = true;
+            pub(scan_status_text_, "Found: " + deferred_ip_);
+            ESP_LOGI(TAG, "Scan queued for deferred apply: %s", deferred_ip_.c_str());
         } else {
             pub(scan_status_text_, "Not found");
         }
+        // Return here so deferred_apply_ fires on NEXT tick.
+        // This keeps apply_scanned_host_() (which triggers on_value lambda
+        // → reconnect()) out of the scan_result_pending_ call stack.
+        return;
     }
+
+    // ── Step 2: deferred apply – one tick after scan_result_pending_ fired ───────
+    if (deferred_apply_) {
+        deferred_apply_ = false;
+        ESP_LOGI(TAG, "Deferred apply: host = %s", deferred_ip_.c_str());
+        apply_scanned_host_(deferred_ip_);
+        deferred_ip_.clear();
+        return;
+    }
+
+    // ── Guard: skip normal polling while scan task is running ──────────────
+    if (scanning_) return;
 
     // ── Guard: do nothing until config is complete ───────────────────────
     if (!is_config_ready()) {
@@ -102,9 +126,6 @@ void LuxpowerSNAComponent::loop() {
         }
         return;
     }
-
-    // ── Skip normal polling while scan is running ────────────────────────
-    if (scanning_) return;
 
     // ── Handle disconnection / reconnect ──────────────────────────────────
     if (state_ == State::DISCONNECTED) {
@@ -118,7 +139,7 @@ void LuxpowerSNAComponent::loop() {
         return;
     }
 
-    // ── Wait for async connect to complete ───────────────────────────────
+    // ── Wait for async connect to complete ────────────────────────────────
     if (state_ == State::CONNECTING) {
         if (!check_connect_()) {
             if (now - last_connect_ms_ > 10000) {
@@ -130,7 +151,7 @@ void LuxpowerSNAComponent::loop() {
         return;
     }
 
-    // ── Connected – receive data first (always) ───────────────────────────
+    // ── Connected – receive data first (always) ──────────────────────────────
     try_recv_();
     while (try_process_packet_()) {}
 
@@ -151,7 +172,7 @@ void LuxpowerSNAComponent::loop() {
 
     if (awaiting_) return;
 
-    // ── State transitions ─────────────────────────────────────────────────
+    // ── State transitions ────────────────────────────────────────────────────
     switch (state_) {
         case State::IDLE: {
             if (!write_queue_.empty()) {
@@ -805,6 +826,12 @@ void LuxpowerSNATime::set_time(const std::string &hhmm) {
 // ---------------------------------------------------------------------------
 
 void LuxpowerSNAComponent::action_scan_dongle() {
+    // Always log so we know the button was pressed regardless of guard outcome
+    ESP_LOGI(TAG, "Scan button pressed (scanning_=%d dongle_len=%u inv_len=%u)",
+             (int)scanning_,
+             (unsigned)dongle_serial_.size(),
+             (unsigned)inverter_serial_.size());
+
     if (scanning_) {
         ESP_LOGW(TAG, "Scan already in progress, ignoring");
         return;
@@ -812,12 +839,14 @@ void LuxpowerSNAComponent::action_scan_dongle() {
 
     // Guard: dongle + inverter serial must be set first
     if (dongle_serial_.size() != 10) {
-        ESP_LOGW(TAG, "Cannot scan: dongle_serial not configured (need 10 chars)");
+        ESP_LOGW(TAG, "Cannot scan: dongle_serial not configured (need 10 chars, got %u)",
+                 (unsigned)dongle_serial_.size());
         pub(scan_status_text_, "Error: set dongle serial first");
         return;
     }
     if (inverter_serial_.size() != 10) {
-        ESP_LOGW(TAG, "Cannot scan: inverter_serial not configured (need 10 chars)");
+        ESP_LOGW(TAG, "Cannot scan: inverter_serial not configured (need 10 chars, got %u)",
+                 (unsigned)inverter_serial_.size());
         pub(scan_status_text_, "Error: set inverter serial first");
         return;
     }
@@ -835,19 +864,20 @@ void LuxpowerSNAComponent::action_scan_dongle() {
         ESP_LOGW(TAG, "Cannot read STA IP, falling back to 192.168.1.0/24");
     }
 
-    // Disconnect existing session – scan and normal polling share the same
-    // lwip socket pool, so we free the main socket before starting.
+    // Close main socket – scan task opens its own batch of sockets
     close_socket_();
 
     scanning_            = true;
+    scan_start_ms_       = millis();   // start watchdog timer
     scan_result_pending_ = false;
     scan_found_          = false;
+    deferred_apply_      = false;
     found_ip_buf_[0]     = '\0';
 
     pub(scan_status_text_, "Scanning...");
     ESP_LOGI(TAG, "Starting dongle scan on %u.%u.%u.0/24 port %u", a, b, c, port_);
 
-    // Heap-allocate params; task frees them before self-deleting
+    // Heap-allocate params; task frees them before calling vTaskDelete
     ScanParams *params = new ScanParams{a, b, c, self_octet, port_, this};
 
     BaseType_t ret = xTaskCreate(
