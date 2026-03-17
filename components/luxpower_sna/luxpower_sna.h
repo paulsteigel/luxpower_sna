@@ -9,6 +9,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"         // millis()
+#include "esphome/core/preferences.h"  // NVS host persistence
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/switch/switch.h"
@@ -22,7 +23,6 @@
 // for scanning dongle ip address
 #include "esp_netif.h"
 #include "lwip/ip4_addr.h"
-#include "esphome/components/text/text.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -271,8 +271,10 @@ class LuxpowerSNAComponent : public Component {
     float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
     // ---- Configuration setters ----
-    void set_host_text(text::Text *t)            { host_text_ = t; }
-    void set_host(const std::string &h)          { host_ = h; }
+    void set_host(const std::string &h) {
+        host_ = h;
+        if (!h.empty()) save_host_prefs_();
+    }
     void set_port(uint16_t p)                    { port_ = p; }
     void set_dongle_serial(const std::string &s) { dongle_serial_ = s; }
     void set_inverter_serial(const std::string &s){ inverter_serial_ = s; }
@@ -420,7 +422,10 @@ class LuxpowerSNAComponent : public Component {
 
  private:
     // ---- Socket ----
-    text::Text *host_text_{nullptr};
+    // ---- NVS host persistence (survives MQTT overwrite) ----
+    void save_host_prefs_();
+    void load_host_prefs_();
+
     bool  start_connect_();
     bool  check_connect_();
     void  close_socket_();

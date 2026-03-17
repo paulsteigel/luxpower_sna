@@ -62,6 +62,8 @@ void LuxpowerSNAComponent::setup() {
     recv_buf_len_ = 0;
     last_input_poll_ms_ = millis();
     last_hold_poll_ms_  = millis();
+    // Load persisted host from NVS — runs before MQTT can overwrite it
+    load_host_prefs_();
 }
 
 void LuxpowerSNAComponent::dump_config() {
@@ -980,20 +982,34 @@ void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
     scan_result_pending_ = true;
 }
 
+// ---------------------------------------------------------------------------
+// NVS host persistence
+// Saves/loads host_ independently of MQTT/HA so MQTT reconnect cannot clear it.
+// Uses a fixed 4-byte hash key unique to this component.
+// ---------------------------------------------------------------------------
+static const uint32_t LUX_HOST_PREF_KEY = 0x4C555848UL;  // "LUXH"
+
+void LuxpowerSNAComponent::save_host_prefs_() {
+    ESPPreferenceObject pref = global_preferences->make_preference<std::string>(LUX_HOST_PREF_KEY, true);
+    pref.save(&host_);
+    global_preferences->sync();
+    ESP_LOGI(TAG, "Host saved to NVS: %s", host_.c_str());
+}
+
+void LuxpowerSNAComponent::load_host_prefs_() {
+    ESPPreferenceObject pref = global_preferences->make_preference<std::string>(LUX_HOST_PREF_KEY, true);
+    std::string saved;
+    if (pref.load(&saved) && !saved.empty()) {
+        host_ = saved;
+        ESP_LOGI(TAG, "Host loaded from NVS: %s", host_.c_str());
+    }
+}
+
 void LuxpowerSNAComponent::apply_scanned_host_(const std::string &ip) {
     ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
     this->set_host(ip);
-
-    if (host_text_ != nullptr) {
-        // publish_state() triggers the on_value lambda on lux_config_host,
-        // which calls set_host() + reconnect() — so we must NOT reconnect here
-        // as well, otherwise we get two reconnects ~13s apart.
-        host_text_->publish_state(ip);
-    } else {
-        // No text entity wired: reconnect directly (nothing else will do it)
-        if (this->is_config_ready()) {
-            this->reconnect();
-        }
+    if (this->is_config_ready()) {
+        this->reconnect();
     }
 }
 
