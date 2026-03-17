@@ -14,8 +14,8 @@ Designed for locations (such as parts of Vietnam) where ISPs assign non-public W
 
 - **Full read access** to all inverter sensor banks (0–4: live, daily, total, BMS, generator)
 - **Write support** — switches, numbers, and buttons to control the inverter
-- **Auto-discovery** — press *Scan Dongle IP* button; the ESP scans the local /24 subnet and finds the dongle automatically
-- **Runtime configuration** — set host IP and serial numbers from HA UI without reflashing; values survive reboot
+- **Auto-discovery** — press *Scan Dongle IP* button; the ESP scans the local /24 subnet, finds the dongle, connects immediately, and saves the IP to internal NVS — survives reboots automatically
+- **Runtime configuration** — set serial numbers from HA UI without reflashing; values survive reboot
 - **IDF-compatible** — uses lwip sockets directly; no WiFiClient dependency; works on ESP32-S2 single-core
 - **Persistent TCP connection** — mirrors the official Python integration behaviour; handles heartbeats automatically
 - **State machine polling** — non-blocking, no `delay()`, safe on single-core ESP32-S2
@@ -70,7 +70,11 @@ See [`luxpower_package.yaml`](luxpower_package.yaml) for a full working example.
 
 ## ⚙️ Runtime Configuration (no reflash needed)
 
-Leave `host`, `dongle_serial`, and `inverter_serial` blank in YAML and set them from the HA UI. Values are stored in ESP32 flash and survive reboots.
+Leave `host`, `dongle_serial`, and `inverter_serial` blank in YAML and set them from the HA UI.
+
+**Host IP** is stored in the component's own NVS partition — independent of MQTT and HA state. Once set (either manually or via Scan), it survives reboots and MQTT reconnects without any extra configuration.
+
+**Serial numbers** are stored in ESPHome flash via `restore_value: true`. An `interval` watchdog pushes them into the hub after boot, before MQTT can interfere.
 
 ```yaml
 luxpower_sna:
@@ -90,7 +94,8 @@ text:
     on_value:
       then:
         - lambda: |-
-            id(lux_hub).set_host(x);
+            if (x.empty()) return;
+            id(lux_hub).set_host(x);           # also saves to NVS automatically
             if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
 
   - platform: template
@@ -122,24 +127,21 @@ text:
             if (x.size() != 10) return;
             id(lux_hub).set_inverter_serial(x);
             if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
-```
 
-> **Important:** Add an `on_boot` block to push restored flash values into the hub on every reboot. Without this, the hub won't receive the serial numbers until the user edits them again.
-
-```yaml
-esphome:
-  on_boot:
-    priority: -100
+# Watchdog: pushes serial numbers into hub after boot (host is handled by NVS internally)
+interval:
+  - interval: 2s
     then:
       - lambda: |-
-          auto host = id(lux_config_host).state;
-          auto dongle = id(lux_config_dongle).state;
+          if (id(lux_hub).is_config_ready()) return;
+          auto dongle   = id(lux_config_dongle).state;
           auto inverter = id(lux_config_inverter).state;
-          if (!host.empty()) id(lux_hub).set_host(host);
-          if (dongle.size() == 10) id(lux_hub).set_dongle_serial(dongle);
+          if (dongle.size() == 10)   id(lux_hub).set_dongle_serial(dongle);
           if (inverter.size() == 10) id(lux_hub).set_inverter_serial(inverter);
           if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
 ```
+
+> **Note:** The `Inverter Host` UI entity is for manual entry only. When using Scan Dongle IP, the host is saved to NVS inside the component directly — the UI entity is not updated, but the component connects and survives reboots automatically.
 
 ---
 
@@ -159,9 +161,10 @@ Both `dongle_serial` and `inverter_serial` must be filled in first. The host fie
 4. On a typical /24 network the scan completes in **under 15 seconds**.
 5. When the dongle is found:
    - `scan_status_text` sensor shows `Found: 192.168.x.x`
+   - The IP is saved to NVS immediately
    - The component connects to the inverter immediately
-6. Copy the IP from **Scan Status** and paste it into **Inverter Host** to persist it for future reboots.
-7. If nothing is found: `scan_status_text` shows `Not found`.
+   - On all future reboots the component connects automatically — no scan needed again
+6. If nothing is found: `scan_status_text` shows `Not found`.
 
 ### YAML snippet
 
@@ -188,7 +191,7 @@ sensor:
 | Message | Cause |
 |---------|-------|
 | `Scanning...` | Scan in progress |
-| `Found: 192.168.x.x` | Dongle located; copy IP into Inverter Host to persist |
+| `Found: 192.168.x.x` | Dongle located; IP saved to NVS; connecting now |
 | `Not found` | No device answered on the configured port |
 | `Error: set dongle serial first` | `dongle_serial` not yet configured |
 | `Error: set inverter serial first` | `inverter_serial` not yet configured |
@@ -204,9 +207,9 @@ For a brand-new installation where you do not know the dongle IP:
 1. Flash the firmware (host can be left blank)
 2. In HA, set **Dongle Serial** and **Inverter Serial** (both exactly 10 characters)
 3. Press **Scan Dongle IP** — wait up to 15 seconds
-4. Check **Scan Status** — if `Found: 192.168.x.x`, the component is already connected
-5. Copy the discovered IP and paste it into **Inverter Host** to save it for future reboots
-6. Sensors and controls are available immediately after the scan succeeds
+4. Check **Scan Status** — if `Found: 192.168.x.x`, the component is already connected and the IP is saved
+5. Sensors and controls are available immediately
+6. On all future reboots the component connects automatically — no action needed
 
 ---
 
@@ -273,14 +276,14 @@ For a brand-new installation where you do not know the dongle IP:
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
+| No data after reboot | Host not yet saved | Press Scan Dongle IP once; IP is then saved to NVS permanently |
 | No data, connection refused | Wrong IP or port | Use Scan Dongle IP, or check dongle IP in router DHCP table |
 | Scan returns "Not found" | Dongle on different subnet or port | Confirm dongle IP manually; check `lux_config_port` value |
 | Scan returns error about serials | Dongle/inverter serial not filled in | Set both serials in HA UI before scanning |
-| Serials empty after reboot | Missing `on_boot` lambda | Add the `on_boot` block shown in the Runtime Configuration section |
+| Serials empty after reboot | Missing interval watchdog | Add the `interval:` block shown in the Runtime Configuration section |
 | CRC mismatch errors | Serial numbers wrong | Verify 10-char dongle + inverter serial (case-sensitive) |
 | Values 10× too high (BMS current) | Model uses /100 scale | Change `/10.0f` → `/100.0f` in `luxpower_sna.cpp` bank 2 section |
 | Entity not found after OTA | Slug changed | Check `name:` field — slug = lowercase + underscores |
-| Config lost after reboot | `restore_value` not set | Add `restore_value: true` to all config text/number entities |
 
 ---
 
@@ -289,8 +292,8 @@ For a brand-new installation where you do not know the dongle IP:
 ```
 luxpower_sna/
   __init__.py       # Hub component registration
-  luxpower_sna.h    # C++ class declarations
-  luxpower_sna.cpp  # C++ implementation (FreeRTOS scan task, state machine)
+  luxpower_sna.h    # C++ class declarations (NVS host persistence)
+  luxpower_sna.cpp  # C++ implementation (FreeRTOS scan task, state machine, NVS)
   sensor.py         # Sensor + text_sensor platform (incl. scan_status_text)
   switch.py         # Switch platform
   number.py         # Number platform
