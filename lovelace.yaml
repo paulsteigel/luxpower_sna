@@ -1,5 +1,5 @@
 type: custom:sunsynk-power-flow-card
-cardstyle: lite
+cardstyle: full
 show_solar: true
 inverter:
   model: lux
@@ -23,34 +23,39 @@ grid:
   invert_grid: true
   additional_loads: 2
 entities:
-  inverter_voltage_154:   sensor.homehna_lux_1234567890_grid_voltage_live
-  load_frequency_192:     sensor.homehna_lux_1234567890_grid_frequency_live
-  inverter_current_164:   sensor.inverter_output_current
-  inverter_status_59:     sensor.homehna_lux_1234567890_status
-  inverter_power_175:     sensor.homehna_lux_1234567890_battery_flow_live
-  day_battery_charge_70:  sensor.homehna_lux_1234567890_battery_charge_daily
-  day_battery_discharge_71: sensor.homehna_lux_1234567890_battery_discharge_daily
-  battery_voltage_183:    sensor.homehna_lux_1234567890_battery_voltage_live
-  battery_soc_184:        sensor.homehna_lux_1234567890_battery
-  battery_power_190:      sensor.homehna_lux_1234567890_battery_flow_live
-  battery_current_191:    sensor.homehna_lux_1234567890_battery_capacity_ah
-  grid_power_169:         sensor.homehna_lux_1234567890_grid_flow_live
-  day_grid_import_76:     sensor.homehna_lux_1234567890_power_from_grid_daily
-  day_grid_export_77:     sensor.homehna_lux_1234567890_power_to_grid_daily
-  grid_ct_power_172:      sensor.homehna_lux_1234567890_grid_flow_live
-  day_load_energy_84:     sensor.homehna_lux_1234567890_power_from_inverter_to_home_daily
-  essential_power:        sensor.homehna_lux_1234567890_home_consumption_live
-  nonessential_power:     none
-  aux_power_166:          sensor.aux_output_power
-  day_pv_energy_108:      sensor.homehna_lux_1234567890_solar_output_daily
-  pv_total:               sensor.homehna_lux_1234567890_solar_output_live
-  pv1_power_186:          sensor.homehna_lux_1234567890_solar_output_array_1_live
-  pv2_power_187:          sensor.homehna_lux_1234567890_solar_output_array_2_live
-  pv1_voltage_109:        sensor.homehna_lux_1234567890_solar_voltage_array_1_live
-  pv1_current_110:        none
-  pv2_voltage_111:        sensor.homehna_lux_1234567890_solar_voltage_array_2_live
-  pv2_current_112:        none
-  radiator_temp_91:       sensor.homehna_lux_1234567890_radiator_1_temperature_live
-  dc_transformer_temp_90: sensor.homehna_lux_1234567890_radiator_2_temperature_live
-  remaining_solar:        sensor.forecast_remaining_today
-  energy_cost:            sensor.octopus_energy_electricity_20e5081533_2380002009185_current_rate
+# replace homehnm_lux_0123456789 with your actual entity ids
+  inverter_voltage_154: sensor.homehnm_lux_0123456789_grid_voltage_live
+  load_frequency_192: sensor.homehnm_lux_0123456789_grid_frequency_live
+  inverter_current_164: sensor.inverter_output_current
+  inverter_status_59: sensor.homehnm_lux_0123456789_status
+  inverter_power_175: sensor.homehnm_lux_0123456789_battery_flow_live
+  day_battery_charge_70: sensor.homehnm_lux_0123456789_battery_charge_daily
+  day_battery_discharge_71: sensor.homehnm_lux_0123456789_battery_discharge_daily
+  battery_voltage_183: sensor.homehnm_lux_0123456789_battery_voltage_live
+  battery_soc_184: sensor.homehnm_lux_0123456789_battery
+  battery_power_190: sensor.homehnm_lux_0123456789_battery_flow_live
+  battery_current_191: sensor.homehnm_lux_0123456789_battery_capacity_ah
+  grid_power_169: sensor.homehnm_lux_0123456789_grid_flow_live
+  day_grid_import_76: sensor.homehnm_lux_0123456789_power_from_grid_daily
+  day_grid_export_77: sensor.homehnm_lux_0123456789_power_to_grid_daily
+  grid_ct_power_172: sensor.homehnm_lux_0123456789_grid_flow_live
+  day_load_energy_84: sensor.homehnm_lux_0123456789_home_consumption_daily
+  essential_power: sensor.homehnm_lux_0123456789_home_consumption_live
+  nonessential_power: none
+  aux_power_166: sensor.aux_output_power
+  day_pv_energy_108: sensor.homehnm_lux_0123456789_solar_output_daily
+  pv_total: sensor.homehnm_lux_0123456789_solar_output_live
+  pv1_power_186: sensor.homehnm_lux_0123456789_solar_output_array_1_live
+  pv2_power_187: sensor.homehnm_lux_0123456789_solar_output_array_2_live
+  pv1_voltage_109: sensor.homehnm_lux_0123456789_solar_voltage_array_1_live
+  pv1_current_110: none
+  pv2_voltage_111: sensor.homehnm_lux_0123456789_solar_voltage_array_2_live
+  pv2_current_112: none
+  radiator_temp_91: sensor.homehnm_lux_0123456789_radiator_1_temperature_live
+  dc_transformer_temp_90: sensor.homehnm_lux_0123456789_radiator_2_temperature_live
+  remaining_solar: sensor.forecast_remaining_today
+  energy_cost: sensor.octopus_energy_electricity_20e5081533_2380002009185_current_rate
+large_font: false
+show_grid: true
+dynamic_line_width: false
+show_battery: true
