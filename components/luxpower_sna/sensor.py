@@ -29,6 +29,7 @@ YAML_TO_C = {
     # Text sensors
     "lux_status_text":          "lux_status_text",
     "lux_battery_status_text":  "lux_battery_status_text",
+    "scan_status_text": "scan_status_text",
     # Bank 0 – live
     "lux_current_solar_voltage_1":   "lux_current_solar_voltage_1",
     "lux_current_solar_voltage_2":   "lux_current_solar_voltage_2",
@@ -129,7 +130,7 @@ YAML_TO_C = {
     "e_load_all_l":   "e_load_all_l",
 }
 
-TEXT_SENSORS = {"lux_status_text", "lux_battery_status_text"}
+TEXT_SENSORS = {"lux_status_text", "lux_battery_status_text", "scan_status_text"}
 
 M = STATE_CLASS_MEASUREMENT
 TI = STATE_CLASS_TOTAL_INCREASING
@@ -137,6 +138,7 @@ TI = STATE_CLASS_TOTAL_INCREASING
 SENSOR_TYPES = {
     "lux_status_text":         text_sensor.text_sensor_schema(icon="mdi:information-outline"),
     "lux_battery_status_text": text_sensor.text_sensor_schema(icon="mdi:battery-alert"),
+    "scan_status_text": text_sensor.text_sensor_schema(icon="mdi:magnify"),
 
     "lux_current_solar_voltage_1": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=M, accuracy_decimals=1, icon="mdi:solar-panel"),
     "lux_current_solar_voltage_2": sensor.sensor_schema(unit_of_measurement=UNIT_VOLT, device_class=DEVICE_CLASS_VOLTAGE, state_class=M, accuracy_decimals=1, icon="mdi:solar-panel"),

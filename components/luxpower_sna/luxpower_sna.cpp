@@ -9,7 +9,7 @@ namespace esphome {
 namespace luxpower_sna {
 
 // ---------------------------------------------------------------------------
-// Status text tables (from Python LXPPacket.py / HA integration)
+// Status text tables
 // ---------------------------------------------------------------------------
 const char *LuxpowerSNAComponent::STATUS_TEXTS[193] = {
     "Standby", "Error", "Inverting", "",
@@ -60,8 +60,6 @@ void LuxpowerSNAComponent::setup() {
     ESP_LOGCONFIG(TAG, "LuxPower SNA setup…");
     memset(recv_buf_, 0, sizeof(recv_buf_));
     recv_buf_len_ = 0;
-    // Initialize timing so the first input poll happens after one full interval,
-    // not immediately. The initial hold poll fires right after connect via initial_hold_done_.
     last_input_poll_ms_ = millis();
     last_hold_poll_ms_  = millis();
 }
@@ -83,14 +81,30 @@ void LuxpowerSNAComponent::dump_config() {
 void LuxpowerSNAComponent::loop() {
     uint32_t now = esphome::millis();
 
+    // ── Pick up scan result from FreeRTOS task (single-core safe handoff) ──
+    if (scan_result_pending_) {
+        scan_result_pending_ = false;
+        scanning_            = false;
+        if (scan_found_) {
+            std::string ip(found_ip_buf_);
+            pub(scan_status_text_, "Found: " + ip);
+            apply_scanned_host_(ip);
+        } else {
+            pub(scan_status_text_, "Not found");
+        }
+    }
+
     // ── Guard: do nothing until config is complete ───────────────────────
     if (!is_config_ready()) {
-        if (now - last_connect_ms_ >= 10000) {   // log at most every 10s
+        if (now - last_connect_ms_ >= 10000) {
             last_connect_ms_ = now;
             ESP_LOGW(TAG, "Config incomplete – waiting for host/dongle/inverter serial via HA");
         }
         return;
     }
+
+    // ── Skip normal polling while scan is running ────────────────────────
+    if (scanning_) return;
 
     // ── Handle disconnection / reconnect ──────────────────────────────────
     if (state_ == State::DISCONNECTED) {
@@ -124,7 +138,6 @@ void LuxpowerSNAComponent::loop() {
     if (awaiting_ && (now - req_sent_ms_ > RESPONSE_TIMEOUT_MS)) {
         ESP_LOGW(TAG, "Response timeout (bank %u)", bank_idx_);
         awaiting_ = false;
-        // Advance to next bank or give up this cycle
         bank_idx_++;
         if (state_ == State::POLLING_INPUT && bank_idx_ >= 5) {
             state_ = State::IDLE;
@@ -136,12 +149,11 @@ void LuxpowerSNAComponent::loop() {
         }
     }
 
-    if (awaiting_) return;  // still waiting for current response
+    if (awaiting_) return;
 
     // ── State transitions ─────────────────────────────────────────────────
     switch (state_) {
         case State::IDLE: {
-            // Write commands take priority
             if (!write_queue_.empty()) {
                 auto cmd = write_queue_.front();
                 write_queue_.pop();
@@ -151,19 +163,14 @@ void LuxpowerSNAComponent::loop() {
                 req_sent_ms_ = now;
                 return;
             }
-            // Initial hold poll on first connect
             if (!initial_hold_done_) {
                 bank_idx_ = 0;
                 state_ = State::POLLING_HOLD;
-            }
-            // Periodic input poll
-            else if (now - last_input_poll_ms_ >= update_interval_ms_) {
+            } else if (now - last_input_poll_ms_ >= update_interval_ms_) {
                 last_input_poll_ms_ = now;
                 bank_idx_ = 0;
                 state_ = State::POLLING_INPUT;
-            }
-            // Periodic hold refresh
-            else if (now - last_hold_poll_ms_ >= hold_interval_ms_) {
+            } else if (now - last_hold_poll_ms_ >= hold_interval_ms_) {
                 last_hold_poll_ms_ = now;
                 bank_idx_ = 0;
                 state_ = State::POLLING_HOLD;
@@ -215,15 +222,12 @@ bool LuxpowerSNAComponent::start_connect_() {
         return false;
     }
 
-    // Non-blocking via ioctl(FIONBIO) – more reliable than fcntl(O_NONBLOCK) on IDF
     int non_blocking = 1;
     ioctl(sock_fd_, FIONBIO, &non_blocking);
 
-    // Disable Nagle for lower latency on small packets
     int yes = 1;
     setsockopt(sock_fd_, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
 
-    // Use getaddrinfo so both IP strings ("192.168.1.x") and hostnames work
     struct addrinfo hints{};
     hints.ai_family   = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -247,7 +251,7 @@ bool LuxpowerSNAComponent::start_connect_() {
         return true;
     }
     if (errno == EINPROGRESS) {
-        return true;  // check_connect_() will confirm
+        return true;
     }
     ESP_LOGE(TAG, "connect() failed: errno=%d", errno);
     close_socket_();
@@ -264,12 +268,11 @@ bool LuxpowerSNAComponent::check_connect_() {
 
     int ret = select(sock_fd_ + 1, nullptr, &wfds, &efds, &tv);
     if (ret < 0) {
-        // select() itself failed (e.g. EBADF) – socket is invalid
         ESP_LOGE(TAG, "select() error %d during connect check", errno);
         close_socket_();
         return false;
     }
-    if (ret == 0) return false;  // Not ready yet – still connecting
+    if (ret == 0) return false;
 
     int err = 0;
     socklen_t errlen = sizeof(err);
@@ -306,9 +309,6 @@ int LuxpowerSNAComponent::send_bytes_(const uint8_t *data, size_t len) {
     return ret;
 }
 
-// ---------------------------------------------------------------------------
-// Non-blocking receive – accumulate into recv_buf_
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::try_recv_() {
     if (sock_fd_ < 0) return;
 
@@ -334,15 +334,9 @@ void LuxpowerSNAComponent::try_recv_() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Packet detection & dispatch
-// Returns true if a full packet was consumed.
-// ---------------------------------------------------------------------------
 bool LuxpowerSNAComponent::try_process_packet_() {
-    // Need at least 6 bytes (prefix + protocol + frame_length)
     if (recv_buf_len_ < 6) return false;
 
-    // Re-sync on prefix 0xA1 0x1A
     if (recv_buf_[0] != 0xA1 || recv_buf_[1] != 0x1A) {
         for (size_t i = 1; i + 1 < recv_buf_len_; i++) {
             if (recv_buf_[i] == 0xA1 && recv_buf_[i+1] == 0x1A) {
@@ -362,19 +356,15 @@ bool LuxpowerSNAComponent::try_process_packet_() {
         recv_buf_len_ = 0;
         return false;
     }
-    if (recv_buf_len_ < total) return false;  // incomplete
+    if (recv_buf_len_ < total) return false;
 
     process_packet_(recv_buf_, total);
 
-    // Consume packet from buffer
     memmove(recv_buf_, recv_buf_ + total, recv_buf_len_ - total);
     recv_buf_len_ -= total;
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Packet dispatch
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_packet_(const uint8_t *buf, size_t len) {
     if (len < 20) return;
 
@@ -394,11 +384,9 @@ void LuxpowerSNAComponent::process_packet_(const uint8_t *buf, size_t len) {
 
     if (len < 22) return;
 
-    // data_frame starts at offset 20
     const uint8_t *df = buf + 20;
-    size_t df_len     = len - 20 - 2;  // exclude trailing 2-byte CRC
+    size_t df_len     = len - 20 - 2;
 
-    // Verify CRC
     uint16_t crc_calc = crc16_(df, df_len);
     uint16_t crc_recv = (uint16_t)(buf[len-2] | (buf[len-1] << 8));
     if (crc_calc != crc_recv) {
@@ -407,21 +395,18 @@ void LuxpowerSNAComponent::process_packet_(const uint8_t *buf, size_t len) {
     }
 
     if (df_len < 14) return;
-    uint8_t  dev_fn   = df[1];
-    uint16_t reg      = (uint16_t)(df[12] | (df[13] << 8));
+    uint8_t  dev_fn = df[1];
+    uint16_t reg    = (uint16_t)(df[12] | (df[13] << 8));
 
-    // Mark response received → clear awaiting flag
     awaiting_ = false;
 
     switch (dev_fn) {
         case LUX_FN_READ_INPUT: {
-            // value_length byte at df[14], data at df[15]
             if (df_len < 15) return;
             uint8_t  vlen = df[14];
             const uint8_t *data = df + 15;
             if (df_len < (size_t)(15 + vlen)) return;
             process_read_input_(reg, data, vlen);
-            // Advance bank
             bank_idx_++;
             break;
         }
@@ -435,7 +420,6 @@ void LuxpowerSNAComponent::process_packet_(const uint8_t *buf, size_t len) {
             break;
         }
         case LUX_FN_WRITE_SINGLE: {
-            // No value_length byte; value is df[14:16]
             if (df_len < 16) return;
             uint16_t val = (uint16_t)(df[14] | (df[15] << 8));
             process_write_single_(reg, val);
@@ -447,9 +431,6 @@ void LuxpowerSNAComponent::process_packet_(const uint8_t *buf, size_t len) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Heartbeat echo
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::send_heartbeat_response_(const uint8_t *pkt, size_t len) {
     send_bytes_(pkt, len);
 }
@@ -458,46 +439,28 @@ void LuxpowerSNAComponent::send_heartbeat_response_(const uint8_t *pkt, size_t l
 // Packet builders
 // ---------------------------------------------------------------------------
 static void build_header_(uint8_t *buf, const char *dongle, uint16_t data_length) {
-    // Full packet layout (total = frame_length + 6):
-    //  [0:2]   prefix      2 bytes   ─┐  (not part of frame_length)
-    //  [2:4]   protocol    2 bytes    │
-    //  [4:6]   frame_length 2 bytes  ─┘
-    //  [6]     address     1 byte    ─┐
-    //  [7]     tcp_fn      1 byte     │
-    //  [8:18]  dongle      10 bytes   │  frame_length covers all of this
-    //  [18:20] data_length 2 bytes    │  ← this 2-byte field IS counted!
-    //  [20:36] data_frame  16 bytes   │
-    //  [36:38] CRC         2 bytes   ─┘
-    //
-    // frame_length = 1+1+10+2+(data_length-2)+2 = data_length + 14
-    // With data_length=18: frame_length = 32  ✓  (matches Python hardcoded value)
-    uint16_t fl = (uint16_t)(data_length + 14);  // = 32 for standard requests
-
-    buf[0] = 0xA1; buf[1] = 0x1A;           // prefix
-    buf[2] = 0x02; buf[3] = 0x00;           // protocol = 2
-    buf[4] = fl & 0xFF; buf[5] = fl >> 8;   // frame_length
-    buf[6] = 0x01;                           // address
-    buf[7] = LUX_TCP_TRANSLATED_DATA;        // tcp_function = 0xC2
-    memcpy(buf + 8, dongle, 10);             // dongle serial
-    buf[18] = data_length & 0xFF;            // data_length (18 = 16 data_frame + 2 CRC)
+    uint16_t fl = (uint16_t)(data_length + 14);
+    buf[0] = 0xA1; buf[1] = 0x1A;
+    buf[2] = 0x02; buf[3] = 0x00;
+    buf[4] = fl & 0xFF; buf[5] = fl >> 8;
+    buf[6] = 0x01;
+    buf[7] = LUX_TCP_TRANSLATED_DATA;
+    memcpy(buf + 8, dongle, 10);
+    buf[18] = data_length & 0xFF;
     buf[19] = data_length >> 8;
 }
 
 void LuxpowerSNAComponent::send_read_input_(uint16_t start_reg, uint16_t count) {
     uint8_t pkt[38];
-    // data_frame = 16 bytes, data_length = 18
     build_header_(pkt, dongle_serial_.c_str(), 18);
-
     uint8_t *df = pkt + 20;
     df[0] = LUX_ACTION_WRITE;
     df[1] = LUX_FN_READ_INPUT;
     memcpy(df + 2, inverter_serial_.c_str(), 10);
     df[12] = start_reg & 0xFF; df[13] = start_reg >> 8;
     df[14] = count & 0xFF;     df[15] = count >> 8;
-
     uint16_t crc = crc16_(df, 16);
     pkt[36] = crc & 0xFF; pkt[37] = crc >> 8;
-
     ESP_LOGD(TAG, "READ_INPUT reg=%u count=%u", start_reg, count);
     send_bytes_(pkt, 38);
 }
@@ -505,17 +468,14 @@ void LuxpowerSNAComponent::send_read_input_(uint16_t start_reg, uint16_t count) 
 void LuxpowerSNAComponent::send_read_hold_(uint16_t start_reg, uint16_t count) {
     uint8_t pkt[38];
     build_header_(pkt, dongle_serial_.c_str(), 18);
-
     uint8_t *df = pkt + 20;
     df[0] = LUX_ACTION_WRITE;
     df[1] = LUX_FN_READ_HOLD;
     memcpy(df + 2, inverter_serial_.c_str(), 10);
     df[12] = start_reg & 0xFF; df[13] = start_reg >> 8;
     df[14] = count & 0xFF;     df[15] = count >> 8;
-
     uint16_t crc = crc16_(df, 16);
     pkt[36] = crc & 0xFF; pkt[37] = crc >> 8;
-
     ESP_LOGD(TAG, "READ_HOLD reg=%u count=%u", start_reg, count);
     send_bytes_(pkt, 38);
 }
@@ -523,24 +483,18 @@ void LuxpowerSNAComponent::send_read_hold_(uint16_t start_reg, uint16_t count) {
 void LuxpowerSNAComponent::send_write_single_(uint16_t reg, uint16_t value) {
     uint8_t pkt[38];
     build_header_(pkt, dongle_serial_.c_str(), 18);
-
     uint8_t *df = pkt + 20;
     df[0] = LUX_ACTION_WRITE;
     df[1] = LUX_FN_WRITE_SINGLE;
     memcpy(df + 2, inverter_serial_.c_str(), 10);
     df[12] = reg & 0xFF;   df[13] = reg >> 8;
     df[14] = value & 0xFF; df[15] = value >> 8;
-
     uint16_t crc = crc16_(df, 16);
     pkt[36] = crc & 0xFF; pkt[37] = crc >> 8;
-
     ESP_LOGI(TAG, "WRITE_SINGLE reg=%u value=%u", reg, value);
     send_bytes_(pkt, 38);
 }
 
-// ---------------------------------------------------------------------------
-// Write queue API (called from Switch / Number)
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::queue_write(uint16_t reg, uint16_t value) {
     ESP_LOGD(TAG, "queue_write reg=%u value=%u", reg, value);
     write_queue_.push(WriteCmd{reg, value});
@@ -567,9 +521,6 @@ void LuxpowerSNAComponent::process_read_input_(uint16_t start_reg,
     }
 }
 
-// ---------------------------------------------------------------------------
-// Process READ_HOLD response – update hold_regs_ cache
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_read_hold_(uint16_t start_reg,
                                               const uint8_t *data, uint8_t count) {
     for (uint8_t i = 0; i < count; i++) {
@@ -580,9 +531,6 @@ void LuxpowerSNAComponent::process_read_hold_(uint16_t start_reg,
     ESP_LOGD(TAG, "READ_HOLD reg=%u count=%u cached", start_reg, count);
 }
 
-// ---------------------------------------------------------------------------
-// Process WRITE_SINGLE confirmation
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_write_single_(uint16_t reg, uint16_t value) {
     ESP_LOGI(TAG, "WRITE_SINGLE confirmed reg=%u value=%u", reg, value);
     if (reg < 240) {
@@ -592,9 +540,6 @@ void LuxpowerSNAComponent::process_write_single_(uint16_t reg, uint16_t value) {
     state_ = State::IDLE;
 }
 
-// ---------------------------------------------------------------------------
-// Notify all switches / numbers of updated hold registers
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::notify_hold_listeners_() {
     for (auto *sw  : switches_) sw->on_hold_update(hold_regs_);
     for (auto *num : numbers_)  num->on_hold_update(hold_regs_);
@@ -602,47 +547,38 @@ void LuxpowerSNAComponent::notify_hold_listeners_() {
 }
 
 // ---------------------------------------------------------------------------
-// Bank 0 processing (registers 0-39) – mirror of Python get_device_values_bank0
+// Bank 0 processing
 // ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_bank0_(const Bank0 &d) {
-    // Solar voltages
     pub(pv_v1_, d.v_pv_1 / 10.0f);
     pub(pv_v2_, d.v_pv_2 / 10.0f);
     pub(pv_v3_, d.v_pv_3 / 10.0f);
-    // Battery
     pub(bat_v_,    d.v_bat / 10.0f);
     pub(bat_soc_,  d.soc);
     pub(bat_soh_,  d.soh);
     pub(internal_fault_, (float)d.internal_fault);
-    // Solar power
     pub(pv_p1_, d.p_pv_1);
     pub(pv_p2_, d.p_pv_2);
     pub(pv_p3_, d.p_pv_3);
     pub(pv_total_, (float)(d.p_pv_1 + d.p_pv_2 + d.p_pv_3));
-    // Battery charge/discharge
     pub(bat_chg_,    d.p_charge);
     pub(bat_dischg_, d.p_discharge);
-    // Grid
     pub(grid_v_r_,    d.v_ac_r / 10.0f);
     pub(grid_v_s_,    d.v_ac_s / 10.0f);
     pub(grid_v_t_,    d.v_ac_t / 10.0f);
-    pub(grid_v_live_, d.v_ac_r / 10.0f);  // same as v_ac_r: raw register unit is 0.1V
+    pub(grid_v_live_, d.v_ac_r / 10.0f);
     pub(grid_freq_,   d.f_ac / 100.0f);
-    // Inverter AC
     pub(p_inv_,        d.p_inv);
     pub(p_rec_,        d.p_rec);
     pub(rms_current_,  d.rms_current / 100.0f);
     pub(pf_,           d.pf / 1000.0f);
-    // EPS
     pub(eps_v_r_,  d.v_eps_r / 10.0f);
     pub(eps_v_s_,  d.v_eps_s / 10.0f);
     pub(eps_v_t_,  d.v_eps_t / 10.0f);
     pub(eps_freq_, d.f_eps / 100.0f);
     pub(p_to_eps_, d.p_to_eps);
-    // Grid flow
     pub(p_to_grid_, d.p_to_grid);
     pub(p_to_user_, d.p_to_user);
-    // Daily energy
     pub(e_pv1_day_,     d.e_pv_1_day / 10.0f);
     pub(e_pv2_day_,     d.e_pv_2_day / 10.0f);
     pub(e_pv3_day_,     d.e_pv_3_day / 10.0f);
@@ -654,10 +590,8 @@ void LuxpowerSNAComponent::process_bank0_(const Bank0 &d) {
     pub(e_eps_day_,     d.e_eps_day / 10.0f);
     pub(e_to_grid_day_, d.e_to_grid_day / 10.0f);
     pub(e_to_user_day_, d.e_to_user_day / 10.0f);
-    // Bus voltages
     pub(v_bus1_, d.v_bus_1 / 10.0f);
     pub(v_bus2_, d.v_bus_2 / 10.0f);
-    // Derived power values
     float home_live = (float)d.p_to_user - d.p_rec + d.p_inv - d.p_to_grid;
     float home_day  = (d.e_to_user_day - d.e_rec_day + d.e_inv_day - d.e_to_grid_day) / 10.0f;
     pub(p_home_,   (float)(d.p_to_user - d.p_rec));
@@ -665,7 +599,6 @@ void LuxpowerSNAComponent::process_bank0_(const Bank0 &d) {
     pub(grid_flow_,(d.p_to_user > 0)   ? -(float)d.p_to_user   : (float)d.p_to_grid);
     pub(home_live_, home_live);
     pub(home_day_,  home_day);
-    // Status text
     if (d.status < 193 && STATUS_TEXTS[d.status] && strlen(STATUS_TEXTS[d.status]) > 0) {
         pub(lux_status_text_, STATUS_TEXTS[d.status]);
     } else {
@@ -674,7 +607,7 @@ void LuxpowerSNAComponent::process_bank0_(const Bank0 &d) {
 }
 
 // ---------------------------------------------------------------------------
-// Bank 1 processing (registers 40-79)
+// Bank 1 processing
 // ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_bank1_(const Bank1 &d) {
     pub(e_pv1_all_,      d.e_pv_1_all / 10.0f);
@@ -690,25 +623,19 @@ void LuxpowerSNAComponent::process_bank1_(const Bank1 &d) {
     pub(e_to_user_all_,  d.e_to_user_all / 10.0f);
     pub(fault_code_,   (float)d.fault_code);
     pub(warning_code_, (float)d.warning_code);
-    // Temperatures – Python does NOT divide these by 10
     pub(t_inner_, (float)d.t_inner);
     pub(t_rad1_,  (float)d.t_rad_1);
     pub(t_rad2_,  (float)d.t_rad_2);
     pub(t_bat_,   (float)d.t_bat);
     pub(uptime_,  (float)d.uptime);
-    // Derived
     float home_total = (d.e_to_user_all - d.e_rec_all + d.e_inv_all - d.e_to_grid_all) / 10.0f;
     pub(home_total_, home_total);
 }
 
 // ---------------------------------------------------------------------------
-// Bank 2 processing (registers 80-119)
+// Bank 2 processing
 // ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_bank2_(const Bank2 &d) {
-    // Python uses /100 for most models, /10 for HV batteries (FAAB/EAAB/ACAB/CFAA/CCAA).
-    // Default /10 here. If BMS current shows 10x too high, change to /100.0f.
-    // Python default /100 (most models). /10 for HV batteries (FAAB/EAAB/ACAB).
-    // SNA is HV → /10 is correct. Change to /100.0f if values look 10x too large.
     pub(bms_max_chg_,   d.max_chg_curr / 10.0f);
     pub(bms_max_dischg_,d.max_dischg_curr / 10.0f);
     pub(chg_volt_ref_,  d.charge_volt_ref / 10.0f);
@@ -716,13 +643,10 @@ void LuxpowerSNAComponent::process_bank2_(const Bank2 &d) {
     pub(bat_status_inv_,(float)d.bat_status_inv);
     pub(bat_count_,     (float)d.bat_count);
     pub(bat_cap_ah_,    (float)d.bat_capacity);
-    // bat_current is signed, /10
     int16_t bc = d.bat_current;
     pub(bat_curr_, bc / 10.0f);
-    // Cell volt – /1000 (Python uses /1000 for mV→V)
     pub(max_cell_v_, d.max_cell_volt / 1000.0f);
     pub(min_cell_v_, d.min_cell_volt / 1000.0f);
-    // Cell temp – signed, /10
     int16_t max_t = d.max_cell_temp;
     int16_t min_t = d.min_cell_temp;
     if (max_t & 0x8000) max_t -= 0x10000;
@@ -731,7 +655,6 @@ void LuxpowerSNAComponent::process_bank2_(const Bank2 &d) {
     pub(min_cell_t_, min_t / 10.0f);
     pub(bat_cycles_, (float)d.bat_cycle_count);
     pub(p_load2_,    (float)d.p_load2);
-    // Battery status text
     uint8_t bs = (uint8_t)(d.bat_status_inv < 17 ? d.bat_status_inv : 16);
     if (BAT_STATUS_TEXTS[bs] && strlen(BAT_STATUS_TEXTS[bs]) > 0) {
         pub(lux_bat_status_text_, BAT_STATUS_TEXTS[bs]);
@@ -741,7 +664,7 @@ void LuxpowerSNAComponent::process_bank2_(const Bank2 &d) {
 }
 
 // ---------------------------------------------------------------------------
-// Bank 3 processing (registers 120-159)
+// Bank 3 processing
 // ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_bank3_(const Bank3 &d) {
     pub(gen_v_,     d.gen_input_volt / 10.0f);
@@ -757,7 +680,7 @@ void LuxpowerSNAComponent::process_bank3_(const Bank3 &d) {
 }
 
 // ---------------------------------------------------------------------------
-// Bank 4 processing (registers 160-199)
+// Bank 4 processing
 // ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::process_bank4_(const Bank4 &d) {
     pub(p_load_ongrid_, (float)d.p_load_ongrid);
@@ -773,7 +696,6 @@ void LuxpowerSNASwitch::write_state(bool state) {
     uint16_t cur = parent_->get_hold_register(register_addr_);
     uint16_t new_val = state ? (cur | bitmask_) : (cur & ~bitmask_);
     parent_->queue_write(register_addr_, new_val);
-    // Optimistically update UI immediately; confirmed by on_hold_update later
     publish_state(state);
 }
 
@@ -789,7 +711,6 @@ void LuxpowerSNASwitch::on_hold_update(const uint16_t *hold_regs) {
 void LuxpowerSNANumber::control(float value) {
     if (!parent_) return;
     uint16_t cur = parent_->get_hold_register(register_addr_);
-
     uint16_t new_val;
     if (is_signed_) {
         int16_t sv = (int16_t)roundf(value * divisor_);
@@ -815,22 +736,15 @@ void LuxpowerSNANumber::on_hold_update(const uint16_t *hold_regs) {
     publish_state(displayed);
 }
 
-
 // ---------------------------------------------------------------------------
-// LuxpowerSNAButton
+// LuxpowerSNAButton – just delegates to parent
 // ---------------------------------------------------------------------------
 void LuxpowerSNAButton::press_action() {
     if (!parent_) return;
     switch (action_) {
-        case Action::RESTART:
-            parent_->action_restart();
-            break;
-        case Action::RESET_ALL:
-            parent_->action_reset_all();
-            break;
-        case Action::SCAN_DONGLE:
-            parent_->action_scan_dongle();
-            break;
+        case Action::RESTART:    parent_->action_restart();      break;
+        case Action::RESET_ALL:  parent_->action_reset_all();    break;
+        case Action::SCAN_DONGLE:parent_->action_scan_dongle();  break;
     }
 }
 
@@ -840,8 +754,6 @@ void LuxpowerSNAButton::press_action() {
 void LuxpowerSNAComponent::action_restart() {
     ESP_LOGW(TAG, "Inverter RESTART – writing reg 11 = 128");
     queue_write(11, 128);
-    // Force reconnect after a short delay; inverter will reboot
-    // close_socket_ will be called naturally when the inverter drops the connection
 }
 
 void LuxpowerSNAComponent::action_reset_all() {
@@ -866,7 +778,6 @@ void LuxpowerSNATime::on_hold_update(const uint16_t *hold_regs) {
 
 void LuxpowerSNATime::set_time(const std::string &hhmm) {
     if (!parent_) return;
-    // Parse "HH:MM"
     if (hhmm.size() < 5 || hhmm[2] != ':') {
         ESP_LOGW(TAG, "Time '%s' invalid format, expected HH:MM", hhmm.c_str());
         return;
@@ -884,130 +795,200 @@ void LuxpowerSNATime::set_time(const std::string &hhmm) {
     snprintf(buf, sizeof(buf), "%02d:%02d", hour, minute);
     current_hhmm_ = buf;
 }
+
 // ---------------------------------------------------------------------------
-// Scan LAN for Lux dongle on port 8000
+// Scan LAN for Lux dongle – FreeRTOS task, batch parallel connect
+// ESP32-S2 single-core: batch=8, safe for default lwip MAX_SOCKETS=16
+//
+// IMPORTANT: ScanParams is defined in the header (inside LuxpowerSNAComponent).
+// Do NOT redefine it here — that would be a redefinition error.
 // ---------------------------------------------------------------------------
-
-bool LuxpowerSNAComponent::scan_host_port_(const std::string &ip, uint16_t port, uint32_t timeout_ms) {
-  int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (fd < 0) {
-    return false;
-  }
-
-  int non_blocking = 1;
-  ioctl(fd, FIONBIO, &non_blocking);
-
-  int yes = 1;
-  setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
-
-  struct sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-
-  if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) {
-    close(fd);
-    return false;
-  }
-
-  int ret = connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
-  if (ret == 0) {
-    close(fd);
-    return true;
-  }
-
-  if (errno != EINPROGRESS) {
-    close(fd);
-    return false;
-  }
-
-  fd_set wfds, efds;
-  FD_ZERO(&wfds);
-  FD_ZERO(&efds);
-  FD_SET(fd, &wfds);
-  FD_SET(fd, &efds);
-
-  struct timeval tv{};
-  tv.tv_sec = timeout_ms / 1000;
-  tv.tv_usec = (timeout_ms % 1000) * 1000;
-
-  ret = select(fd + 1, nullptr, &wfds, &efds, &tv);
-  if (ret <= 0) {
-    close(fd);
-    return false;
-  }
-
-  int err = 0;
-  socklen_t errlen = sizeof(err);
-  getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
-  close(fd);
-
-  return err == 0;
-}
-
-bool LuxpowerSNAComponent::try_probe_lux_dongle_(const std::string &ip, uint16_t port, uint32_t timeout_ms) {
-  // Minimal probe for now:
-  // if TCP/8000 is open, treat it as a candidate.
-  // Can be made stricter later by sending a Lux packet and checking response.
-  return scan_host_port_(ip, port, timeout_ms);
-}
 
 void LuxpowerSNAComponent::action_scan_dongle() {
-  ESP_LOGI(TAG, "Starting dongle scan on port %u...", port_);
-
-  // Stop current socket/session while scanning
-  close_socket_();
-
-  // Determine subnet from STA IP, assume /24
-  esp_netif_ip_info_t ip_info{};
-  if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK) {
-    ESP_LOGW(TAG, "Unable to get STA IP info; using current host subnet fallback");
-  }
-
-  uint8_t a = ip4_addr1(&ip_info.ip);
-  uint8_t b = ip4_addr2(&ip_info.ip);
-  uint8_t c = ip4_addr3(&ip_info.ip);
-  uint8_t self = ip4_addr4(&ip_info.ip);
-
-  if (a == 0 && b == 0 && c == 0) {
-    // fallback if IP info unavailable
-    a = 192; b = 168; c = 100;
-    ESP_LOGW(TAG, "Falling back to subnet %u.%u.%u.0/24", a, b, c);
-  }
-
-  for (uint16_t i = 1; i <= 254; i++) {
-    if (i == self) continue;
-
-    char ipbuf[20];
-    snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, i);
-    std::string candidate = ipbuf;
-
-    ESP_LOGD(TAG, "Probing %s:%u", candidate.c_str(), port_);
-
-    if (try_probe_lux_dongle_(candidate, port_, 150)) {
-      ESP_LOGI(TAG, "Dongle candidate found at %s:%u", candidate.c_str(), port_);
-        apply_scanned_host_(candidate);
+    if (scanning_) {
+        ESP_LOGW(TAG, "Scan already in progress, ignoring");
         return;
     }
 
-    delay(5);
-  }
+    // Guard: dongle + inverter serial must be set first
+    if (dongle_serial_.size() != 10) {
+        ESP_LOGW(TAG, "Cannot scan: dongle_serial not configured (need 10 chars)");
+        pub(scan_status_text_, "Error: set dongle serial first");
+        return;
+    }
+    if (inverter_serial_.size() != 10) {
+        ESP_LOGW(TAG, "Cannot scan: inverter_serial not configured (need 10 chars)");
+        pub(scan_status_text_, "Error: set inverter serial first");
+        return;
+    }
 
-  ESP_LOGW(TAG, "No dongle found on %u.%u.%u.0/24 port %u", a, b, c, port_);
+    // Get local subnet from STA interface
+    esp_netif_ip_info_t ip_info{};
+    uint8_t a = 192, b = 168, c = 1, self_octet = 0;
+    if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) == ESP_OK
+        && ip_info.ip.addr != 0) {
+        a          = ip4_addr1(&ip_info.ip);
+        b          = ip4_addr2(&ip_info.ip);
+        c          = ip4_addr3(&ip_info.ip);
+        self_octet = ip4_addr4(&ip_info.ip);
+    } else {
+        ESP_LOGW(TAG, "Cannot read STA IP, falling back to 192.168.1.0/24");
+    }
+
+    // Disconnect existing session – scan and normal polling share the same
+    // lwip socket pool, so we free the main socket before starting.
+    close_socket_();
+
+    scanning_            = true;
+    scan_result_pending_ = false;
+    scan_found_          = false;
+    found_ip_buf_[0]     = '\0';
+
+    pub(scan_status_text_, "Scanning...");
+    ESP_LOGI(TAG, "Starting dongle scan on %u.%u.%u.0/24 port %u", a, b, c, port_);
+
+    // Heap-allocate params; task frees them before self-deleting
+    ScanParams *params = new ScanParams{a, b, c, self_octet, port_, this};
+
+    BaseType_t ret = xTaskCreate(
+        scan_task_fn_,
+        "lux_scan",
+        6144,   // stack: ample for 8 sockets + snprintf buffers on S2
+        params,
+        1,      // priority 1 – time-sliced with main loop on single-core S2
+        nullptr
+    );
+
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "xTaskCreate failed for lux_scan");
+        delete params;
+        scanning_ = false;
+        pub(scan_status_text_, "Error: task create failed");
+    }
 }
 
+// Static trampoline – runs in FreeRTOS task context
+void LuxpowerSNAComponent::scan_task_fn_(void *param) {
+    ScanParams *p = static_cast<ScanParams *>(param);
+    LuxpowerSNAComponent *self = p->hub;
+    uint8_t  a          = p->a;
+    uint8_t  b          = p->b;
+    uint8_t  c          = p->c;
+    uint8_t  self_octet = p->self_octet;
+    uint16_t port       = p->port;
+    delete p;
+
+    self->do_scan_(a, b, c, self_octet, port);
+    vTaskDelete(nullptr);
+}
+
+void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
+                                     uint8_t self_octet, uint16_t port) {
+    static const int BATCH = 8;  // conservative for S2 single-core + lwip pool
+    int     batch_fds[BATCH];
+    uint8_t batch_octets[BATCH];
+
+    for (uint16_t base = 1; base <= 254; base += BATCH) {
+        int maxfd = -1;
+        fd_set wfds, efds;
+        FD_ZERO(&wfds);
+        FD_ZERO(&efds);
+
+        // --- Open batch of non-blocking sockets and initiate connect ---
+        for (int j = 0; j < BATCH; j++) {
+            uint16_t i = base + j;
+            batch_fds[j]    = -1;
+            batch_octets[j] = 0;
+
+            if (i > 254) continue;
+            if ((uint8_t)i == self_octet) continue;
+
+            int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (fd < 0) continue;
+
+            int nb = 1;
+            ioctl(fd, FIONBIO, &nb);
+
+            struct sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port   = htons(port);
+            char ipbuf[20];
+            snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, (uint8_t)i);
+            if (inet_pton(AF_INET, ipbuf, &addr.sin_addr) != 1) {
+                close(fd); continue;
+            }
+
+            connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
+            // EINPROGRESS is expected – we check result with select() below
+
+            batch_fds[j]    = fd;
+            batch_octets[j] = (uint8_t)i;
+            FD_SET(fd, &wfds);
+            FD_SET(fd, &efds);
+            if (fd > maxfd) maxfd = fd;
+        }
+
+        // --- Wait up to 200 ms for any socket in the batch ---
+        if (maxfd >= 0) {
+            struct timeval tv{0, 200000};  // 200 ms
+            select(maxfd + 1, nullptr, &wfds, &efds, &tv);
+        }
+
+        // --- Check results and close all sockets in this batch ---
+        for (int j = 0; j < BATCH; j++) {
+            if (batch_fds[j] < 0) continue;
+
+            bool connected = false;
+            if (FD_ISSET(batch_fds[j], &wfds)) {
+                int err = 0;
+                socklen_t el = sizeof(err);
+                getsockopt(batch_fds[j], SOL_SOCKET, SO_ERROR, &err, &el);
+                connected = (err == 0);
+            }
+            close(batch_fds[j]);
+            batch_fds[j] = -1;
+
+            if (connected) {
+                char ipbuf[20];
+                snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u",
+                         a, b, c, batch_octets[j]);
+                ESP_LOGI(TAG, "Dongle candidate found at %s:%u", ipbuf, port);
+
+                // Write result BEFORE setting flag (single-core: no reorder risk,
+                // but keep the write-before-flag discipline for clarity)
+                memcpy(found_ip_buf_, ipbuf, sizeof(found_ip_buf_));
+                scan_found_          = true;
+                scan_result_pending_ = true;  // loop() picks this up
+                return;                       // stop scanning immediately
+            }
+        }
+
+        // Yield between batches so main loop stays responsive
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Exhausted all IPs – not found
+    ESP_LOGW(TAG, "Scan complete: no dongle found on %u.%u.%u.0/24 port %u",
+             a, b, c, port);
+    scan_found_          = false;
+    scan_result_pending_ = true;
+}
+
+// ---------------------------------------------------------------------------
+// Apply scanned host – called from loop() on main thread
+// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::apply_scanned_host_(const std::string &ip) {
-  ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
+    ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
+    this->set_host(ip);
 
-  this->set_host(ip);
+    // Push value into template text entity if attached
+    if (host_text_ != nullptr) {
+        host_text_->publish_state(ip);
+    }
 
-  // Push value into template text entity if attached
-  if (host_text_ != nullptr) {
-    host_text_->publish_state(ip);
-  }
-
-  if (this->is_config_ready()) {
-    this->reconnect();
-  }
+    if (this->is_config_ready()) {
+        this->reconnect();
+    }
 }
 
 }  // namespace luxpower_sna

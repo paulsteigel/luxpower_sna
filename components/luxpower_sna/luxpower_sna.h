@@ -18,10 +18,13 @@
 
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+
 // for scanning dongle ip address
 #include "esp_netif.h"
 #include "lwip/ip4_addr.h"
 #include "esphome/components/text/text.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // ioctl(FIONBIO) is used instead of fcntl(O_NONBLOCK) for IDF socket compatibility
 #include <queue>
@@ -210,17 +213,16 @@ class LuxpowerSNANumber : public number::Number, public Component {
 };
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Button entity  (restart, reset_all_settings)
+// Button entity  (restart, reset_all_settings, scan_dongle)
+// NOTE: Scan logic lives entirely in LuxpowerSNAComponent.
+//       press_action() simply delegates to parent_->action_scan_dongle().
 // ---------------------------------------------------------------------------
 class LuxpowerSNAButton : public button::Button, public Component {
  public:
-    //enum class Action : uint8_t { RESTART, RESET_ALL };
     enum class Action : uint8_t { RESTART, RESET_ALL, SCAN_DONGLE };
 
     void set_parent(LuxpowerSNAComponent *parent) { parent_ = parent; }
     void set_action(Action a)                      { action_ = a; }
-    void action_scan_dongle();
 
  protected:
     void press_action() override;
@@ -228,17 +230,10 @@ class LuxpowerSNAButton : public button::Button, public Component {
  private:
     LuxpowerSNAComponent *parent_{nullptr};
     Action action_{Action::RESTART};
-    // for scanning dongle address on demand
-    bool scan_host_port_(const std::string &ip, uint16_t port, uint32_t timeout_ms);
-    bool try_probe_lux_dongle_(const std::string &ip, uint16_t port, uint32_t timeout_ms);
-
 };
 
 // ---------------------------------------------------------------------------
 // Time entity  – maps to a single hold register, encoding = minute*256 + hour
-// Exposed as a text entity ("HH:MM") since ESPHome has no native time-input.
-// on_hold_update() parses the cached register and calls publish_state().
-// control()  (called when user sets value in HA) encodes and queues a write.
 // ---------------------------------------------------------------------------
 class LuxpowerSNATime : public Component {
  public:
@@ -272,6 +267,7 @@ class LuxpowerSNATime : public Component {
     }
 };
 
+// ---------------------------------------------------------------------------
 // Hub / main component
 // ---------------------------------------------------------------------------
 class LuxpowerSNAComponent : public Component {
@@ -281,29 +277,24 @@ class LuxpowerSNAComponent : public Component {
     void loop()        override;
     void dump_config() override;
     float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
-    void apply_scanned_host_(const std::string &ip); // helper for setting text into host
 
     // ---- Configuration setters ----
-    void set_host_text(text::Text *t) { host_text_ = t; }
-    void set_host(const std::string &h)          { host_ = h; }
-    void set_port(uint16_t p)                    { port_ = p; }
-    void set_dongle_serial(const std::string &s) { dongle_serial_ = s; }
+    void set_host_text(text::Text *t)             { host_text_ = t; }
+    void set_host(const std::string &h)           { host_ = h; }
+    void set_port(uint16_t p)                     { port_ = p; }
+    void set_dongle_serial(const std::string &s)  { dongle_serial_ = s; }
     void set_inverter_serial(const std::string &s){ inverter_serial_ = s; }
-    void set_update_interval(uint32_t ms)         { update_interval_ms_ = ms; }
-    void set_hold_update_interval(uint32_t ms)    { hold_interval_ms_ = ms; }
+    void set_update_interval(uint32_t ms)          { update_interval_ms_ = ms; }
+    void set_hold_update_interval(uint32_t ms)     { hold_interval_ms_ = ms; }
 
-    // ---- Runtime reconfiguration ----------------------------------------
-    // Call these from text/number entity on_value lambdas, then call reconnect().
-    // They are safe to call at any time; if currently connected, the existing
-    // socket is closed and a new connection is attempted with the new params.
+    // ---- Runtime reconfiguration ----
     void reconnect() {
         ESP_LOGI(TAG, "reconnect() called – closing socket and resetting state");
-        close_socket_();           // sets state_ = DISCONNECTED
-        last_connect_ms_ = 0;      // connect immediately on next loop()
-        initial_hold_done_ = false; // re-fetch hold registers after reconnect
+        close_socket_();
+        last_connect_ms_ = 0;
+        initial_hold_done_ = false;
     }
 
-    // Returns true when config is complete enough to attempt a connection
     bool is_config_ready() const {
         return !host_.empty()
             && dongle_serial_.size() == 10
@@ -313,7 +304,6 @@ class LuxpowerSNAComponent : public Component {
     // ---- Called by switches / numbers to request a register write ----
     void queue_write(uint16_t reg, uint16_t value);
 
-    /// Returns cached hold register value (safe to call from Switch::write_state)
     uint16_t get_hold_register(uint16_t reg) const {
         return (reg < 240) ? hold_regs_[reg] : 0;
     }
@@ -321,16 +311,18 @@ class LuxpowerSNAComponent : public Component {
     // ---- Platform registration ----
     void register_switch(LuxpowerSNASwitch *sw)  { switches_.push_back(sw); }
     void register_number(LuxpowerSNANumber *num) { numbers_.push_back(num); }
-    void register_button(LuxpowerSNAButton *btn) { /* no list needed, buttons are fire-and-forget */ }
+    void register_button(LuxpowerSNAButton *btn) { /* fire-and-forget */ }
     void register_time(LuxpowerSNATime *t)       { times_.push_back(t); }
 
     // ---- Actions called by buttons ----
     void action_restart();
     void action_reset_all();
+    void action_scan_dongle();  // ← scan logic lives here, not in Button
 
     // ---- Sensor setters (Section 1 – bank 0) ----
     void set_lux_status_text_sensor(text_sensor::TextSensor *s)         { lux_status_text_ = s; }
     void set_lux_battery_status_text_sensor(text_sensor::TextSensor *s) { lux_bat_status_text_ = s; }
+    void set_scan_status_text_sensor(text_sensor::TextSensor *s)        { scan_status_text_ = s; }
 
     void set_lux_current_solar_voltage_1_sensor(sensor::Sensor *s) { pv_v1_ = s; }
     void set_lux_current_solar_voltage_2_sensor(sensor::Sensor *s) { pv_v2_ = s; }
@@ -438,11 +430,11 @@ class LuxpowerSNAComponent : public Component {
     // ---- Socket helpers ----
     text::Text *host_text_{nullptr};
     bool  start_connect_();
-    bool  check_connect_();        // returns true when connected
+    bool  check_connect_();
     void  close_socket_();
     int   send_bytes_(const uint8_t *data, size_t len);
     void  try_recv_();
-    bool  try_process_packet_();   // returns true if a full packet was handled
+    bool  try_process_packet_();
 
     // ---- Packet builders ----
     void  send_read_input_(uint16_t start_reg, uint16_t count = 40);
@@ -457,7 +449,7 @@ class LuxpowerSNAComponent : public Component {
     void  process_write_single_(uint16_t reg, uint16_t value);
     void  notify_hold_listeners_();
 
-    // ---- Bank processors (mirror of Python get_device_values_bankN) ----
+    // ---- Bank processors ----
     void  process_bank0_(const Bank0 &d);
     void  process_bank1_(const Bank1 &d);
     void  process_bank2_(const Bank2 &d);
@@ -468,21 +460,38 @@ class LuxpowerSNAComponent : public Component {
     static uint16_t crc16_(const uint8_t *data, size_t len);
 
     // ---- Publish helpers ----
-    static void pub(sensor::Sensor      *s, float v) { if (s) s->publish_state(v); }
+    static void pub(sensor::Sensor      *s, float v)              { if (s) s->publish_state(v); }
     static void pub(text_sensor::TextSensor *s, const std::string &v) { if (s) s->publish_state(v); }
+
+    // ---- Scan helpers (FreeRTOS task) ----
+    // ScanParams is defined here; the .cpp must NOT redefine it.
+    struct ScanParams {
+        uint8_t a, b, c, self_octet;
+        uint16_t port;
+        LuxpowerSNAComponent *hub;
+    };
+    void apply_scanned_host_(const std::string &ip);
+    void do_scan_(uint8_t a, uint8_t b, uint8_t c, uint8_t self_octet, uint16_t port);
+    static void scan_task_fn_(void *param);
+
+    // ---- Scan state (written by task, read by loop()) ----
+    volatile bool scanning_{false};
+    volatile bool scan_result_pending_{false};
+    volatile bool scan_found_{false};
+    char found_ip_buf_[20]{};
 
     // ---- State machine ----
     enum class State : uint8_t {
         DISCONNECTED,
         CONNECTING,
         IDLE,
-        POLLING_INPUT,   // cycling input banks
-        POLLING_HOLD,    // cycling hold banks
-        WRITING,         // processing write queue
+        POLLING_INPUT,
+        POLLING_HOLD,
+        WRITING,
     };
     State    state_     = State::DISCONNECTED;
-    uint8_t  bank_idx_  = 0;     // index into poll sequence (0-4 for input, 0-5 for hold)
-    bool     awaiting_  = false; // waiting for response
+    uint8_t  bank_idx_  = 0;
+    bool     awaiting_  = false;
     uint32_t req_sent_ms_ = 0;
 
     static const uint32_t RESPONSE_TIMEOUT_MS = 4000;
@@ -519,13 +528,15 @@ class LuxpowerSNAComponent : public Component {
     std::vector<LuxpowerSNANumber*> numbers_;
     std::vector<LuxpowerSNATime*>   times_;
 
-    // ---- Status texts ----
+    // ---- Status text tables ----
     static const char *STATUS_TEXTS[193];
     static const char *BAT_STATUS_TEXTS[17];
 
     // ---- Sensor pointers (bank 0) ----
     text_sensor::TextSensor *lux_status_text_{nullptr};
     text_sensor::TextSensor *lux_bat_status_text_{nullptr};
+    text_sensor::TextSensor *scan_status_text_{nullptr};
+
     sensor::Sensor *pv_v1_{nullptr}, *pv_v2_{nullptr}, *pv_v3_{nullptr};
     sensor::Sensor *bat_v_{nullptr}, *bat_soc_{nullptr}, *bat_soh_{nullptr};
     sensor::Sensor *internal_fault_{nullptr};
