@@ -914,7 +914,7 @@ void LuxpowerSNAComponent::scan_task_fn_(void *param) {
 
 void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
                                      uint8_t self_octet, uint16_t port) {
-    static const int BATCH = 4;  // safe when sharing lwip pool with jk_modbus/other components
+    static const int BATCH = 8;  // conservative for S2 single-core + lwip pool
     int     batch_fds[BATCH];
     uint8_t batch_octets[BATCH];
 
@@ -1011,16 +1011,13 @@ void LuxpowerSNAComponent::apply_scanned_host_(const std::string &ip) {
     ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
     this->set_host(ip);
 
+    // Push value into template text entity if attached
     if (host_text_ != nullptr) {
-        // publish_state() triggers the on_value lambda on lux_config_host,
-        // which calls set_host() + reconnect() — so we must NOT reconnect here
-        // as well, otherwise we get two reconnects ~13s apart.
         host_text_->publish_state(ip);
-    } else {
-        // No text entity wired: reconnect directly (nothing else will do it)
-        if (this->is_config_ready()) {
-            this->reconnect();
-        }
+    }
+
+    if (this->is_config_ready()) {
+        this->reconnect();
     }
 }
 
