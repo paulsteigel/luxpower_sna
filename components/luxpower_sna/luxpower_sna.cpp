@@ -913,111 +913,87 @@ void LuxpowerSNAComponent::scan_task_fn_(void *param) {
 }
 
 void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
-                                     uint8_t self_octet, uint16_t port) {
-    static const int BATCH = 8;  // conservative for S2 single-core + lwip pool
-    int     batch_fds[BATCH];
-    uint8_t batch_octets[BATCH];
+                                    uint8_t self_octet, uint16_t port) {
+    // Sequential scan — one socket at a time.
+    // Parallel batching risks exhausting the lwip pool when other components
+    // (jk_modbus, mqtt, etc.) are holding sockets concurrently. Sequential is
+    // slower (~15 s worst-case) but 100% reliable regardless of pool pressure.
+    for (uint16_t i = 1; i <= 254; i++) {
+        if ((uint8_t)i == self_octet) continue;
 
-    for (uint16_t base = 1; base <= 254; base += BATCH) {
-        int maxfd = -1;
+        char ipbuf[20];
+        snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, (uint8_t)i);
+
+        int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (fd < 0) {
+            // Pool temporarily full — yield and retry this address
+            ESP_LOGD(TAG, "[lux_scan] socket() failed for %s (errno=%d), retrying", ipbuf, errno);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            i--;  // retry same address
+            continue;
+        }
+
+        // Non-blocking connect
+        int nb = 1;
+        ioctl(fd, FIONBIO, &nb);
+
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port   = htons(port);
+        if (inet_pton(AF_INET, ipbuf, &addr.sin_addr) != 1) {
+            close(fd);
+            continue;
+        }
+        connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
+
+        // Wait up to 150 ms for connect to complete
         fd_set wfds, efds;
-        FD_ZERO(&wfds);
-        FD_ZERO(&efds);
+        FD_ZERO(&wfds); FD_ZERO(&efds);
+        FD_SET(fd, &wfds); FD_SET(fd, &efds);
+        struct timeval tv{0, 150000};  // 150 ms
+        int sel = select(fd + 1, nullptr, &wfds, &efds, &tv);
 
-        // --- Open batch of non-blocking sockets and initiate connect ---
-        for (int j = 0; j < BATCH; j++) {
-            uint16_t i = base + j;
-            batch_fds[j]    = -1;
-            batch_octets[j] = 0;
+        bool connected = false;
+        if (sel > 0 && FD_ISSET(fd, &wfds)) {
+            int err = 0;
+            socklen_t el = sizeof(err);
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
+            connected = (err == 0);
+        }
+        close(fd);
 
-            if (i > 254) continue;
-            if ((uint8_t)i == self_octet) continue;
-
-            int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-            if (fd < 0) continue;
-
-            int nb = 1;
-            ioctl(fd, FIONBIO, &nb);
-
-            struct sockaddr_in addr{};
-            addr.sin_family = AF_INET;
-            addr.sin_port   = htons(port);
-            char ipbuf[20];
-            snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, (uint8_t)i);
-            if (inet_pton(AF_INET, ipbuf, &addr.sin_addr) != 1) {
-                close(fd); continue;
-            }
-
-            connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
-            // EINPROGRESS is expected – we check result with select() below
-
-            batch_fds[j]    = fd;
-            batch_octets[j] = (uint8_t)i;
-            FD_SET(fd, &wfds);
-            FD_SET(fd, &efds);
-            if (fd > maxfd) maxfd = fd;
+        if (connected) {
+            ESP_LOGI(TAG, "[lux_scan] Dongle candidate found at %s:%u", ipbuf, port);
+            memcpy(found_ip_buf_, ipbuf, sizeof(found_ip_buf_));
+            scan_found_          = true;
+            scan_result_pending_ = true;
+            return;
         }
 
-        // --- Wait up to 200 ms for any socket in the batch ---
-        if (maxfd >= 0) {
-            struct timeval tv{0, 200000};  // 200 ms
-            select(maxfd + 1, nullptr, &wfds, &efds, &tv);
-        }
-
-        // --- Check results and close all sockets in this batch ---
-        for (int j = 0; j < BATCH; j++) {
-            if (batch_fds[j] < 0) continue;
-
-            bool connected = false;
-            if (FD_ISSET(batch_fds[j], &wfds)) {
-                int err = 0;
-                socklen_t el = sizeof(err);
-                getsockopt(batch_fds[j], SOL_SOCKET, SO_ERROR, &err, &el);
-                connected = (err == 0);
-            }
-            close(batch_fds[j]);
-            batch_fds[j] = -1;
-
-            if (connected) {
-                char ipbuf[20];
-                snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u",
-                         a, b, c, batch_octets[j]);
-                ESP_LOGI(TAG, "Dongle candidate found at %s:%u", ipbuf, port);
-
-                // Write result BEFORE setting flag (single-core: no reorder risk,
-                // but keep the write-before-flag discipline for clarity)
-                memcpy(found_ip_buf_, ipbuf, sizeof(found_ip_buf_));
-                scan_found_          = true;
-                scan_result_pending_ = true;  // loop() picks this up
-                return;                       // stop scanning immediately
-            }
-        }
-
-        // Yield between batches so main loop stays responsive
-        vTaskDelay(pdMS_TO_TICKS(5));
+        // Yield briefly so main loop stays responsive
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 
-    // Exhausted all IPs – not found
-    ESP_LOGW(TAG, "Scan complete: no dongle found on %u.%u.%u.0/24 port %u",
+    ESP_LOGW(TAG, "[lux_scan] Scan complete: no dongle found on %u.%u.%u.0/24 port %u",
              a, b, c, port);
     scan_found_          = false;
     scan_result_pending_ = true;
 }
 
-// ---------------------------------------------------------------------------
-// Apply scanned host – called from loop() on main thread
-// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::apply_scanned_host_(const std::string &ip) {
     ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
     this->set_host(ip);
 
-    // Push value into template text entity if attached
     if (host_text_ != nullptr) {
+        // publish_state() triggers the on_value lambda on lux_config_host,
+        // which calls set_host() + reconnect() — so we must NOT reconnect here
+        // as well, otherwise we get two reconnects ~13s apart.
         host_text_->publish_state(ip);
-    }
-
-    if (this->is_config_ready()) {
-        this->reconnect();
+    } else {
+        // No text entity wired: reconnect directly (nothing else will do it)
+        if (this->is_config_ready()) {
+            this->reconnect();
+        }
     }
 }
 
