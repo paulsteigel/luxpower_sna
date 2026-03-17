@@ -14,7 +14,7 @@ Designed for locations (such as parts of Vietnam) where ISPs assign non-public W
 
 - **Full read access** to all inverter sensor banks (0–4: live, daily, total, BMS, generator)
 - **Write support** — switches, numbers, and buttons to control the inverter
-- **Zero-config first-run** — press *Scan Dongle IP* button; the ESP scans the local /24 subnet, finds the dongle, and fills in the host automatically
+- **Auto-discovery** — press *Scan Dongle IP* button; the ESP scans the local /24 subnet and finds the dongle automatically
 - **Runtime configuration** — set host IP and serial numbers from HA UI without reflashing; values survive reboot
 - **IDF-compatible** — uses lwip sockets directly; no WiFiClient dependency; works on ESP32-S2 single-core
 - **Persistent TCP connection** — mirrors the official Python integration behaviour; handles heartbeats automatically
@@ -70,12 +70,11 @@ See [`luxpower_package.yaml`](luxpower_package.yaml) for a full working example.
 
 ## ⚙️ Runtime Configuration (no reflash needed)
 
-Leave `host`, `dongle_serial`, and `inverter_serial` blank in YAML and set them from the HA UI or web server. Values are stored in ESP32 flash and survive reboots.
+Leave `host`, `dongle_serial`, and `inverter_serial` blank in YAML and set them from the HA UI. Values are stored in ESP32 flash and survive reboots.
 
 ```yaml
 luxpower_sna:
   id: lux_hub
-  host_text_id: lux_config_host   # wire scan result back to the text entity
   update_interval: 20s
   hold_update_interval: 60s
 
@@ -125,39 +124,48 @@ text:
             if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
 ```
 
-> **`host_text_id`** is the key that links the hub to your `lux_config_host` text entity. When the Scan Dongle button finds the dongle, it writes the discovered IP back into this entity automatically — including saving it to flash.
+> **Important:** Add an `on_boot` block to push restored flash values into the hub on every reboot. Without this, the hub won't receive the serial numbers until the user edits them again.
+
+```yaml
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          auto host = id(lux_config_host).state;
+          auto dongle = id(lux_config_dongle).state;
+          auto inverter = id(lux_config_inverter).state;
+          if (!host.empty()) id(lux_hub).set_host(host);
+          if (dongle.size() == 10) id(lux_hub).set_dongle_serial(dongle);
+          if (inverter.size() == 10) id(lux_hub).set_inverter_serial(inverter);
+          if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
+```
 
 ---
 
 ## 🔍 Scan Dongle IP (Auto-Discovery)
 
-If you do not know the dongle's IP address, use the **Scan Dongle IP** button. The ESP32 will scan all 254 addresses on its own /24 subnet, connect-test each one on the configured port (default 8000), and set the host automatically when found.
+If you do not know the dongle's IP address, use the **Scan Dongle IP** button. The ESP32 scans all 254 addresses on its own /24 subnet, TCP-tests each one on the configured port (default 8000), and connects automatically when found.
 
 ### Prerequisites before scanning
 
-Both `dongle_serial` and `inverter_serial` must be filled in first (they are needed to verify the connection after discovery). The host field can be empty.
+Both `dongle_serial` and `inverter_serial` must be filled in first. The host field can be empty.
 
 ### How it works
 
 1. Press **Scan Dongle IP** in HA or the web interface.
-2. The component launches a background FreeRTOS task (does not block the main loop).
-3. Addresses are tested in batches of 8 parallel TCP connects (200 ms timeout per batch).
-4. On a typical /24 network the scan completes in **3–7 seconds**.
+2. The component launches a background FreeRTOS task — the main loop is not blocked.
+3. Addresses are tested sequentially, one socket at a time (safe with other components sharing the lwip pool).
+4. On a typical /24 network the scan completes in **under 15 seconds**.
 5. When the dongle is found:
    - `scan_status_text` sensor shows `Found: 192.168.x.x`
-   - The host is written back into the `lux_config_host` text entity (flash-persisted)
-   - The component reconnects automatically
-6. If nothing is found: `scan_status_text` shows `Not found`.
+   - The component connects to the inverter immediately
+6. Copy the IP from **Scan Status** and paste it into **Inverter Host** to persist it for future reboots.
+7. If nothing is found: `scan_status_text` shows `Not found`.
 
 ### YAML snippet
 
 ```yaml
-luxpower_sna:
-  id: lux_hub
-  host_text_id: lux_config_host   # required for auto-fill after scan
-  update_interval: 20s
-  hold_update_interval: 60s
-
 button:
   - platform: luxpower_sna
     luxpower_sna_id: lux_hub
@@ -180,12 +188,25 @@ sensor:
 | Message | Cause |
 |---------|-------|
 | `Scanning...` | Scan in progress |
-| `Found: 192.168.x.x` | Dongle located, host applied |
+| `Found: 192.168.x.x` | Dongle located; copy IP into Inverter Host to persist |
 | `Not found` | No device answered on the configured port |
 | `Error: set dongle serial first` | `dongle_serial` not yet configured |
 | `Error: set inverter serial first` | `inverter_serial` not yet configured |
 | `Error: task create failed` | Insufficient FreeRTOS heap (very rare) |
 | `Error: scan timeout` | Background task died unexpectedly (watchdog fired after 30 s) |
+
+---
+
+## 🔁 First-Run Workflow
+
+For a brand-new installation where you do not know the dongle IP:
+
+1. Flash the firmware (host can be left blank)
+2. In HA, set **Dongle Serial** and **Inverter Serial** (both exactly 10 characters)
+3. Press **Scan Dongle IP** — wait up to 15 seconds
+4. Check **Scan Status** — if `Found: 192.168.x.x`, the component is already connected
+5. Copy the discovered IP and paste it into **Inverter Host** to save it for future reboots
+6. Sensors and controls are available immediately after the scan succeeds
 
 ---
 
@@ -252,26 +273,14 @@ sensor:
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| No data, connection refused | Wrong IP or port | Use Scan Dongle IP button, or check dongle IP in router DHCP table |
+| No data, connection refused | Wrong IP or port | Use Scan Dongle IP, or check dongle IP in router DHCP table |
 | Scan returns "Not found" | Dongle on different subnet or port | Confirm dongle IP manually; check `lux_config_port` value |
 | Scan returns error about serials | Dongle/inverter serial not filled in | Set both serials in HA UI before scanning |
+| Serials empty after reboot | Missing `on_boot` lambda | Add the `on_boot` block shown in the Runtime Configuration section |
 | CRC mismatch errors | Serial numbers wrong | Verify 10-char dongle + inverter serial (case-sensitive) |
-| `lux_config_host` not updated after scan | Missing `host_text_id` in hub config | Add `host_text_id: lux_config_host` to the `luxpower_sna:` block |
 | Values 10× too high (BMS current) | Model uses /100 scale | Change `/10.0f` → `/100.0f` in `luxpower_sna.cpp` bank 2 section |
 | Entity not found after OTA | Slug changed | Check `name:` field — slug = lowercase + underscores |
 | Config lost after reboot | `restore_value` not set | Add `restore_value: true` to all config text/number entities |
-
----
-
-## 🔁 First-Run Workflow
-
-For a brand-new installation where you do not know the dongle IP:
-
-1. Flash the firmware (host and serials can be left blank)
-2. In HA, set **Dongle Serial** and **Inverter Serial** (both exactly 10 characters)
-3. Press **Scan Dongle IP** — wait ~5 seconds
-4. Check **Scan Status** — if `Found: 192.168.x.x`, the host is set and the component connects automatically
-5. Sensors and controls become available immediately
 
 ---
 
@@ -279,8 +288,8 @@ For a brand-new installation where you do not know the dongle IP:
 
 ```
 luxpower_sna/
-  __init__.py       # Hub component registration + host_text_id wiring
-  luxpower_sna.h    # C++ class declarations (scan state, deferred apply)
+  __init__.py       # Hub component registration
+  luxpower_sna.h    # C++ class declarations
   luxpower_sna.cpp  # C++ implementation (FreeRTOS scan task, state machine)
   sensor.py         # Sensor + text_sensor platform (incl. scan_status_text)
   switch.py         # Switch platform
