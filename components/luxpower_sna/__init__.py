@@ -1,17 +1,19 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.components import text
 from esphome.const import CONF_ID, CONF_UPDATE_INTERVAL
 
 # CONF_HOST / CONF_PORT are not in esphome.const – define locally
-CONF_HOST             = "host"
-CONF_PORT             = "port"
+CONF_HOST                 = "host"
+CONF_PORT                 = "port"
 CONF_DONGLE_SERIAL        = "dongle_serial"
 CONF_INVERTER_SERIAL      = "inverter_serial"
 CONF_HOLD_UPDATE_INTERVAL = "hold_update_interval"
 CONF_LUXPOWER_SNA_ID      = "luxpower_sna_id"
+CONF_HOST_TEXT_ID         = "host_text_id"   # ← optional: wire scan result → text entity
 
 DEPENDENCIES = ["wifi"]
-AUTO_LOAD    = ["sensor", "text_sensor", "switch", "number", "button"]
+AUTO_LOAD    = ["sensor", "text_sensor", "switch", "number", "button", "text"]
 MULTI_CONF   = True
 
 luxpower_sna_ns      = cg.esphome_ns.namespace("luxpower_sna")
@@ -23,13 +25,14 @@ LUXPOWER_SNA_COMPONENT_SCHEMA = cv.Schema({
 })
 
 CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID():                         cv.declare_id(LuxpowerSNAComponent),
+    cv.GenerateID():                              cv.declare_id(LuxpowerSNAComponent),
     cv.Optional(CONF_HOST,            default=""): cv.string,
     cv.Optional(CONF_PORT,            default=8000): cv.port,
     cv.Optional(CONF_DONGLE_SERIAL,   default=""): cv.string,
     cv.Optional(CONF_INVERTER_SERIAL, default=""): cv.string,
     cv.Optional(CONF_UPDATE_INTERVAL,      default="20s"): cv.update_interval,
     cv.Optional(CONF_HOLD_UPDATE_INTERVAL, default="60s"): cv.update_interval,
+    cv.Optional(CONF_HOST_TEXT_ID): cv.use_id(text.Text),  # ← new
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -52,3 +55,8 @@ async def to_code(config):
 
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
     cg.add(var.set_hold_update_interval(config[CONF_HOLD_UPDATE_INTERVAL]))
+
+    # Wire up host text entity so scan result writes back to lux_config_host
+    if CONF_HOST_TEXT_ID in config:
+        host_text_var = await cg.get_variable(config[CONF_HOST_TEXT_ID])
+        cg.add(var.set_host_text(host_text_var))
