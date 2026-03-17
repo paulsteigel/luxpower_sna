@@ -908,6 +908,11 @@ void LuxpowerSNAComponent::scan_task_fn_(void *param) {
     uint16_t port       = p->port;
     delete p;
 
+    // Wait for lwip to fully release the main inverter socket closed in action_scan_dongle().
+    // Without this, the first batch of socket() calls may return -1 (pool not yet freed),
+    // causing addresses in batch 1 to be silently skipped.
+    vTaskDelay(pdMS_TO_TICKS(300));
+
     self->do_scan_(a, b, c, self_octet, port);
     vTaskDelete(nullptr);
 }
@@ -1011,13 +1016,16 @@ void LuxpowerSNAComponent::apply_scanned_host_(const std::string &ip) {
     ESP_LOGI(TAG, "Applying scanned host: %s", ip.c_str());
     this->set_host(ip);
 
-    // Push value into template text entity if attached
     if (host_text_ != nullptr) {
+        // publish_state() triggers the on_value lambda on lux_config_host,
+        // which calls set_host() + reconnect() — so we must NOT reconnect here
+        // as well, otherwise we get two reconnects ~13s apart.
         host_text_->publish_state(ip);
-    }
-
-    if (this->is_config_ready()) {
-        this->reconnect();
+    } else {
+        // No text entity wired: reconnect directly (nothing else will do it)
+        if (this->is_config_ready()) {
+            this->reconnect();
+        }
     }
 }
 
