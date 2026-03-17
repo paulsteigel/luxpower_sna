@@ -987,20 +987,23 @@ void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
 // Saves/loads host_ independently of MQTT/HA so MQTT reconnect cannot clear it.
 // Uses a fixed 4-byte hash key unique to this component.
 // ---------------------------------------------------------------------------
+// NVS uses a fixed char[64] because make_preference requires trivially copyable types.
 static const uint32_t LUX_HOST_PREF_KEY = 0x4C555848UL;  // "LUXH"
 
 void LuxpowerSNAComponent::save_host_prefs_() {
-    ESPPreferenceObject pref = global_preferences->make_preference<std::string>(LUX_HOST_PREF_KEY, true);
-    pref.save(&host_);
+    char buf[64] = {};
+    strncpy(buf, host_.c_str(), sizeof(buf) - 1);
+    auto pref = global_preferences->make_preference<char[64]>(LUX_HOST_PREF_KEY, true);
+    pref.save(&buf);
     global_preferences->sync();
-    ESP_LOGI(TAG, "Host saved to NVS: %s", host_.c_str());
+    ESP_LOGI(TAG, "Host saved to NVS: %s", buf);
 }
 
 void LuxpowerSNAComponent::load_host_prefs_() {
-    ESPPreferenceObject pref = global_preferences->make_preference<std::string>(LUX_HOST_PREF_KEY, true);
-    std::string saved;
-    if (pref.load(&saved) && !saved.empty()) {
-        host_ = saved;
+    char buf[64] = {};
+    auto pref = global_preferences->make_preference<char[64]>(LUX_HOST_PREF_KEY, true);
+    if (pref.load(&buf) && buf[0] != '\0') {
+        host_ = std::string(buf);
         ESP_LOGI(TAG, "Host loaded from NVS: %s", host_.c_str());
     }
 }
