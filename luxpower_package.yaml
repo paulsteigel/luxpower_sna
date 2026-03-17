@@ -7,6 +7,28 @@
 #     luxpower: !include commons/luxpower_sensors.yaml
 # ============================================================
 
+globals:
+  - id: g_lux_host
+    type: std::string
+    restore_value: true
+    initial_value: '""'
+
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          if (id(lux_hub).is_config_ready()) return;
+          // Đọc từ global, không từ template entity — MQTT không ảnh hưởng được
+          auto host     = id(g_lux_host);
+          auto dongle   = id(lux_config_dongle).state;
+          auto inverter = id(lux_config_inverter).state;
+          ESP_LOGI("lux_cfg", "watchdog: host='%s' dongle=%u inv=%u",
+                   host.c_str(), (unsigned)dongle.size(), (unsigned)inverter.size());
+          if (!host.empty())         id(lux_hub).set_host(host);
+          if (dongle.size() == 10)   id(lux_hub).set_dongle_serial(dongle);
+          if (inverter.size() == 10) id(lux_hub).set_inverter_serial(inverter);
+          if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
+          
 external_components:
   - source: github://paulsteigel/luxpower_sna@main
     refresh: 0s
@@ -14,7 +36,7 @@ external_components:
 # ── Hub ──────────────────────────────────────────────────────
 luxpower_sna:
   id: lux_hub
-  host_text_id: lux_config_host
+  #host_text_id: lux_config_host
   update_interval: 20s
   hold_update_interval: 60s
 
@@ -23,7 +45,6 @@ text:
   - platform: template
     id: lux_config_host
     name: "${luxid}_Inverter Host"
-    icon: "mdi:ip-network"
     entity_category: config
     mode: text
     optimistic: true
@@ -32,6 +53,8 @@ text:
     on_value:
       then:
         - lambda: |-
+            if (x.empty()) return;
+            id(g_lux_host) = x;
             id(lux_hub).set_host(x);
             if (id(lux_hub).is_config_ready()) id(lux_hub).reconnect();
 
