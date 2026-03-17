@@ -908,18 +908,13 @@ void LuxpowerSNAComponent::scan_task_fn_(void *param) {
     uint16_t port       = p->port;
     delete p;
 
-    // Wait for lwip to fully release the main inverter socket closed in action_scan_dongle().
-    // Without this, the first batch of socket() calls may return -1 (pool not yet freed),
-    // causing addresses in batch 1 to be silently skipped.
-    vTaskDelay(pdMS_TO_TICKS(300));
-
     self->do_scan_(a, b, c, self_octet, port);
     vTaskDelete(nullptr);
 }
 
 void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
                                      uint8_t self_octet, uint16_t port) {
-    static const int BATCH = 8;  // conservative for S2 single-core + lwip pool
+    static const int BATCH = 4;  // safe when sharing lwip pool with jk_modbus/other components
     int     batch_fds[BATCH];
     uint8_t batch_octets[BATCH];
 
