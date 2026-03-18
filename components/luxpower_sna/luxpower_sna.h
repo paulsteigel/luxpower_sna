@@ -291,9 +291,6 @@ class LuxpowerSNAComponent : public Component {
     void set_update_interval(uint32_t ms)         { update_interval_ms_ = ms; }
     void set_hold_update_interval(uint32_t ms)    { hold_interval_ms_ = ms; }
 
-    // ---- Optional: wire host text entity so scan result writes back ----
-    void set_host_text(text::Text *t) { host_text_ = t; }
-
     // ---- Runtime reconfiguration ----
     void reconnect() {
         ESP_LOGI(TAG, "reconnect() called – closing socket and resetting state");
@@ -499,9 +496,6 @@ class LuxpowerSNAComponent : public Component {
     // avoiding on_value lambda → reconnect() re-entrant loop.
     bool        deferred_apply_{false};
     std::string deferred_ip_{};
-
-    // ---- Optional host text entity (wired by __init__.py) ----
-    text::Text *host_text_{nullptr};
 
     // ---- State machine ----
     enum class State : uint8_t {
