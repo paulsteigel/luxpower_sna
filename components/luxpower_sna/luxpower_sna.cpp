@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <cstring>
+#include <algorithm>  // std::min, std::max
 
 namespace esphome {
 namespace luxpower_sna {
@@ -103,8 +104,6 @@ void LuxpowerSNAComponent::loop() {
             pub(scan_status_text_, "Not found");
         }
         // Return here so deferred_apply_ fires on NEXT tick.
-        // This keeps apply_scanned_host_() (which triggers on_value lambda
-        // → reconnect()) out of the scan_result_pending_ call stack.
         return;
     }
 
@@ -518,8 +517,15 @@ void LuxpowerSNAComponent::send_write_single_(uint16_t reg, uint16_t value) {
     send_bytes_(pkt, 38);
 }
 
+// [FIX #3] Write queue bounded — drop with warning when full
 void LuxpowerSNAComponent::queue_write(uint16_t reg, uint16_t value) {
-    ESP_LOGD(TAG, "queue_write reg=%u value=%u", reg, value);
+    if (write_queue_.size() >= LUX_WRITE_QUEUE_MAX) {
+        ESP_LOGW(TAG, "queue_write: queue full (%u), dropping reg=%u value=%u",
+                 (unsigned)LUX_WRITE_QUEUE_MAX, reg, value);
+        return;
+    }
+    ESP_LOGD(TAG, "queue_write reg=%u value=%u (depth=%u)", reg, value,
+             (unsigned)write_queue_.size() + 1);
     write_queue_.push(WriteCmd{reg, value});
 }
 
@@ -532,12 +538,39 @@ void LuxpowerSNAComponent::process_read_input_(uint16_t start_reg,
         ESP_LOGW(TAG, "READ_INPUT start=%u too small (%u)", start_reg, (unsigned)data_len);
         return;
     }
+    // [FIX #2] Use memcpy instead of reinterpret_cast to avoid unaligned access
+    // on Xtensa when raw packet buffer offset is not naturally aligned.
     switch (start_reg) {
-        case 0:   process_bank0_(*reinterpret_cast<const Bank0*>(data)); break;
-        case 40:  process_bank1_(*reinterpret_cast<const Bank1*>(data)); break;
-        case 80:  process_bank2_(*reinterpret_cast<const Bank2*>(data)); break;
-        case 120: process_bank3_(*reinterpret_cast<const Bank3*>(data)); break;
-        case 160: process_bank4_(*reinterpret_cast<const Bank4*>(data)); break;
+        case 0: {
+            Bank0 bank;
+            memcpy(&bank, data, sizeof(Bank0));
+            process_bank0_(bank);
+            break;
+        }
+        case 40: {
+            Bank1 bank;
+            memcpy(&bank, data, sizeof(Bank1));
+            process_bank1_(bank);
+            break;
+        }
+        case 80: {
+            Bank2 bank;
+            memcpy(&bank, data, sizeof(Bank2));
+            process_bank2_(bank);
+            break;
+        }
+        case 120: {
+            Bank3 bank;
+            memcpy(&bank, data, sizeof(Bank3));
+            process_bank3_(bank);
+            break;
+        }
+        case 160: {
+            Bank4 bank;
+            memcpy(&bank, data, sizeof(Bank4));
+            process_bank4_(bank);
+            break;
+        }
         default:
             ESP_LOGW(TAG, "Unknown INPUT bank start_reg=%u", start_reg);
             break;
@@ -746,6 +779,9 @@ void LuxpowerSNANumber::control(float value) {
     publish_state(value);
 }
 
+// [FIX #5] Clamp displayed value to number traits range before publishing.
+// Prevents HA log errors when inverter reports out-of-range values (e.g. 101
+// meaning "disabled/unlimited" on some Luxpower firmware versions).
 void LuxpowerSNANumber::on_hold_update(const uint16_t *hold_regs) {
     if (register_addr_ >= 240) return;
     uint16_t raw = hold_regs[register_addr_];
@@ -756,6 +792,12 @@ void LuxpowerSNANumber::on_hold_update(const uint16_t *hold_regs) {
     } else {
         displayed = (float)((raw & bitmask_) >> bitshift_) / divisor_;
     }
+    // Clamp to configured min/max — inverter may send sentinel values (e.g. 101)
+    // that mean "no limit / disabled". Silently clamp rather than spam HA logs.
+    float min_v = this->traits.get_min_value();
+    float max_v = this->traits.get_max_value();
+    if (displayed < min_v) displayed = min_v;
+    if (displayed > max_v) displayed = max_v;
     publish_state(displayed);
 }
 
@@ -820,15 +862,11 @@ void LuxpowerSNATime::set_time(const std::string &hhmm) {
 }
 
 // ---------------------------------------------------------------------------
-// Scan LAN for Lux dongle – FreeRTOS task, batch parallel connect
-// ESP32-S2 single-core: batch=8, safe for default lwip MAX_SOCKETS=16
-//
-// IMPORTANT: ScanParams is defined in the header (inside LuxpowerSNAComponent).
-// Do NOT redefine it here — that would be a redefinition error.
+// Scan LAN for Lux dongle – FreeRTOS task, sequential connect
+// ESP32-S2 single-core: sequential is safer than parallel for lwip pool.
 // ---------------------------------------------------------------------------
 
 void LuxpowerSNAComponent::action_scan_dongle() {
-    // Always log so we know the button was pressed regardless of guard outcome
     ESP_LOGI(TAG, "Scan button pressed (scanning_=%d dongle_len=%u inv_len=%u)",
              (int)scanning_,
              (unsigned)dongle_serial_.size(),
@@ -839,7 +877,6 @@ void LuxpowerSNAComponent::action_scan_dongle() {
         return;
     }
 
-    // Guard: dongle + inverter serial must be set first
     if (dongle_serial_.size() != 10) {
         ESP_LOGW(TAG, "Cannot scan: dongle_serial not configured (need 10 chars, got %u)",
                  (unsigned)dongle_serial_.size());
@@ -853,7 +890,6 @@ void LuxpowerSNAComponent::action_scan_dongle() {
         return;
     }
 
-    // Get local subnet from STA interface
     esp_netif_ip_info_t ip_info{};
     uint8_t a = 192, b = 168, c = 1, self_octet = 0;
     if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) == ESP_OK
@@ -866,11 +902,10 @@ void LuxpowerSNAComponent::action_scan_dongle() {
         ESP_LOGW(TAG, "Cannot read STA IP, falling back to 192.168.1.0/24");
     }
 
-    // Close main socket – scan task opens its own batch of sockets
     close_socket_();
 
     scanning_            = true;
-    scan_start_ms_       = millis();   // start watchdog timer
+    scan_start_ms_       = millis();
     scan_result_pending_ = false;
     scan_found_          = false;
     deferred_apply_      = false;
@@ -879,15 +914,14 @@ void LuxpowerSNAComponent::action_scan_dongle() {
     pub(scan_status_text_, "Scanning...");
     ESP_LOGI(TAG, "Starting dongle scan on %u.%u.%u.0/24 port %u", a, b, c, port_);
 
-    // Heap-allocate params; task frees them before calling vTaskDelete
     ScanParams *params = new ScanParams{a, b, c, self_octet, port_, this};
 
     BaseType_t ret = xTaskCreate(
         scan_task_fn_,
         "lux_scan",
-        6144,   // stack: ample for 8 sockets + snprintf buffers on S2
+        6144,
         params,
-        1,      // priority 1 – time-sliced with main loop on single-core S2
+        1,
         nullptr
     );
 
@@ -899,7 +933,6 @@ void LuxpowerSNAComponent::action_scan_dongle() {
     }
 }
 
-// Static trampoline – runs in FreeRTOS task context
 void LuxpowerSNAComponent::scan_task_fn_(void *param) {
     ScanParams *p = static_cast<ScanParams *>(param);
     LuxpowerSNAComponent *self = p->hub;
@@ -916,10 +949,6 @@ void LuxpowerSNAComponent::scan_task_fn_(void *param) {
 
 void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
                                     uint8_t self_octet, uint16_t port) {
-    // Sequential scan — one socket at a time.
-    // Parallel batching risks exhausting the lwip pool when other components
-    // (jk_modbus, mqtt, etc.) are holding sockets concurrently. Sequential is
-    // slower (~15 s worst-case) but 100% reliable regardless of pool pressure.
     for (uint16_t i = 1; i <= 254; i++) {
         if ((uint8_t)i == self_octet) continue;
 
@@ -928,14 +957,12 @@ void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
 
         int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (fd < 0) {
-            // Pool temporarily full — yield and retry this address
             ESP_LOGD(TAG, "[lux_scan] socket() failed for %s (errno=%d), retrying", ipbuf, errno);
             vTaskDelay(pdMS_TO_TICKS(20));
-            i--;  // retry same address
+            i--;
             continue;
         }
 
-        // Non-blocking connect
         int nb = 1;
         ioctl(fd, FIONBIO, &nb);
 
@@ -948,11 +975,10 @@ void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
         }
         connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
 
-        // Wait up to 150 ms for connect to complete
         fd_set wfds, efds;
         FD_ZERO(&wfds); FD_ZERO(&efds);
         FD_SET(fd, &wfds); FD_SET(fd, &efds);
-        struct timeval tv{0, 150000};  // 150 ms
+        struct timeval tv{0, 150000};
         int sel = select(fd + 1, nullptr, &wfds, &efds, &tv);
 
         bool connected = false;
@@ -967,27 +993,28 @@ void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
         if (connected) {
             ESP_LOGI(TAG, "[lux_scan] Dongle candidate found at %s:%u", ipbuf, port);
             memcpy(found_ip_buf_, ipbuf, sizeof(found_ip_buf_));
-            scan_found_          = true;
+            scan_found_ = true;
+            // [FIX #1] Memory barrier ensures found_ip_buf_ is fully written
+            // before scan_result_pending_ is set — prevents race condition on
+            // Xtensa where compiler/CPU may reorder stores.
+            __sync_synchronize();
             scan_result_pending_ = true;
             return;
         }
 
-        // Yield briefly so main loop stays responsive
         vTaskDelay(pdMS_TO_TICKS(2));
     }
 
     ESP_LOGW(TAG, "[lux_scan] Scan complete: no dongle found on %u.%u.%u.0/24 port %u",
              a, b, c, port);
     scan_found_          = false;
+    __sync_synchronize();
     scan_result_pending_ = true;
 }
 
 // ---------------------------------------------------------------------------
 // NVS host persistence
-// Saves/loads host_ independently of MQTT/HA so MQTT reconnect cannot clear it.
-// Uses a fixed 4-byte hash key unique to this component.
 // ---------------------------------------------------------------------------
-// NVS uses a fixed char[64] because make_preference requires trivially copyable types.
 static const uint32_t LUX_HOST_PREF_KEY = 0x4C555848UL;  // "LUXH"
 
 void LuxpowerSNAComponent::save_host_prefs_() {

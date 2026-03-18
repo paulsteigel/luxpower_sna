@@ -46,6 +46,9 @@ static const uint8_t  LUX_FN_READ_INPUT       = 0x04;
 static const uint8_t  LUX_FN_WRITE_SINGLE     = 0x06;
 static const uint8_t  LUX_ACTION_WRITE        = 0x00;  // used for ALL requests per Python lib
 
+// Write queue max depth — prevents unbounded growth when inverter is offline
+static const size_t   LUX_WRITE_QUEUE_MAX     = 20;
+
 // ---------------------------------------------------------------------------
 // Packed structs for INPUT data banks
 // ---------------------------------------------------------------------------
@@ -144,6 +147,13 @@ struct Bank4 {
 };  // 80 bytes
 
 #pragma pack(pop)
+
+// Compile-time size guards — catches struct padding issues at build time
+static_assert(sizeof(Bank0) == 80, "Bank0 size mismatch — check struct members");
+static_assert(sizeof(Bank1) == 80, "Bank1 size mismatch — check struct members");
+static_assert(sizeof(Bank2) == 80, "Bank2 size mismatch — check struct members");
+static_assert(sizeof(Bank3) == 80, "Bank3 size mismatch — check struct members");
+static_assert(sizeof(Bank4) == 80, "Bank4 size mismatch — check struct members");
 
 // ---------------------------------------------------------------------------
 // Write command (from switches / numbers)
@@ -281,6 +291,9 @@ class LuxpowerSNAComponent : public Component {
     void set_update_interval(uint32_t ms)         { update_interval_ms_ = ms; }
     void set_hold_update_interval(uint32_t ms)    { hold_interval_ms_ = ms; }
 
+    // ---- Optional: wire host text entity so scan result writes back ----
+    void set_host_text(text::Text *t) { host_text_ = t; }
+
     // ---- Runtime reconfiguration ----
     void reconnect() {
         ESP_LOGI(TAG, "reconnect() called – closing socket and resetting state");
@@ -295,7 +308,7 @@ class LuxpowerSNAComponent : public Component {
             && inverter_serial_.size() == 10;
     }
 
-    // ---- Write queue ----
+    // ---- Write queue (bounded to LUX_WRITE_QUEUE_MAX) ----
     void queue_write(uint16_t reg, uint16_t value);
 
     uint16_t get_hold_register(uint16_t reg) const {
@@ -463,7 +476,7 @@ class LuxpowerSNAComponent : public Component {
     // ---- Apply scan result (called from loop() on main thread) ----
     void apply_scanned_host_(const std::string &ip);
 
-    // ---- Scan internals (FreeRTOS task, batch parallel connect)
+    // ---- Scan internals (FreeRTOS task, sequential connect) ----
     // ScanParams is defined here in the header — do NOT redefine in .cpp.
     struct ScanParams {
         uint8_t  a, b, c, self_octet;
@@ -471,7 +484,6 @@ class LuxpowerSNAComponent : public Component {
         LuxpowerSNAComponent *hub;
     };
     static void scan_task_fn_(void *param);
-    // Note: port is passed explicitly so task doesn't race with port_ changes
     void do_scan_(uint8_t a, uint8_t b, uint8_t c, uint8_t self_octet, uint16_t port);
 
     // ---- Scan state (written by task, read by loop()) ----
@@ -487,6 +499,9 @@ class LuxpowerSNAComponent : public Component {
     // avoiding on_value lambda → reconnect() re-entrant loop.
     bool        deferred_apply_{false};
     std::string deferred_ip_{};
+
+    // ---- Optional host text entity (wired by __init__.py) ----
+    text::Text *host_text_{nullptr};
 
     // ---- State machine ----
     enum class State : uint8_t {
