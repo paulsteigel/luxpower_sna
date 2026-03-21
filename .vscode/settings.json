@@ -2,5 +2,6 @@
     "files.associations": {
         "vector": "cpp",
         "functional": "cpp"
-    }
+    },
+    "idf.currentSetup": "D:\\Users\\paulsteigel\\esp\\v5.5.1\\esp-idf"
 }
