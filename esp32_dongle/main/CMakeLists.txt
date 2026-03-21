@@ -14,4 +14,8 @@ idf_component_register(
         mqtt
         freertos
         esp_common
+        driver
+        esp_http_server
+        app_update
+        mdns
 )

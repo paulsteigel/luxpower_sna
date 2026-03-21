@@ -2,28 +2,29 @@
 #include <stdint.h>
 
 // ── WiFi STA (home LAN) ───────────────────────────────────────
+// TODO: Phase 2 — replace with captive portal / WiFiManager style
 #define WIFI_STA_SSID        "HOME"
 #define WIFI_STA_PASS        "ngoc12345"
 
-// ── WiFi AP (for LuxApp local connection) ────────────────────
+// ── WiFi AP (for OTA + status page + future captive portal) ──
 #define WIFI_AP_SSID         "LuxDongle-AP"
 #define WIFI_AP_PASS         "luxpower1"
 #define WIFI_AP_IP           "10.10.10.1"
 #define WIFI_AP_GW           "10.10.10.1"
 #define WIFI_AP_NETMASK      "255.255.255.0"
 
+// ── mDNS hostname → http://luxdongle.local:8080 ──────────────
+#define MDNS_HOSTNAME        "luxdongle"
+
 // ── LuxPower Cloud ────────────────────────────────────────────
-#define LUX_CLOUD_HOST       "120.79.53.27"
+#define LUX_CLOUD_HOST       "47.81.11.236"   // updated from 120.79.53.27
 #define LUX_CLOUD_PORT       4346
-#define LUX_LOCAL_PORT       8000   // LuxApp connects here
 
 // ── Dongle / Inverter identity ────────────────────────────────
-// Replace with your actual serial numbers
 #define DONGLE_SN            "BA32500699"   // 10 chars
 #define INVERTER_SN          "3253631886"   // 10 chars
 
-// ── fn=0x10 WRITE_MULTI unknown field ────────────────────────
-// Observed constant across all captured sessions (reverse engineered)
+// ── fn=0x10 WRITE_MULTI unknown field (constant, observed) ───
 #define WRITE_MULTI_UNK_LEN  10
 static const uint8_t WRITE_MULTI_UNK[WRITE_MULTI_UNK_LEN] = {
     0x2B, 0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
@@ -42,43 +43,38 @@ static const uint8_t WRITE_MULTI_UNK[WRITE_MULTI_UNK_LEN] = {
 #define MQTT_USER            "mqtt_user"
 #define MQTT_PASS            "D1ndh1sk@"
 #define MQTT_CLIENT_ID       "esp-luxpower"
-#define MQTT_PREFIX          "lux"         // topic prefix: lux/state/xxx
-#define MQTT_CMD_PREFIX      "lux/cmd"     // lux/cmd/set/xxx
+#define MQTT_PREFIX          "lux"
+#define MQTT_CMD_PREFIX      "lux/cmd"
+#define MQTT_LOG_TOPIC       "lux/log"
+
+// ── OTA web server ────────────────────────────────────────────
+#define OTA_PORT             8080
 
 // ── Timing (ms) ──────────────────────────────────────────────
-#define POLL_INPUT_MS        5000
-#define POLL_HOLD_MS         60000
-#define HEARTBEAT_INTERVAL_MS 15000
-#define CLOUD_RECONNECT_MS   10000
-#define MODBUS_TIMEOUT_MS    500
-#define MODBUS_INTER_FRAME_MS 10
+#define POLL_INPUT_MS             5000
+#define POLL_HOLD_MS              60000
+#define HEARTBEAT_INTERVAL_MS     15000
+#define CLOUD_RECONNECT_MS        10000
+#define BATTERY_SETTLE_MS         25000   // wait after battery type change
 
-// ── FreeRTOS task priorities ─────────────────────────────────
-#define TASK_PRIO_MODBUS     5
+// ── FreeRTOS task config ──────────────────────────────────────
 #define TASK_PRIO_CLOUD      4
-#define TASK_PRIO_LOCAL_SRV  3
 #define TASK_PRIO_MQTT       3
-
-// ── FreeRTOS task stack sizes ────────────────────────────────
-#define STACK_MODBUS         4096
 #define STACK_CLOUD          8192
-#define STACK_LOCAL_SRV      4096
 #define STACK_MQTT           4096
 
 // ── Register counts ───────────────────────────────────────────
 #define INPUT_REG_COUNT      240
 #define HOLD_REG_COUNT       240
 
-// ── Cloud filter: registers allowed to be written by cloud ───
-// Anything NOT in this list will be logged and blocked
-// Based on observed legitimate writes during reverse engineering
+// ── Cloud write whitelist (confirmed from captures) ───────────
 static const uint16_t CLOUD_WRITE_WHITELIST[] = {
     0,    // hold_model (battery type) - fn=0x10
     99,   // la_chg_volt
     101,  // charge_rate
     102,  // dischg_rate
     105,  // eod_soc
-    120,  // sys_enable (EOD mode)
+    120,  // sys_enable
     125,  // soc_low_eps
     160,  // ac_chg_start_soc
     161,  // ac_chg_end_soc
