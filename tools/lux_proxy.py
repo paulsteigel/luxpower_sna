@@ -8,7 +8,7 @@ Chạy: python lux_proxy.py
 import socket, threading, struct, time, sys, os
 
 LOCAL_PORT    = 4346
-LUX_SERVER_IP = "47.81.11.236"
+LUX_SERVER_IP = "192.168.1.6" # "120.79.53.27" # "47.81.11.236"
 LUX_PORT      = 4346
 DONGLE_SN     = "BA32500699"
 INVERTER_SN   = "3253631886"

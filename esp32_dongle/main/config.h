@@ -1,6 +1,11 @@
 #pragma once
 #include <stdint.h>
 
+// ── Mode selection ────────────────────────────────────────────
+// Define RELAY_MODE to act as transparent MITM relay (real dongle → ESP32 → cloud)
+// Undefine to act as a dongle itself (ESP32 polls cloud directly)
+#define RELAY_MODE
+
 // ── WiFi STA (home LAN) ───────────────────────────────────────
 // TODO: Phase 2 — replace with captive portal / WiFiManager style
 #define WIFI_STA_SSID        "HOME"
@@ -17,12 +22,12 @@
 #define MDNS_HOSTNAME        "luxdongle"
 
 // ── LuxPower Cloud ────────────────────────────────────────────
-#define LUX_CLOUD_HOST       "47.81.11.236"   // updated from 120.79.53.27
+#define LUX_CLOUD_HOST       "120.79.53.27" //"47.81.11.236"   // updated from 120.79.53.27
 #define LUX_CLOUD_PORT       4346
 
 // ── Dongle / Inverter identity ────────────────────────────────
-#define DONGLE_SN            "BA32500699"   // 10 chars
-#define INVERTER_SN          "3253631886"   // 10 chars
+#define DONGLE_SN            "BA12150911" //"BA32500699"   // 10 chars
+#define INVERTER_SN          "2193038031" //"3253631886"   // 10 chars
 
 // ── fn=0x10 WRITE_MULTI unknown field (constant, observed) ───
 #define WRITE_MULTI_UNK_LEN  10

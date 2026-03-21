@@ -1,6 +1,11 @@
+#include "config.h"   // must come first so RELAY_MODE is visible below
+
 extern "C" {
     void lux_cloud_task(void *pvParam);
     void lux_mqtt_task(void *pvParam);
+#ifdef RELAY_MODE
+    void lux_relay_start(void);
+#endif
 }
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +20,6 @@ extern "C" {
 #include "lwip/ip4_addr.h"
 #include "mdns.h"
 
-#include "config.h"
 #include "shared_state.h"
 #include "lux_ota.h"
 
@@ -128,6 +132,11 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Dongle SN  : %s", DONGLE_SN);
     ESP_LOGI(TAG, "Inverter SN: %s", INVERTER_SN);
     ESP_LOGI(TAG, "Cloud      : %s:%d", LUX_CLOUD_HOST, LUX_CLOUD_PORT);
+#ifdef RELAY_MODE
+    ESP_LOGI(TAG, "Mode       : RELAY (real dongle → ESP32 → cloud)");
+#else
+    ESP_LOGI(TAG, "Mode       : DONGLE (ESP32 polls cloud directly)");
+#endif
 
     // NVS
     esp_err_t ret = nvs_flash_init();
@@ -150,11 +159,17 @@ extern "C" void app_main(void) {
     // OTA web server on port 8080
     lux_ota_start();
 
-    // Core 0: Cloud TCP
+#ifdef RELAY_MODE
+    // Core 0: Relay server — real dongle drives the cloud connection
+    // lux_cloud_task NOT started (dongle handles it)
+    lux_relay_start();
+#else
+    // Core 0: Cloud TCP — ESP32 acts as dongle, polls cloud directly
     xTaskCreatePinnedToCore(lux_cloud_task, "lux_cloud",
                             STACK_CLOUD, NULL, TASK_PRIO_CLOUD, NULL, 0);
+#endif
 
-    // Core 1: MQTT publish + subscribe
+    // Core 1: MQTT publish + subscribe (unchanged regardless of mode)
     xTaskCreatePinnedToCore(lux_mqtt_task, "lux_mqtt",
                             STACK_MQTT, NULL, TASK_PRIO_MQTT, NULL, 1);
 
