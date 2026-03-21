@@ -1,8 +1,8 @@
 // lux_relay.c
-// Transparent TCP relay: Real Dongle → ESP32:4346 → Cloud 47.81.11.236:4346
+// Transparent TCP relay: Real Dongle → ESP32:4346 → Cloud
 //
-// Parses C→D (cloud response) frames → feeds shared_state
-// → lux_mqtt_task picks up & publishes to HA automatically (zero changes needed)
+// Data flows: Dongle sends RESP frames (fn=03/04) → ESP32 parses → shared_state
+// → lux_mqtt_task picks up & publishes to HA automatically
 
 #include "lux_relay.h"
 #include "lux_proto.h"
@@ -19,8 +19,8 @@
 
 static const char *TAG = "lux_relay";
 
-#define RELAY_LISTEN_PORT   LUX_CLOUD_PORT   // 4346
-#define CLOUD_HOST          LUX_CLOUD_HOST   // "47.81.11.236"
+#define RELAY_LISTEN_PORT   LUX_CLOUD_PORT
+#define CLOUD_HOST          LUX_CLOUD_HOST
 #define CLOUD_PORT          LUX_CLOUD_PORT
 #define BUF_SIZE            1024
 #define RELAY_CONN_STACK    5120
@@ -36,36 +36,32 @@ static void hex_dump(const char *label, const uint8_t *buf, int len) {
         pos += snprintf(line + pos, sizeof(line) - pos, "%02X ", buf[i]);
     if (len > 32)
         snprintf(line + pos, sizeof(line) - pos, "...[+%d]", len - 32);
-    ESP_LOGD(TAG, "[%s] %d B: %s", label, len, line);
+    ESP_LOGI(TAG, "[%s] %d B: %s", label, len, line);
 }
 
-// ── Parse C→D frame and feed shared_state ─────────────────────
-// Called for every complete frame coming from cloud → dongle.
-// Reuses lux_parse() + reg_update_input/hold from shared_state.h
-static void relay_process_cloud_frame(const uint8_t *buf, size_t total) {
+// ── Parse dongle RESP frame → shared_state ────────────────────
+// Dongle sends fn=03 (HOLD RESP) and fn=04 (INPUT RESP) with register data.
+// Cloud only sends REQ frames — no data there.
+static void relay_process_dongle_frame(const uint8_t *buf, size_t total) {
     lux_parsed_t p = lux_parse(buf, total);
 
-    if (p.type == LUX_PKT_HEARTBEAT) return;   // nothing to store
-
-    // Only care about data responses (fn=03 or fn=04) with register payload
-    if (p.type != LUX_PKT_DATA_RESP && p.type != LUX_PKT_READ_REQ) {
-        // READ_REQ type is also returned for response frames (parser
-        // uses READ_REQ as fallback for fn=03/04) — treat both as data.
-        if (p.dev_fn != LUX_FN_READ_INPUT && p.dev_fn != LUX_FN_READ_HOLD)
-            return;
-    }
+    if (p.type == LUX_PKT_HEARTBEAT) return;
 
     const uint8_t *df = p.df;
     size_t df_len     = p.df_len;
     if (!df || df_len < 16) return;
 
-    // df layout (same as lux_cloud.c:process_read_response):
-    //  [0]     action
-    //  [1]     fn (03=HOLD / 04=INPUT)
-    //  [2..11] inverter SN (10 bytes)
+    // Only fn=03 (HOLD) and fn=04 (INPUT) carry register data
+    if (p.dev_fn != LUX_FN_READ_INPUT && p.dev_fn != LUX_FN_READ_HOLD)
+        return;
+
+    // df layout:
+    //  [0]      action
+    //  [1]      fn (03=HOLD / 04=INPUT)
+    //  [2..11]  inverter SN (10 bytes)
     //  [12..13] start_reg LE
-    //  [14]    byte_count
-    //  [15..15+byte_count-1] data (LE uint16 pairs)
+    //  [14]     byte_count
+    //  [15..]   data (LE uint16 pairs)
     //  [-2..-1] CRC
     uint16_t start      = df[12] | ((uint16_t)df[13] << 8);
     uint8_t  byte_count = df[14];
@@ -80,22 +76,33 @@ static void relay_process_cloud_frame(const uint8_t *buf, size_t total) {
         regs[i] = (uint16_t)raw[i*2] | ((uint16_t)raw[i*2+1] << 8);  // LE
 
     if (p.dev_fn == LUX_FN_READ_INPUT) {
-        ESP_LOGD(TAG, "← INPUT start=%u count=%u", start, count);
+        ESP_LOGI(TAG, "← INPUT start=%u count=%u", start, count);
         reg_update_input(start, regs, count);
     } else if (p.dev_fn == LUX_FN_READ_HOLD) {
-        ESP_LOGD(TAG, "← HOLD  start=%u count=%u", start, count);
+        ESP_LOGI(TAG, "← HOLD  start=%u count=%u", start, count);
         reg_update_hold(start, regs, count);
     }
 }
 
-// ── Reassemble stream into complete frames ────────────────────
+// ── Frame callbacks ───────────────────────────────────────────
+// Dongle → Server: RESP frames with actual register data → parse!
+static void on_dongle_frame(const uint8_t *buf, size_t len) {
+    hex_dump("D→S", buf, (int)len);
+    relay_process_dongle_frame(buf, len);   // ← data is HERE
+}
+
+// Server → Dongle: REQ frames only — no register data, skip
+static void on_cloud_frame(const uint8_t *buf, size_t len) {
+    hex_dump("S→D", buf, (int)len);
+}
+
+// ── Reassemble TCP stream into complete frames ────────────────
 typedef struct {
     uint8_t buf[BUF_SIZE];
     size_t  len;
 } frame_buf_t;
 
-// Returns true if we should keep going, false on fatal error
-static bool frame_buf_push(frame_buf_t *fb, const uint8_t *data, int n,
+static void frame_buf_push(frame_buf_t *fb, const uint8_t *data, int n,
                             void (*on_frame)(const uint8_t *, size_t)) {
     if (fb->len + n > BUF_SIZE) { fb->len = 0; }
     memcpy(fb->buf + fb->len, data, n);
@@ -104,7 +111,7 @@ static bool frame_buf_push(frame_buf_t *fb, const uint8_t *data, int n,
     while (fb->len >= 6) {
         uint8_t *p = fb->buf;
 
-        // Resync to magic
+        // Resync to magic bytes
         if (p[0] != LUX_MAGIC_0 || p[1] != LUX_MAGIC_1) {
             size_t i;
             for (i = 1; i + 1 < fb->len; i++)
@@ -123,18 +130,6 @@ static bool frame_buf_push(frame_buf_t *fb, const uint8_t *data, int n,
         memmove(fb->buf, fb->buf + total, fb->len - total);
         fb->len -= total;
     }
-    return true;
-}
-
-// ── Dummy on_frame for D→C (just log, no parsing needed) ─────
-static void on_dongle_frame(const uint8_t *buf, size_t len) {
-    hex_dump("D→C", buf, (int)len);
-    // Future: could parse write commands from dongle here
-}
-
-static void on_cloud_frame(const uint8_t *buf, size_t len) {
-    hex_dump("C→D", buf, (int)len);
-    relay_process_cloud_frame(buf, len);
 }
 
 // ── Per-connection relay task ──────────────────────────────────
@@ -145,7 +140,7 @@ static void relay_conn_task(void *arg) {
     int ds = ctx->dongle_sock;
     free(ctx);
 
-    // Open upstream to real cloud
+    // Connect upstream to real cloud
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port   = htons(CLOUD_PORT),
@@ -161,7 +156,7 @@ static void relay_conn_task(void *arg) {
     }
     ESP_LOGI(TAG, "Relay: dongle fd=%d ↔ cloud fd=%d", ds, cs);
 
-    frame_buf_t fb_d2c = {}, fb_c2d = {};
+    frame_buf_t fb_d2s = {}, fb_s2d = {};
     uint8_t     tmp[512];
     int         maxfd = (ds > cs ? ds : cs) + 1;
 
@@ -176,19 +171,19 @@ static void relay_conn_task(void *arg) {
         if (r < 0)  { ESP_LOGE(TAG, "select err %d", errno); break; }
         if (r == 0) { ESP_LOGW(TAG, "Relay idle timeout"); break; }
 
-        // Dongle → Cloud
+        // Dongle → Cloud (RESP frames — data lives here!)
         if (FD_ISSET(ds, &rfds)) {
             int n = recv(ds, tmp, sizeof(tmp), 0);
             if (n <= 0) { ESP_LOGI(TAG, "Dongle disconnected"); break; }
-            frame_buf_push(&fb_d2c, tmp, n, on_dongle_frame);
+            frame_buf_push(&fb_d2s, tmp, n, on_dongle_frame);  // ← parse!
             if (send(cs, tmp, n, 0) < 0) { ESP_LOGE(TAG, "→cloud err"); break; }
         }
 
-        // Cloud → Dongle
+        // Cloud → Dongle (REQ frames only — no data)
         if (FD_ISSET(cs, &rfds)) {
             int n = recv(cs, tmp, sizeof(tmp), 0);
             if (n <= 0) { ESP_LOGI(TAG, "Cloud disconnected"); break; }
-            frame_buf_push(&fb_c2d, tmp, n, on_cloud_frame);   // ← feeds HA
+            frame_buf_push(&fb_s2d, tmp, n, on_cloud_frame);
             if (send(ds, tmp, n, 0) < 0) { ESP_LOGE(TAG, "→dongle err"); break; }
         }
     }
