@@ -6,9 +6,8 @@ extern "C" {
 #ifdef RELAY_MODE
     void lux_relay_start(void);
 #endif
+    void lux_local_server_start(void);
 }
-
-void lux_local_server_start(void);
 
 #include <stdio.h>
 #include <string.h>
