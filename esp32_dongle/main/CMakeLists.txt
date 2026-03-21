@@ -5,6 +5,7 @@ idf_component_register(
         "lux_cloud.c"
         "lux_mqtt.c"
         "lux_relay.c"
+        "lux_local_server.c" 
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi

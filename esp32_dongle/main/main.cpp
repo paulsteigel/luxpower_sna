@@ -7,6 +7,9 @@ extern "C" {
     void lux_relay_start(void);
 #endif
 }
+
+void lux_local_server_start(void);
+
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -163,6 +166,7 @@ extern "C" void app_main(void) {
     // Core 0: Relay server — real dongle drives the cloud connection
     // lux_cloud_task NOT started (dongle handles it)
     lux_relay_start();
+    lux_local_server_start(); 
 #else
     // Core 0: Cloud TCP — ESP32 acts as dongle, polls cloud directly
     xTaskCreatePinnedToCore(lux_cloud_task, "lux_cloud",
