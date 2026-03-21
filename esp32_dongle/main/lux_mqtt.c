@@ -59,14 +59,6 @@ static void pub_float(const char *name, float val) {
     esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
 }
 
-static void pub_int(const char *name, int val) {
-    if (!s_connected) return;
-    char topic[64], payload[16];
-    snprintf(topic,   sizeof(topic),   MQTT_PREFIX "/state/%s", name);
-    snprintf(payload, sizeof(payload), "%d", val);
-    esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
-}
-
 static void mqtt_publish_all(void) {
     for (int i = 0; i < (int)SENSOR_COUNT; i++) {
         const mqtt_sensor_t *s = &SENSORS[i];
@@ -107,23 +99,20 @@ static void mqtt_subscribe_all(void) {
 // ── Handle incoming command ───────────────────────────────────
 static void mqtt_handle_cmd(const char *topic, const char *data, int dlen) {
     char payload[32] = {};
+    if (dlen > (int)sizeof(payload)-1) dlen = sizeof(payload)-1;
     memcpy(payload, data, dlen);
     ESP_LOGI(TAG, "CMD %s = %s", topic, payload);
 
-    if (strstr(topic, "charge_rate")) {
+    if (strstr(topic, "control")) {
+        if (strcmp(payload, "__restart__") == 0)
+            cmd_queue_write(11, 128, "mqtt");
+        else if (strcmp(payload, "__reset_all__") == 0)
+            cmd_queue_write(11, 2, "mqtt");
+
+    } else if (strstr(topic, "charge_rate")) {
         int v = atoi(payload);
         if (v >= 0 && v <= 140) cmd_queue_write(101, (uint16_t)v, "mqtt");
 
-    } 
-    if (strstr(topic, "charge_rate")) {
-        if (strcmp(payload, "__restart__") == 0) {
-            cmd_queue_write(11, 128, "mqtt");   // restart inverter
-        } else if (strcmp(payload, "__reset_all__") == 0) {
-            cmd_queue_write(11, 2, "mqtt");     // reset all
-        } else {
-            int v = atoi(payload);
-            if (v >= 0 && v <= 140) cmd_queue_write(101, (uint16_t)v, "mqtt");
-        }
     } else if (strstr(topic, "dischg_rate")) {
         int v = atoi(payload);
         if (v >= 0 && v <= 140) cmd_queue_write(102, (uint16_t)v, "mqtt");
@@ -146,7 +135,6 @@ static void mqtt_handle_cmd(const char *topic, const char *data, int dlen) {
         xQueueSend(g_write_queue, &cmd, pdMS_TO_TICKS(100));
     }
 }
-
 // ── MQTT event handler ────────────────────────────────────────
 static void mqtt_event_handler(void *arg, esp_event_base_t base,
                                 int32_t id, void *data) {

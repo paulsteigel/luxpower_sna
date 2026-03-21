@@ -13,7 +13,7 @@
 #include "esp_log.h"
 #include "config.h"
 
-static esp_mqtt_client_handle_t s_log_mqtt_client = NULL;
+static esp_mqtt_client_handle_t s_log_client  = NULL;
 
 // Custom vprintf: print to UART + publish to MQTT
 static int s_in_log = 0;
@@ -32,12 +32,12 @@ static int lux_log_vprintf(const char *fmt, va_list args) {
 
 // Call once after MQTT connected
 static void lux_log_mqtt_attach(esp_mqtt_client_handle_t client) {
-    s_log_mqtt_client = client;
+    s_log_client  = client;
     esp_log_set_vprintf(lux_log_vprintf);
 }
 
 // Call on MQTT disconnect to fall back to UART only
 static void lux_log_mqtt_detach(void) {
-    s_log_mqtt_client = NULL;
+    s_log_client  = NULL;
     esp_log_set_vprintf(vprintf);
 }
