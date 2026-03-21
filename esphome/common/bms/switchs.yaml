@@ -1,0 +1,39 @@
+switch:
+  - platform: template
+    name: "${name} CAN Charge enabled"
+    id: switch_charging
+    optimistic: true
+  - platform: template
+    name: "${name} CAN Discharge enabled"
+    id: switch_discharging
+    optimistic: true
+#  - platform: template
+#    name: "${name} CAN Force bulk (top bal)"
+#    id: switch_chg_bulk
+#    optimistic: true
+#  - platform: template
+#    name: "${name} CAN Float charge enabled"
+#    id: switch_chg_float
+#    optimistic: true
+  - platform: template
+    name: ${name} CAN Automatic Charge Current
+    id: can_switch_auto_charge_current
+    optimistic: true
+ #   restore_value: true
+    entity_category: config  
+  - platform: template
+    name: ${name} CAN Automatic Discharge Current
+    id: can_switch_auto_discharge_current
+    optimistic: true
+    entity_category: config
+#    restore_value: true
+  - platform: restart
+    name: ${name} Restart ESP    
+    id: ${name}_restart_esp
+    entity_category: config
+  - platform: template
+    name: "${name} CAN Auto Voltage Regulation"
+    id: can_switch_auto_voltage
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF  # safe default — manual on first flash
+    entity_category: config

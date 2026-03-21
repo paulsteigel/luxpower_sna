@@ -1,0 +1,34 @@
+# 1. Debug component - bắt buộc phải có
+debug:
+  update_interval: 30s
+
+# 2. Thêm vào khối sensor: đã có sẵn
+sensor:
+  - platform: debug
+    free:                          # ← đổi từ free_heap thành free
+      name: "${name} Free Heap"
+      id: free_heap_sensor
+
+text_sensor:
+  - platform: debug
+    reset_reason:
+      name: "${name} Reset Reason"
+
+interval:
+  - interval: 60s
+    then:
+      - mqtt.publish:
+          topic: "${name}/heartbeat"
+          retain: true
+          payload: !lambda |-
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+              "{\"heap\":%u,\"min_heap\":%u,\"uptime\":%llu}",
+              esp_get_free_heap_size(),
+              esp_get_minimum_free_heap_size(),
+              (unsigned long long)(millis() / 1000)
+            );
+            return std::string(buf);
+            
+            
+            

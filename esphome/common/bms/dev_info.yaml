@@ -1,0 +1,59 @@
+switch:
+  - platform: restart
+    icon: "mdi:restart"
+    id: ${name}_btn_restart
+    name: "${name}_Restart"
+    entity_category: config
+
+text_sensor:
+# Ip address and other
+  - platform: wifi_info
+    ip_address:
+      name: "${name} ESP IP Address"
+      #address_0:
+      #  name: "${id_prefix} ESP IP Address 0"
+# wifi strength
+
+# +--------------------------------------+
+  # | Template text sensors                |
+  # +--------------------------------------+
+  - platform: template
+    name: ${name} Uptime Human Readable
+    id: ${name}_uptime_human
+    icon: mdi:clock-start
+
+sensor:
+  - platform: wifi_signal
+    entity_category: diagnostic
+    name: "${name} WiFi Signal Strength"
+    id: ${name}_esp_wifi_signal_strength
+    unit_of_measurement: dBm
+    device_class: signal_strength
+    state_class: measurement
+    icon: mdi:wifi
+  # +--------------------------------------+
+  # | Uptime sensor                        |
+  # +--------------------------------------+
+  - platform: uptime
+    entity_category: diagnostic
+    name: ${name} Uptime Sensor
+    id: uptime_sensor
+    update_interval: 60s
+    on_raw_value:
+      then:
+        - text_sensor.template.publish:
+            id: ${name}_uptime_human
+            state: !lambda |-
+              int seconds = round(id(uptime_sensor).raw_state);
+              int days = seconds / (24 * 3600);
+              seconds = seconds % (24 * 3600);
+              int hours = seconds / 3600;
+              seconds = seconds % 3600;
+              int minutes = seconds /  60;
+              seconds = seconds % 60;
+              return (
+                (days ? to_string(days) + "d " : "") +
+                (hours ? to_string(hours) + "h " : "") +
+                (minutes ? to_string(minutes) + "m " : "") +
+                (to_string(seconds) + "s")
+              ).c_str();

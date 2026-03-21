@@ -1,0 +1,397 @@
+#/homeassistant/esphome/commons/canbus_luxpower.yaml
+# +============================================================+
+# |  canbus_luxpower.yaml                                           |
+# |  Luxpower Battery CAN Bus Protocol (Official doc V04.2)    |
+# |  Verified against SVE_Log.txt reverse engineering          |
+# |                                                            |
+# |  Rate: 500kbps | Endian: Little Endian | Cycle: 1s        |
+# |  Inverter ACK: 0x305 all-zeros after each cycle           |
+# +============================================================+
+#
+# substitutions required in main yaml:
+#   name:           device name
+#   can_tx_pin:     GPIO pin
+#   can_rx_pin:     GPIO pin
+#   batt_modules:   "1"  (parallel pack count)
+#   max_cycles:     "6000.0"
+#
+# JK BMS sensors used (all pack-level, not per-cell):
+#   can_over_voltage_protection           : float mV/cell  slider (e.g. 3450mV)
+#   can_under_voltage_protection          : float mV/cell  slider (e.g. 3150mV)
+#   total_battery_capacity_setting        : float Ah (e.g. 280Ah)
+#   total_voltage                         : float V
+#   current                               : float A  (+ charge / - discharge)
+#   temperature_sensor_1                  : float °C
+#   temperature_sensor_2                  : float °C
+#   max_cell_voltage                      : float V  → mV in frame
+#   min_cell_voltage                      : float V  → mV in frame
+#   capacity_remaining                    : float %  (SOC from JK BMS)
+#   charging_cycles                       : float cycles
+#   errors_bitmask                        : float bitmask
+#   charging_switch                       : bool
+#   discharging_switch                    : bool
+#   battery_strings                       : float (cell count, e.g. 16)
+#
+# Globals (set by adaptive control):
+#   charging_a    : int A  (current charge limit, probe 5A → ramp)
+#   discharging_a : int A  (current discharge limit, probe 5A → ramp)
+#   report_soc    : uint16_t %
+#   charge_status : std::string
+#   alarm_status  : std::string
+
+canbus:
+  - platform: esp32_can
+    tx_pin: ${can_tx_pin}
+    rx_pin: ${can_rx_pin}
+    can_id: 4
+    bit_rate: 500kbps
+
+    on_frame:
+
+      # ── 0x305 Inverter ACK (Inverter → BMS, every ~1s) ─────────
+      - can_id: 0x305
+        then:
+          - light.toggle:
+              id: blue_led
+          - lambda: |-
+              id(can_ack_counter) = 0;
+              id(can_status) = "ON";
+              id(${name}_canbus_status).publish_state(id(can_status));
+              ESP_LOGI("LUX_CAN", "0x305 ACK ✅");
+
+      # ── 0x300 Remote command from Luxpower inverter ─────────────
+      # Byte0 Bit0: RSD (shutdown battery)
+      - can_id: 0x300
+        then:
+          - lambda: |-
+              if (x[0] & 0x01) {
+                ESP_LOGW("LUX_CAN", "0x300 Inverter requests BATTERY SHUTDOWN");
+              }
+
+      # ── 0x405 Luxpower keepalive poll (~60s) ───────────────────
+      - can_id: 0x405
+        then:
+          - lambda: |-
+              ESP_LOGI("LUX_CAN", "0x405 Luxpower poll");
+
+interval:
+
+  - interval: 20s
+    then:
+      - lambda: id(can_ack_counter) = 1;
+
+  # ==========================================================
+  # Main 1s transmit cycle: 5 frames per Luxpower protocol
+  # Order per SVE log: 351 → 355 → 356 → 359 → 35C → 35E(÷12)
+  # ==========================================================
+  - interval: 1000ms
+    then:
+      - if:
+          condition:
+            lambda: |-
+              if (id(can_ack_counter) < 20) {
+                id(can_ack_counter)++;
+                id(can_msg_counter)++;
+                return true;
+              }
+              else if (id(can_status) == "OFF") {
+                return false;
+              }
+              else {
+                id(can_status) = "OFF";
+                id(${name}_canbus_status).publish_state(id(can_status));
+                ESP_LOGI("LUX_CAN", "0x305 timeout → Inverter offline");
+                return false;
+              }
+          then:
+
+            # ======================================================
+            # 0x351 — Charge/Discharge Voltage & Current Limits
+            # ──────────────────────────────────────────────────────
+            # Byte [0:1] Charge voltage recommend   0.1V  uint16 LE
+            # Byte [2:3] Charge current limitation  0.1A   int16 LE
+            # Byte [4:5] Discharge current limit    0.1A   int16 LE
+            # Byte [6:7] Discharge cut voltage      0.1V  uint16 LE
+            #
+            # CVL AUTO:   (OVP_slider - gap_slider) × cells
+            #   → Inverter does CC up to taper_start
+            #   → Your CCL taper handles CV phase
+            #   → Layered: inverter backs off before software OVP
+            # CVL MANUAL: max_charge_voltage slider (existing behavior)
+            #
+            # DVL:  (UVP + 30mV) × cells
+            #   → Inverter stops discharge before your UVP taper
+            #   → Your DCL taper is the fine control layer
+            #   → Software UVP hard stop is the safety layer
+            #
+            # CCL/DCL RAMPING:
+            #   → Max 15A/s down, 25A/s up
+            #   → Prevents DC bus voltage spikes on current steps
+            #   → Static variables inside lambda (no flash wear)
+            # ======================================================
+            - if:
+                condition:
+                  lambda: return (id(can_msg_counter) == 1);
+                then:
+                  canbus.send:
+                    can_id: 0x351
+                    data: !lambda |-
+                      float cells = (!isnan(id(battery_strings).state) &&
+                                     id(battery_strings).state > 0)
+                                    ? id(battery_strings).state : 16.0f;
+
+                      // ── CVL: Auto or Manual ──────────────────────
+                      float cv_v;
+                      if (id(can_switch_auto_voltage).state) {
+                        // AUTO: taper_start = OVP - gap
+                        // Inverter targets this voltage, CCL taper
+                        // handles the CV zone above this point
+                        float ovp_mv = id(can_over_voltage_protection).state;
+                        float gap_mv = id(${name}_voltage_recovery_gap).state;
+                        cv_v = ((ovp_mv - gap_mv) / 1000.0f) * cells;
+                        ESP_LOGD("LUX_CAN", "0x351 CVL AUTO: OVP=%.0fmV gap=%.0fmV → %.2fV",
+                                 ovp_mv, gap_mv, cv_v);
+                      } else {
+                        // MANUAL: max_charge_voltage slider
+                        // existing behavior — unchanged
+                        cv_v = (id(max_charge_voltage).state / 1000.0f) * cells;
+                      }
+                      uint16_t CVL = uint16_t(cv_v * 10.0f);
+
+                      // ── DVL: UVP + 30mV floor ────────────────────
+                      // Inverter stops discharge 30mV above your UVP
+                      // Your DCL taper is the fine control below this
+                      // Your UVP hard stop in lambda is the safety net
+                      float uvp_mv = id(can_under_voltage_protection).state;
+                      float dv_v   = ((uvp_mv + 30.0f) / 1000.0f) * cells;
+                      uint16_t DVL = uint16_t(dv_v * 10.0f);
+
+                      // ── CCL/DCL: Ramp-limited values ─────────────
+                      // Prevents sudden large current steps to inverter
+                      // Max 15A/s ramp down, 25A/s ramp up (1s cycle)
+                      static int last_ccl = 5;
+                      static int last_dcl = 5;
+
+                      int target_ccl = (id(charging_a)    > 0) ? id(charging_a)    : 5;
+                      int target_dcl = (id(discharging_a) > 0) ? id(discharging_a) : 5;
+
+                      // Ramp down: max 15A per cycle
+                      // Ramp up:   max 25A per cycle
+                      if (target_ccl < last_ccl)
+                        target_ccl = std::max(target_ccl, last_ccl - 15);
+                      else
+                        target_ccl = std::min(target_ccl, last_ccl + 25);
+
+                      if (target_dcl < last_dcl)
+                        target_dcl = std::max(target_dcl, last_dcl - 15);
+                      else
+                        target_dcl = std::min(target_dcl, last_dcl + 25);
+
+                      last_ccl = target_ccl;
+                      last_dcl = target_dcl;
+
+                      int16_t CCL = int16_t(target_ccl * 10);
+                      int16_t DCL = int16_t(target_dcl * 10);
+
+                      if (id(errors_bitmask).state > 1)
+                        id(charge_status) = "Alarm";
+                      id(${name}_charging_status).publish_state(id(charge_status));
+
+                      uint8_t m[8];
+                      m[0]=CVL&0xFF; m[1]=CVL>>8;
+                      m[2]=CCL&0xFF; m[3]=CCL>>8;
+                      m[4]=DCL&0xFF; m[5]=DCL>>8;
+                      m[6]=DVL&0xFF; m[7]=DVL>>8;
+
+                      ESP_LOGI("LUX_CAN", "0x351 CVL=%.1fV CCL=%dA DCL=%dA DVL=%.1fV cells=%.0f",
+                        cv_v, target_ccl, target_dcl, dv_v, cells);
+                      return {m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]};
+
+            # ======================================================
+            # 0x355 — SOC / SOH / Max+Min Cell Voltage
+            # ──────────────────────────────────────────────────────
+            # Byte [0:1] SOC              1%    uint16 LE
+            # Byte [2:3] SOH              1%    uint16 LE
+            # Byte [4:5] Max cell voltage 1mV   uint16 LE
+            # Byte [6:7] Min cell voltage 1mV   uint16 LE
+            # ======================================================
+            - if:
+                condition:
+                  lambda: return (id(can_msg_counter) == 2);
+                then:
+                  canbus.send:
+                    can_id: 0x355
+                    data: !lambda |-
+                      uint16_t SOC = uint16_t(id(report_soc));
+
+                      // SOH from charge cycles: ((cycles/max) - 1) × -100
+                      // e.g. 424 cycles / 6000 max = 93%
+                      int soh = (int)(((id(charging_cycles).state / ${max_cycles}) - 1.0f) * -100.0f);
+                      soh = std::max(0, std::min(100, soh));
+                      uint16_t SOH = uint16_t(soh);
+
+                      uint16_t maxCV = uint16_t(id(max_cell_voltage).state * 1000.0f);
+                      uint16_t minCV = uint16_t(id(min_cell_voltage).state * 1000.0f);
+
+                      uint8_t m[8];
+                      m[0]=SOC  &0xFF; m[1]=SOC  >>8;
+                      m[2]=SOH  &0xFF; m[3]=SOH  >>8;
+                      m[4]=maxCV&0xFF; m[5]=maxCV>>8;
+                      m[6]=minCV&0xFF; m[7]=minCV>>8;
+
+                      ESP_LOGI("LUX_CAN", "0x355 SOC=%d%% SOH=%d%% MaxCell=%dmV MinCell=%dmV",
+                        SOC, SOH, maxCV, minCV);
+                      return {m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]};
+
+            # ======================================================
+            # 0x356 — Pack Voltage / Current / Cell Temperature
+            # ──────────────────────────────────────────────────────
+            # Byte [0:1] Pack voltage         0.01V  int16 LE  (LV battery)
+            # Byte [2:3] Pack current         0.1A   int16 LE  (+ charge / - discharge)
+            # Byte [4:5] Max cell temperature 0.1°C  int16 LE
+            # Byte [6:7] Min cell temperature 0.1°C  int16 LE
+            #
+            # ⚠️ Official Luxpower doc: bytes 4-7 = Max/Min cell TEMPERATURE
+            #    NOT T1/T2 sensor order — use max() and min() of sensors
+            #    SVE log verified: 27.0°C / 26.0°C ✓
+            # ======================================================
+            - if:
+                condition:
+                  lambda: return (id(can_msg_counter) == 3);
+                then:
+                  canbus.send:
+                    can_id: 0x356
+                    data: !lambda |-
+                      int16_t VOLT = int16_t(id(total_voltage).state * 100.0f);   // 0.01V
+
+                      int16_t CURR = int16_t(id(current).state * 10.0f);          // 0.1A
+
+                      float t1 = id(temperature_sensor_1).state;
+                      float t2 = id(temperature_sensor_2).state;
+                      // +0.1°C offset on max so inverter never sees max==min
+                      int16_t TMAX = int16_t(std::max(t1, t2) * 10.0f + 1);
+                      int16_t TMIN = int16_t(std::min(t1, t2) * 10.0f);
+
+                      uint8_t m[8];
+                      m[0]=VOLT&0xFF; m[1]=VOLT>>8;
+                      m[2]=CURR&0xFF; m[3]=CURR>>8;
+                      m[4]=TMAX&0xFF; m[5]=TMAX>>8;
+                      m[6]=TMIN&0xFF; m[7]=TMIN>>8;
+
+                      ESP_LOGI("LUX_CAN", "0x356 V=%.2fV I=%.1fA Tmax=%.1f°C Tmin=%.1f°C",
+                        id(total_voltage).state, id(current).state,
+                        std::max(t1,t2), std::min(t1,t2));
+                      return {m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]};
+
+            # ======================================================
+            # 0x359 — Protection / Alarm / Module / Capacity
+            # ──────────────────────────────────────────────────────
+            # Byte [0]   Protection 1  (see Table 1 in doc)
+            # Byte [1]   Protection 2
+            # Byte [2]   Alarm 1
+            # Byte [3]   Alarm 2
+            # Byte [4]   Module number (parallel pack count)
+            # Byte [5:6] Battery Capacity Ah  uint16 LE  ← KEY for Luxpower!
+            #            SVE log: 0x64 0x00 = 100Ah (SVE pack) ✓
+            # Byte [7]   Reserved 0x00
+            #
+            # Table 1 bit mapping (official doc):
+            # Prot1/Alarm1 Bit1=OV Bit2=UV Bit3=OT Bit4=UT Bit7=Dis.OC
+            # Prot2/Alarm2 Bit0=Chg.OC Bit3=SysErr
+            # ======================================================
+            - if:
+                condition:
+                  lambda: return (id(can_msg_counter) == 4);
+                then:
+                  canbus.send:
+                    can_id: 0x359
+                    data: !lambda |-
+                      uint8_t m[8] = {0,0,0,0,0,0,0,0};
+
+                      if (id(errors_bitmask).state > 1) {
+                        uint16_t e = uint16_t(id(errors_bitmask).state);
+                        // JK bit2,7,10 → Over Voltage (Prot1 bit1, Alarm1 bit1)
+                        if ((e&0x04)|(e&0x80)|(e&0x400)) { m[0]|=0x02; m[2]|=0x02; id(alarm_status)="OVP"; }
+                        // JK bit3,11   → Under Voltage (Prot1 bit2, Alarm1 bit2)
+                        if ((e&0x08)|(e&0x800))           { m[0]|=0x04; m[2]|=0x04; id(alarm_status)="UVP"; }
+                        // JK bit1,4,8  → Over Temp     (Prot1 bit3, Alarm1 bit3)
+                        if ((e&0x02)|(e&0x10)|(e&0x100))  { m[0]|=0x08; m[2]|=0x08; id(alarm_status)="OTP"; }
+                        // JK bit9      → Under Temp     (Prot1 bit4, Alarm1 bit4)
+                        if (e&0x200)                       { m[0]|=0x10; m[2]|=0x10; id(alarm_status)="UTP"; }
+                        // JK bit6      → Discharge OC   (Prot1 bit7, Alarm1 bit7)
+                        if (e&0x40)                        { m[0]|=0x80; m[2]|=0x80; id(alarm_status)="DOCP"; }
+                        // JK bit5      → Charge OC      (Prot2 bit0, Alarm2 bit0)
+                        if (e&0x20)                        { m[1]|=0x01; m[3]|=0x01; id(alarm_status)="COCP"; }
+                        // JK bit12,13  → System Error   (Prot2 bit3, Alarm2 bit3)
+                        if ((e&0x1000)|(e&0x2000))         { m[1]|=0x08; m[3]|=0x08; id(alarm_status)="BMS"; }
+                      }
+                      else {
+                        id(alarm_status) = "NoAlarm";
+                      }
+
+                      // Byte 4: parallel module count
+                      m[4] = uint8_t(${batt_modules});
+
+                      // Bytes 5-6: Battery Capacity Ah (Luxpower reads this for display)
+                      uint16_t cap = uint16_t(id(total_battery_capacity_setting).state);
+                      m[5] = cap & 0xFF;
+                      m[6] = cap >> 8;
+                      m[7] = 0x00;
+
+                      ESP_LOGI("LUX_CAN", "0x359 P0=0x%02X P1=0x%02X Mods=%d Cap=%dAh Alarm=%s",
+                        m[0], m[1], m[4], cap, id(alarm_status).c_str());
+                      return {m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]};
+
+            # ======================================================
+            # 0x35C — BMS Request Flags + Cycle Count
+            # ──────────────────────────────────────────────────────
+            # Byte [0]   Request flag (Table 2 in doc)
+            #   Bit7=Charge enable | Bit6=Discharge enable
+            #   Bit5=Forced charge req2 | Bit4=Forced charge req1
+            #   Bit3=Full charge request
+            # Byte [1]   Reserved 0x00
+            # Byte [2:3] Cycle count  uint16 LE
+            #            SVE log: 0x6F 0x00 = 111 cycles ✓
+            # Byte [4:7] Reserved 0x00
+            # ======================================================
+            - if:
+                condition:
+                  lambda: return (id(can_msg_counter) == 5);
+                then:
+                  canbus.send:
+                    can_id: 0x35C
+                    data: !lambda |-
+                      uint8_t m[8] = {0,0,0,0,0,0,0,0};
+
+                      if (id(charging_switch).state && id(switch_charging).state)
+                        m[0] |= 0x80;   // Bit7: Charge enable
+                      if (id(discharging_switch).state && id(switch_discharging).state)
+                        m[0] |= 0x40;   // Bit6: Discharge enable
+
+                      // Bytes 2-3: Charge cycle count
+                      uint16_t cyc = uint16_t(id(charging_cycles).state);
+                      m[2] = cyc & 0xFF;
+                      m[3] = cyc >> 8;
+
+                      ESP_LOGI("LUX_CAN", "0x35C Flags=0x%02X (Chg=%d Dis=%d) Cycles=%d",
+                        m[0], (m[0]&0x80)?1:0, (m[0]&0x40)?1:0, cyc);
+                      return {m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]};
+
+            # ======================================================
+            # 0x35E — Battery Brand (ASCII, every 12s)
+            # ──────────────────────────────────────────────────────
+            # Byte [0:7] Brand name ASCII, space-padded
+            # "PYLON   " works well with Luxpower display
+            # Change to "SVE     " if preferred
+            # ======================================================
+            - if:
+                condition:
+                  lambda: return (id(can_msg_counter) == 12);
+                then:
+                  - canbus.send:
+                      can_id: 0x35E
+                      data: [0x48, 0x49, 0x4E, 0x41, 0x45, 0x53, 0x53, 0x20]
+                      #      'H'  'I'  'N'  'A'  'E'  'S '  'S '  ' '
+                  - lambda: |-
+                      id(can_msg_counter) = 0;
+                      ESP_LOGI("LUX_CAN", "0x35E Brand: HINAESS | cycle reset");
