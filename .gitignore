@@ -1,0 +1,8 @@
+# ESP-IDF build output
+esp32_dongle/build/
+esp32_dongle/sdkconfig
+esp32_dongle/managed_components/
+
+# Nhưng GIỮ lại sdkconfig.defaults và partitions.csv
+!esp32_dongle/sdkconfig.defaults
+!esp32_dongle/partitions.csv

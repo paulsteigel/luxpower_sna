@@ -13,7 +13,7 @@ static const char *OTA_TAG = "ota";
 // ── Status page ────────────────────────────────────────────────
 static esp_err_t ota_status_handler(httpd_req_t *req) {
     const esp_app_desc_t *desc = esp_app_get_description();
-    char buf[1024];
+    char buf[2048];
     snprintf(buf, sizeof(buf),
         "<!DOCTYPE html><html><head>"
         "<meta charset='utf-8'><title>LuxDongle</title>"

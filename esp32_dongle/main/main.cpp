@@ -1,3 +1,7 @@
+extern "C" {
+    void lux_cloud_task(void *pvParam);
+    void lux_mqtt_task(void *pvParam);
+}
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
