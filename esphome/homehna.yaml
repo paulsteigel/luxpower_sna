@@ -120,12 +120,12 @@ packages:
   dev_info_pkg: !include ./commons/dev_info.yaml
   dyndns_pkg: !include ./commons/dyndns.yaml
   #otahttp_pkg: !include ./commons/ota_http.yaml
-  charge_discharge_pkg: !include ./commons/charge_discharge_control.yaml
+  charge_discharge_pkg: !include ./commons/charge_discharge_controller.yaml
   globals_pkg: !include ./commons/globals.yaml
   sensors_pkg: !include ./commons/text_sensors.yaml
   numbers_pkg: !include ./commons/numbers.yaml
   switchs_pkg: !include ./commons/switchs.yaml
-  #canbus_pkg: !include ./commons/canbus.yaml
+  #canbus_pkg: !include ./commons/canbus_pylon.yaml
   #canbus_pkg: !include ./commons/canbus_sve.yaml
   canbus_pkg: !include ./commons/canbus_luxpower.yaml
   luxpower_pkg: !include ./commons/luxpower.yaml
