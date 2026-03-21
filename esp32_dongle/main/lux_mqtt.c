@@ -97,6 +97,7 @@ static void mqtt_subscribe_all(void) {
         MQTT_CMD_PREFIX "/set/eod_soc",
         MQTT_CMD_PREFIX "/set/sys_enable",
         MQTT_CMD_PREFIX "/set/battery_type",
+        MQTT_CMD_PREFIX "/control",
         NULL
     };
     for (int i = 0; topics[i]; i++)
@@ -106,7 +107,6 @@ static void mqtt_subscribe_all(void) {
 // ── Handle incoming command ───────────────────────────────────
 static void mqtt_handle_cmd(const char *topic, const char *data, int dlen) {
     char payload[32] = {};
-    if (dlen > (int)sizeof(payload)-1) dlen = sizeof(payload)-1;
     memcpy(payload, data, dlen);
     ESP_LOGI(TAG, "CMD %s = %s", topic, payload);
 
@@ -114,7 +114,8 @@ static void mqtt_handle_cmd(const char *topic, const char *data, int dlen) {
         int v = atoi(payload);
         if (v >= 0 && v <= 140) cmd_queue_write(101, (uint16_t)v, "mqtt");
 
-    } else if (strstr(topic, "charge_rate")) {
+    } 
+    if (strstr(topic, "charge_rate")) {
         if (strcmp(payload, "__restart__") == 0) {
             cmd_queue_write(11, 128, "mqtt");   // restart inverter
         } else if (strcmp(payload, "__reset_all__") == 0) {

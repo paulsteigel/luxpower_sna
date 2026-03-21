@@ -132,12 +132,12 @@ static void lux_ota_start(void) {
         ESP_LOGE(OTA_TAG, "Failed to start HTTP server on port %d", OTA_PORT);
         return;
     }
-
+    
     httpd_uri_t status = {
-        .uri = "/", .method = HTTP_GET, .handler = ota_status_handler
+        .uri = "/", .method = HTTP_GET, .handler = ota_status_handler, .user_ctx = NULL
     };
     httpd_uri_t upload = {
-        .uri = "/ota", .method = HTTP_POST, .handler = ota_upload_handler
+        .uri = "/ota", .method = HTTP_POST, .handler = ota_upload_handler, .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &status);
     httpd_register_uri_handler(server, &upload);

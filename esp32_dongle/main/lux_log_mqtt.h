@@ -16,29 +16,18 @@
 static esp_mqtt_client_handle_t s_log_mqtt_client = NULL;
 
 // Custom vprintf: print to UART + publish to MQTT
-static int lux_log_vprintf(const char *fmt, va_list args) {
-    // 1. Always write to UART (original behavior)
-    int ret = vprintf(fmt, args);
+static int s_in_log = 0;
 
-    // 2. Publish to MQTT if connected
-    // Need a fresh va_list — can't reuse args after vprintf consumed it.
-    // Use a fixed buffer to format the message.
-    if (s_log_mqtt_client) {
-        char buf[256];
-        // Re-format: we can't va_copy reliably here without C99 guarantee,
-        // so we use a separate vsnprintf pass. The fmt+args are still valid
-        // because vprintf on Xtensa doesn't consume the va_list (it's passed
-        // by value in the ABI). This is safe on ESP-IDF/Xtensa.
-        vsnprintf(buf, sizeof(buf), fmt, args);
-        // Strip trailing newline for cleaner MQTT messages
-        size_t len = strlen(buf);
-        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r'))
-            buf[--len] = '\0';
-        if (len > 0)
-            esp_mqtt_client_publish(s_log_mqtt_client,
-                                    MQTT_LOG_TOPIC, buf, (int)len, 0, 0);
+static int lux_log_vprintf(const char *fmt, va_list args) {
+    if (s_in_log || !s_log_client) {
+        return vprintf(fmt, args);
     }
-    return ret;
+    s_in_log = 1;
+    char buf[256];
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    esp_mqtt_client_publish(s_log_client, "lux/log", buf, 0, 0, 0);
+    s_in_log = 0;
+    return strlen(buf);
 }
 
 // Call once after MQTT connected
