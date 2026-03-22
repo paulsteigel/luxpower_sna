@@ -41,6 +41,7 @@ mqtt:
   client_id: ${name}_mqtt
 
 wifi:
+  use_address: ${name}.freemyip.com 
   ap:
     ssid: ${name}
 
