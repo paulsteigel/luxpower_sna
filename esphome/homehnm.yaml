@@ -125,18 +125,19 @@ wifi:
 captive_portal:
 
 packages:
-  dev_info_pkg: !include ./commons/dev_info.yaml
-  dyndns_pkg: !include ./commons/dyndns.yaml
+  dev_info_pkg: !include ./commons/bms/dev_info.yaml
+  dyndns_pkg: !include ./commons/bms/dyndns.yaml
   #otahttp_pkg: !include ./commons/ota_http.yaml
-  charge_discharge_pkg: !include ./commons/charge_discharge_control.yaml
-  globals_pkg: !include ./commons/globals.yaml
-  sensors_pkg: !include ./commons/text_sensors.yaml
-  numbers_pkg: !include ./commons/numbers.yaml
-  switchs_pkg: !include ./commons/switchs.yaml
-  canbus_pkg: !include ./commons/canbus.yaml
+  charge_discharge_pkg: !include ./commons/charge_discharge_controller.yaml
+  globals_pkg: !include ./commons/bms/globals.yaml
+  sensors_pkg: !include ./commons/bms/text_sensors.yaml
+  numbers_pkg: !include ./commons/bms/numbers.yaml
+  switchs_pkg: !include ./commons/bms/switchs.yaml
+  #canbus_pkg: !include ./commons/bms/canbus_pylon.yaml
+  #canbus_pkg: !include ./commons/bms/canbus_sve.yaml
+  canbus_pkg: !include ./commons/bms/canbus_luxpower.yaml
   luxpower_pkg: !include ./commons/luxpower.yaml
   logger_pkg: !include ./commons/loggerfix.yaml
-
 ota:
   - platform: esphome
     # safe_mode: false
