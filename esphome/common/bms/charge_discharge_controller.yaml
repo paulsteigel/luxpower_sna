@@ -661,7 +661,7 @@ sensor:
             id(charging_a) = (int)current_out_a;
 
 
-# =================================================================
+  # =================================================================
   # DISCHARGE CONTROL V10r — GAP-PLATEAU + RATCHET
   # Requires 3 globals: g_dis_phase, g_dis_ceiling, g_dis_k_est
   # =================================================================
@@ -717,6 +717,9 @@ sensor:
             // Phase timing
             static unsigned long phase_enter_ms  = 0;
             static unsigned long ramp_last_ms    = 0;
+            // Plateau: track i_actual BEFORE each ramp step
+            static float         plat_b_prev     = 0.0f;  // i_actual before last step
+            static float         plat_c_prev     = 0.0f;  // current_out_a before last step
 
             // K learning (ΔV/ΔI trong normal zone)
             static float         k_v0            = 0.0f;
@@ -964,7 +967,6 @@ sensor:
 
               if ((now - ramp_last_ms) >= step_int) {
                 float i_actual = -current_val;
-                float p_gap    = current_out_a - i_actual;
 
                 // Probe ceiling: uvp_trip + k guard
                 float probe_ceil = (uvp_trip_ceiling > 0.0f) ? uvp_trip_ceiling : max_i;
@@ -972,15 +974,19 @@ sensor:
                   float ig = (smv - uvp) / id(g_dis_k_est) * K_SAFETY_PROBE;
                   probe_ceil = std::min(probe_ceil, std::max(probe_start_a, ig));
                 }
-                // Nếu dis_ceiling đã có từ session trước: không vượt
                 if (id(g_dis_ceiling) >= 0.0f)
                   probe_ceil = std::min(probe_ceil, id(g_dis_ceiling));
 
                 bool near_taper = (smv <= taper_start + gap * 0.5f);
                 bool at_ceil    = (current_out_a >= probe_ceil - 0.5f);
 
-                // ── PLATEAU CHECK ──────────────────────────
-                bool plateau = (p_gap >= PLATEAU_GAP_A && i_actual > probe_start_a);
+                // ── PLATEAU CHECK (bạn định nghĩa) ─────────
+                // C tăng ≥1A (đủ kích thích), B chỉ tăng <500mA → bão hòa
+                float dc = current_out_a - plat_c_prev;  // bước C vừa tăng
+                float db = i_actual - plat_b_prev;        // B phản ứng
+                bool plateau = (dc >= 1.0f)
+                               && (std::abs(db) < 0.5f)
+                               && (i_actual > probe_start_a);
                 bool force_lock = (near_taper || at_ceil);
 
                 if (plateau || force_lock) {
@@ -992,27 +998,31 @@ sensor:
                   k_safe = std::max(probe_start_a, std::min(max_i, k_safe));
 
                   float new_ceil = plateau
-                                   ? std::min(i_actual, k_safe)   // plateau: bám thực tế
-                                   : std::min(current_out_a, k_safe); // force: bám limit
+                                   ? std::min(i_actual, k_safe)
+                                   : std::min(current_out_a, k_safe);
 
-                  // Ratchet: nếu ceiling cũ đã thấp hơn → giữ cũ
                   if (id(g_dis_ceiling) >= 0.0f)
                     new_ceil = std::min(new_ceil, id(g_dis_ceiling));
 
                   id(g_dis_ceiling) = std::max(probe_start_a, new_ceil);
-                  id(g_dis_phase)   = 2;  // → CEILING_LOCK
+                  id(g_dis_phase)   = 2;
                   current_out_a     = id(g_dis_ceiling);
 
                   if (near_taper && uvp_trip_ceiling > 0.0f) uvp_trip_ceiling = -1.0f;
 
-                  ESP_LOGI("DIS", "%s: I_act=%.1fA gap=%.1fA → ceil=%.1fA k=%.2f",
+                  ESP_LOGI("DIS", "%s: C=%.1f B=%.1f ΔC=%.1f ΔB=%.1f → ceil=%.1fA k=%.2f",
                            plateau ? "PLATEAU" : "FORCE_LOCK",
-                           i_actual, p_gap, id(g_dis_ceiling), id(g_dis_k_est));
+                           current_out_a, i_actual, dc, db,
+                           id(g_dis_ceiling), id(g_dis_k_est));
                 } else {
-                  // Tiếp tục ramp
+                  // Snapshot TRƯỚC khi tăng
+                  plat_b_prev = i_actual;
+                  plat_c_prev = current_out_a;
+
                   float next_i = std::min({max_i, probe_ceil, current_out_a + step_a});
                   if (next_i > current_out_a + 0.1f) {
-                    ESP_LOGI("DIS", "RAMP %.1f→%.1fA gap=%.1fA", current_out_a, next_i, p_gap);
+                    ESP_LOGI("DIS", "RAMP %.1f→%.1fA | B=%.1f ΔC=%.1f ΔB=%.1f",
+                             current_out_a, next_i, i_actual, dc, db);
                     current_out_a = next_i;
                   }
                   ramp_last_ms = now;
@@ -1077,7 +1087,7 @@ sensor:
                        current_out_a, smv, ph<3?pn[ph]:"?", id(g_dis_k_est));
             }
             id(discharging_a) = (int)current_out_a;
-
+            
 # =================================================================
 # STATUS SENSORS (unchanged structure, updated labels)
 # =================================================================
