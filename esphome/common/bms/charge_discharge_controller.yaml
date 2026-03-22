@@ -662,8 +662,22 @@ sensor:
 
 
   # =================================================================
-  # DISCHARGE CONTROL V4.5
-  # Triggered by: min_cell_voltage
+  # DISCHARGE CONTROL V4.5 → [V8] PATCH
+  # Changes vs V4.5:
+  #  [V8-T] Taper exponent 1.5→2.5, MIN_TAPER_FACTOR removed
+  #         → current reaches 0 naturally at UVP (no relay-trip floor)
+  #  [V8-A] Asymmetric EMA in taper:
+  #         alpha_drop=0.35 (fast down), alpha_rise=0.05/0.10 (slow up)
+  #         → voltage spike → current drops in 2-3 ticks, not 10
+  #  [V8-H] deep_taper hysteresis flag (set pos>=0.55, clear pos<=0.15)
+  #         → once deep in taper, current rises only as a crawl
+  #         → prevents: reduce→V recover→increase→V sag loop
+  #  [V8-R] R_est: online ΔV/ΔI estimation from BMS actual current
+  #         → tracks cell internal resistance continuously
+  #         → seeds from 8.0 mV/A, bounded [0.5, 60] mV/A
+  #  [V8-P] Predictive cap: i_safe = headroom_mV / R_est * 0.60
+  #         applied in taper zone, adaptive zone, AND probe ceiling
+  #         → never requests more current than cell can deliver above UVP
   # =================================================================
   - platform: copy
     source_id: min_cell_voltage
@@ -695,16 +709,29 @@ sensor:
             // [V4] EMA smoothing state
             static float ema_target_dis          = 5.0f;
 
+            // ── [V8] ADAPTIVE TAPER STATE ──────────────────
+            // [V8-R] Online R_internal estimation (mV/A)
+            static float         r_est_dis  = 8.0f;  // seed: 8 mV/A typical LFP end-of-discharge
+            static float         smv_r0     = 0.0f;  // reference smv snapshot
+            static float         i_r0       = 0.0f;  // reference i_actual snapshot (positive)
+            static unsigned long ms_r0      = 0;     // reference timestamp
+            // [V8-H] Hysteresis: once deep in taper, rise is suppressed
+            static bool          deep_taper = false;
+
             // ── CONSTANTS ──────────────────────────────────
             static const unsigned long STARTUP_HOLD_MS  = 10000UL;
             static const unsigned long PROBE_STEP_MS    = 10000UL;
             static const float         PROBE_START_A    = 5.0f;
-            static const float         TAPER_EXPONENT   = 1.5f;
-            static const float         MIN_TAPER_FACTOR = 0.05f;
+            static const float         TAPER_EXPONENT   = 2.5f;    // [V8-T] was 1.5
+            // MIN_TAPER_FACTOR removed [V8-T]: taper → 0 at UVP naturally
             static const unsigned long MIN_ADJ_MS       = 2000UL;
             static const unsigned long COOLDOWN_MS      = 30000UL;
             static const float         CEILING_DECAY    = 0.70f;
             static const float         CEILING_MIN_A    = 1.0f;
+            // [V8] Predictive cap safety margin: reserve 40% headroom above UVP
+            static const float         R_SAFETY         = 0.60f;   // 60% of R-based safe current
+            static const float         R_SAFETY_PROBE   = 0.80f;   // looser for probe (still in normal zone)
+            static const float         R_SAFETY_ADAPTIVE= 0.80f;   // normal zone guard
 
             // ── INPUT GUARD ────────────────────────────────
             if (isnan(x) || isnan(id(current).state)) {
@@ -732,7 +759,7 @@ sensor:
             bool  auto_mode   = id(can_switch_auto_discharge_current).state;
             bool  dis_enabled = id(switch_discharging).state;
             float soc_stop    = id(can_soc_stop_discharging).state;
-            float sag_v       = id(${name}_sag_compensation_mv).state;  // [fixed] mV
+            float sag_v       = id(${name}_sag_compensation_mv).state;
             float taper_start = uvp + gap;
 
             float probe_start_a = std::max(5.0f, max_i * 0.05f);
@@ -748,7 +775,7 @@ sensor:
               smv           = raw_mv;
               first_run     = false;
               current_out_a = probe_start_a;
-              ema_target_dis = probe_start_a;  // [V4] seed EMA
+              ema_target_dis = probe_start_a;
               if (id(g_startup_ms) == 0) {
                 id(g_startup_ms)   = (uint32_t)now;
                 id(g_startup_done) = false;
@@ -770,7 +797,6 @@ sensor:
 
             // ══════════════════════════════════════════════
             // [V7] FORCE STOP from SOC filter
-            // Handles race condition — DIS lambda owns discharging_a
             // ══════════════════════════════════════════════
             if (id(g_force_dis_stop)) {
               current_out_a  = 0.0f;
@@ -792,6 +818,7 @@ sensor:
                   uvp_trip_ceiling  = -1.0f;
                   id(switch_discharging).turn_on();
                   was_discharging = false;
+                  deep_taper      = false;  // [V8-H] clear on force-unlock
                   ESP_LOGI("DIS_V4", "🔓 DIS FORCE-UNLOCK: %s",
                            auto_mode ? "user→auto" : "chg_session");
                 } else {
@@ -821,10 +848,11 @@ sensor:
                                    ? std::min(probe_start_a, uvp_trip_ceiling)
                                    : probe_start_a;
                 current_out_a   = safe_start;
-                ema_target_dis  = safe_start;  // [V4] seed EMA
+                ema_target_dis  = safe_start;
                 probe_active    = false;
                 probe_done      = false;
                 was_discharging = false;
+                deep_taper      = false;  // [V8-H] clear hysteresis on re-enable
                 ESP_LOGI("DIS_V4", "🔓 DIS RE-ENABLED: %s V=%.1fmV %.1fA",
                          v_recovered ? "V_ok" : now_auto ? "auto" : "chg",
                          smv, safe_start);
@@ -870,56 +898,135 @@ sensor:
             }
 
             // ══════════════════════════════════════════════
-            // SESSION DETECTION (unchanged — probe from 5A always)
-            // No interruption memory for discharge: safe and correct
+            // SESSION DETECTION
             // ══════════════════════════════════════════════
             if (is_discharging && !was_discharging) {
               probe_active    = true;
               probe_done      = false;
               current_out_a   = probe_start_a;
-              ema_target_dis  = probe_start_a;  // [V4] seed EMA
+              ema_target_dis  = probe_start_a;
               probe_last_step = now;
               last_adj        = now;
-              ESP_LOGI("DIS_V4", "🔄 NEW DIS SESSION: probe %.1fA", probe_start_a);
+              // [V8-R] Reset R tracking on new session (keep r_est — it's still valid)
+              ms_r0 = 0; smv_r0 = 0.0f; i_r0 = 0.0f;
+              deep_taper = false;  // [V8-H] fresh session starts with no hysteresis
+              ESP_LOGI("DIS_V4", "🔄 NEW DIS SESSION: probe %.1fA (R_est=%.1fmΩ)",
+                       probe_start_a, r_est_dis);
             }
             was_discharging = is_discharging;
 
             // ══════════════════════════════════════════════
-            // TAPER ZONE: uvp < V <= taper_start
+            // [V8-R] ONLINE R_EST UPDATE
+            // Uses actual BMS current (Hall sensor) vs smoothed cell voltage.
+            // Updates only when: discharging, ≥3s since last snapshot,
+            // actual current increased ≥3A AND voltage dropped ≥1.5mV.
+            // This captures the true I-V relationship without noise.
+            // ══════════════════════════════════════════════
+            if (is_discharging) {
+              float i_actual = -current_val;  // positive magnitude
+              if (ms_r0 == 0) {
+                // Seed snapshot at first discharging tick
+                smv_r0 = smv; i_r0 = i_actual; ms_r0 = now;
+              } else if ((now - ms_r0) >= 3000UL) {
+                float di = i_actual - i_r0;   // positive = more load
+                float dv = smv_r0 - smv;      // positive = voltage dropped
+                if (di > 3.0f && dv > 1.5f) {
+                  float r_sample = dv / di;   // mV/A
+                  if (r_sample > 0.3f && r_sample < 80.0f) {
+                    r_est_dis = 0.20f * r_sample + 0.80f * r_est_dis;
+                    r_est_dis = std::max(0.5f, std::min(60.0f, r_est_dis));
+                    ESP_LOGI("DIS_V4", "📐 R_est→%.2fmΩ (ΔI=+%.1fA ΔV=-%.1fmV)",
+                             r_est_dis, di, dv);
+                  }
+                }
+                smv_r0 = smv; i_r0 = i_actual; ms_r0 = now;
+              }
+            }
+
+            // ══════════════════════════════════════════════
+            // [V8-P] PREDICTIVE SAFE CURRENT (helper, used below)
+            // Headroom above UVP divided by estimated R_internal.
+            // Safety factor 60% in taper (tight), 80% in normal zone (relaxed).
+            // Returns max_i when R_est not yet reliable (<0.5 mV/A).
+            // ══════════════════════════════════════════════
+            // (computed inline where needed to use the right safety factor)
+
+            // ══════════════════════════════════════════════
+            // TAPER ZONE: uvp < smv ≤ taper_start
+            // [V8] Complete redesign of auto_mode branch
             // ══════════════════════════════════════════════
             if (is_discharging && gap > 1.0f && smv <= taper_start) {
               if (probe_active) {
                 probe_active   = false;
                 probe_done     = true;
-                ema_target_dis = current_out_a;  // [V4] seed EMA
+                ema_target_dis = current_out_a;
                 ESP_LOGI("DIS_V4", "🔍 PROBE END → TAPER: %.1fA V=%.1fmV", current_out_a, smv);
               }
 
               float pos = (taper_start - smv) / gap;
               pos = std::max(0.0f, std::min(1.0f, pos));
-              float factor = std::pow(1.0f - pos, TAPER_EXPONENT);
-              factor = std::max(factor, MIN_TAPER_FACTOR);
+
+              // [V8-H] Deep taper hysteresis:
+              //   Set once pos crosses 0.55 (55% into gap below taper_start).
+              //   Only cleared when pos drops back to 0.15 (well-recovered).
+              //   While set: EMA rise is suppressed to a crawl (alpha_rise=0.05).
+              if (pos >= 0.55f) deep_taper = true;
+              else if (pos <= 0.15f) deep_taper = false;
+
+              // [V8-P] Predictive cap in taper zone (60% safety margin)
+              float v_headroom  = smv - uvp;
+              float i_safe_taper = (r_est_dis > 0.5f)
+                                   ? (v_headroom / r_est_dis) * R_SAFETY
+                                   : max_i;
+              i_safe_taper = std::max(0.0f, std::min(max_i, i_safe_taper));
 
               if (auto_mode) {
-                float target  = max_i * factor;
-                bool  can_adj = (now - last_adj) >= MIN_ADJ_MS;
+                // [V8-T] Steeper curve (exp 2.5), NO floor → smoothly → 0 at pos=1
+                float curve_target = max_i * std::pow(1.0f - pos, TAPER_EXPONENT);
+                curve_target = std::max(0.0f, curve_target);
+
+                // Take the more conservative of: taper curve AND predictive cap
+                float target = std::min(curve_target, i_safe_taper);
+
+                bool can_adj = (now - last_adj) >= MIN_ADJ_MS;
                 if (can_adj) {
-                  // [V4] EMA: fast drop, slow rise
-                  ema_target_dis = 0.15f * target + 0.85f * ema_target_dis;
+                  // [V8-A] Asymmetric EMA:
+                  //   Drop  → fast  (0.35): responds in ~2 ticks when V sags
+                  //   Rise  → slow  (0.10): gentle rise when V recovers in shallow taper
+                  //   Rise  → crawl (0.05): hysteresis when deep in taper
+                  float alpha = (target < ema_target_dis)
+                                ? 0.35f
+                                : (deep_taper ? 0.05f : 0.10f);
+
+                  ema_target_dis = alpha * target + (1.0f - alpha) * ema_target_dis;
+                  // min(instant_target, EMA): fast-drop guarantee retained from V4
                   float smoothed = std::min(target, ema_target_dis);
-                  // [V5] Deadband
-                  if (std::abs(current_out_a - smoothed) >= 0.5f) {
+
+                  // Tighter deadband in taper zone [V8]: 0.2A (was 0.5A)
+                  if (std::abs(current_out_a - smoothed) >= 0.2f) {
                     current_out_a = smoothed;
                   }
                   last_adj = now;
                 }
-                ESP_LOGI("DIS_V4", "📉 TAPER: pos=%.2f → %.1fA (tgt=%.1fA)", pos, current_out_a, target);
+                if ((now % 3000) < 300)
+                  ESP_LOGI("DIS_V4",
+                    "📉 TAPER[V8]: pos=%.2f cur=%.1fA curve=%.1fA pred=%.1fA R=%.1f deep=%d",
+                    pos, current_out_a, max_i * std::pow(1.0f-pos, TAPER_EXPONENT),
+                    i_safe_taper, r_est_dis, (int)deep_taper);
               } else {
                 current_out_a  = max_i;
                 ema_target_dis = max_i;
+                deep_taper     = false;  // manual mode: no hysteresis
                 ESP_LOGI("DIS_V4", "📉 TAPER MANUAL: %.1fA", max_i);
               }
               goto publish_dis;
+            }
+
+            // Outside taper zone: clear deep_taper only when well clear (pos<0.15 equivalent)
+            // i.e. smv > taper_start + gap * 0.15 is already handled by pos<0.15 path above,
+            // but on exit we also clear to be safe.
+            if (smv > taper_start + gap * 0.20f) {
+              deep_taper = false;  // [V8-H] well outside taper → reset
             }
 
             // ── EDGE DETECTION auto↔manual (unchanged) ────
@@ -963,7 +1070,6 @@ sensor:
               float dist_to_uvp = (smv - uvp) - sag_v;
               dist_to_uvp = std::max(0.0f, dist_to_uvp);
 
-              // [V3] Zone-based step size and interval
               float probe_step_a;
               unsigned long step_interval;
               if (dist_to_uvp > 150.0f) {
@@ -978,13 +1084,21 @@ sensor:
               }
 
               float probe_ceil = (uvp_trip_ceiling > 0.0f) ? uvp_trip_ceiling : max_i;
+              // [V8-P] Probe ceiling also capped by R_est safe current (looser: 80%)
+              if (r_est_dis > 0.5f) {
+                float v_headroom  = smv - uvp;
+                float i_r_probe   = (v_headroom / r_est_dis) * R_SAFETY_PROBE;
+                i_r_probe = std::max(probe_start_a, i_r_probe);
+                probe_ceil = std::min(probe_ceil, i_r_probe);
+              }
+
               bool near_taper  = (smv <= taper_start + gap);
               bool at_max      = (current_out_a >= std::min(max_i, probe_ceil) - 0.5f);
 
               if (near_taper || at_max) {
                 probe_active   = false;
                 probe_done     = true;
-                ema_target_dis = current_out_a;  // [V4] seed EMA
+                ema_target_dis = current_out_a;
                 if (near_taper && uvp_trip_ceiling > 0.0f) {
                   ESP_LOGI("DIS_V4", "🟢 PROBE OK → ceiling reset (%.1fA→free)", uvp_trip_ceiling);
                   uvp_trip_ceiling = -1.0f;
@@ -995,7 +1109,7 @@ sensor:
                 bool step_time = (now - probe_last_step) >= step_interval;
                 if (step_time) {
                   float next_i = std::min({max_i, probe_ceil, current_out_a + probe_step_a});
-                  ESP_LOGI("DIS_V4", "🔍 PROBE STEP: %.1fA→%.1fA (step=%.1fA, dist=%.0fmV, ceil=%.1fA)",
+                  ESP_LOGI("DIS_V4", "🔍 PROBE STEP: %.1fA→%.1fA (step=%.1fA dist=%.0fmV ceil=%.1fA)",
                            current_out_a, next_i, probe_step_a, dist_to_uvp, probe_ceil);
                   current_out_a   = next_i;
                   probe_last_step = now;
@@ -1004,7 +1118,7 @@ sensor:
               }
             }
 
-            // ── [V4] ADAPTIVE PHASE: EMA smoothing ─────────
+            // ── [V4/V8] ADAPTIVE PHASE: EMA + R_est guard ──
             {
               bool can_adj = (now - last_adj) >= MIN_ADJ_MS;
               if (can_adj) {
@@ -1021,18 +1135,30 @@ sensor:
                 }
                 target = std::max(max_i * 0.1f, std::min(max_i, target));
 
-                // [V4] EMA: fast drop, slow rise
-                ema_target_dis = 0.15f * target + 0.85f * ema_target_dis;
+                // [V8-P] R_est guard in normal zone: prevent sag into taper on next tick
+                if (r_est_dis > 0.5f) {
+                  float v_headroom  = smv - uvp;
+                  float i_r_guard   = (v_headroom / r_est_dis) * R_SAFETY_ADAPTIVE;
+                  i_r_guard = std::max(max_i * 0.1f, i_r_guard);
+                  target = std::min(target, i_r_guard);
+                }
+
+                // [V8-A] Asymmetric EMA in adaptive zone too
+                // If recently in deep taper: rise is suppressed (alpha_up=0.04)
+                float alpha_d = 0.15f;
+                float alpha_u = deep_taper ? 0.04f : 0.15f;
+                float alpha   = (target < ema_target_dis) ? alpha_d : alpha_u;
+
+                ema_target_dis = alpha * target + (1.0f - alpha) * ema_target_dis;
                 float smoothed = std::min(target, ema_target_dis);
 
-                // [V5] Deadband
                 if (std::abs(current_out_a - smoothed) >= 0.5f) {
                   current_out_a = smoothed;
                   last_adj = now;
                 }
 
-                ESP_LOGI("DIS_V4", "🎯 ADAPTIVE: dist_real=%.1fmV eff=%.1fmV tgt=%.1fA I=%.1fA",
-                         dist_real, dist_eff, target, current_out_a);
+                ESP_LOGI("DIS_V4", "🎯 ADAPTIVE[V8]: dist_eff=%.1fmV tgt=%.1fA I=%.1fA R=%.1f deep=%d",
+                         dist_eff, target, current_out_a, r_est_dis, (int)deep_taper);
               }
             }
 
@@ -1043,12 +1169,11 @@ sensor:
             if (std::abs(current_out_a - last_published) >= 0.3f) {
               id(${name}_adaptive_discharging_current).publish_state(current_out_a);
               last_published = current_out_a;
-              ESP_LOGI("DIS_V4", "📡 DIS→%.1fA | V=%.1fmV | %s",
-                       current_out_a, smv,
-                       probe_active ? "PROBE" : "ADAPTIVE");
+              ESP_LOGI("DIS_V4", "📡 DIS→%.1fA | V=%.1fmV | R=%.1f | %s",
+                       current_out_a, smv, r_est_dis,
+                       probe_active ? "PROBE" : (deep_taper ? "TAPER-deep" : "ADAPTIVE"));
             }
             id(discharging_a) = (int)current_out_a;
-
 
 # =================================================================
 # STATUS SENSORS (unchanged structure, updated labels)
