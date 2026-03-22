@@ -164,8 +164,13 @@ sensor:
             static unsigned long soft_start_ms       = 0;
             static unsigned long ramp_last_ms        = 0;
             static unsigned long log_ms              = 0;
-            static int           plat_count          = 0;  // approach zone: 2-tick confirm
-            // C/20 EOC tracking
+            // [Fix1] timestamp-based plateau confirm (6s liên tục)
+            static unsigned long plat_start_ms       = 0;   // 0 = chưa bắt đầu
+            // [Fix2] theo dõi zone transition
+            static bool          prev_free_zone      = true;
+            // [Risk2] guard free-zone 10s trước khi reset ceiling
+            static unsigned long free_zone_start_ms  = 0;
+            // C/20 EOC
             static unsigned long below_cterm_ms      = 0;
             static unsigned long cterm_check_ms      = 0;
 
@@ -173,16 +178,17 @@ sensor:
             static const unsigned long STARTUP_HOLD_MS  = 10000UL;
             static const unsigned long SOFT_START_MS    = 3000UL;
             static const unsigned long STEP_FREE_MS     = 5000UL;   // free zone: 5s/step
-            static const unsigned long STEP_APPR_MS     = 3000UL;   // approach zone: 3s/step
+            static const unsigned long STEP_APPR_MS     = 3000UL;   // approach: 3s/step
             static const unsigned long COOLDOWN_MS      = 30000UL;
             static const unsigned long CC_MEMORY_MS     = 90000UL;
+            static const unsigned long PLAT_CONFIRM_MS  = 6000UL;   // [Fix1] 6s liên tục
+            static const unsigned long FREE_CONFIRM_MS  = 10000UL;  // [Risk2] 10s guard
             static const float         CEILING_DECAY    = 0.70f;
             static const float         CEILING_MIN_A    = 1.0f;
             static const float         PLATEAU_GAP_A    = 3.0f;
-            static const int           PLATEAU_CONFIRM  = 2;        // 2 ticks liên tiếp
             static const float         TAPER_EXP        = 2.0f;
-            static const float         NEAR_OVP_RATIO   = 0.30f;   // gap×0.3
-            static const float         FREE_ZONE_RATIO  = 1.50f;   // gap×1.5
+            static const float         NEAR_OVP_RATIO   = 0.30f;
+            static const float         FREE_ZONE_RATIO  = 1.50f;
             static const float         CX_NEAR_RATIO    = 0.50f;
 
             // ── INPUT GUARD ────────────────────────────────
