@@ -677,16 +677,28 @@ sensor:
             id(charging_a) = (int)current_out_a;
 
   # =================================================================
-  # DISCHARGE CONTROL V10r — SIMPLIFIED
-  # Logic:
-  #  PH0 SOFT_START (3s): giữ probe_start_a
-  #  PH1 RAMP: tăng 5%/max_i mỗi 1s
-  #       → khi C - B > 3A: Cx = B_actual → PH2
-  #       → khi C = max_i:  Cx = B_actual → PH2  (forced)
-  #  PH2 CEILING_LOCK (ratchet):
-  #       → dis_ceiling chỉ giảm theo k_est khi V sụt
-  #       → không bao giờ tăng
-  #  RESET: chỉ khi đổi chiều xả→sạc
+  # DISCHARGE CONTROL V11
+  # =================================================================
+  # BOOT → SOFTSTART (3s tại probe_start_a)
+  #
+  # [SAFE ZONE] smv >= uvp + gap*0.3:
+  #   probe_start = 5A
+  #   RAMP: tăng step mỗi 3s
+  #   Mọi tick: kiểm tra gap = C - B >= 3A
+  #     → Cx = min(B_actual, v_head/k_est*0.70)  [không vượt năng lực pin]
+  #     → chuyển ADAPTIVE
+  #
+  # [NEAR-UVP ZONE] smv < uvp + gap*0.3:
+  #   Cx = v_head / k_est * 0.50  (tính theo năng lực pin thực tế)
+  #   Cx clamped [1A, 5A]
+  #   KHÔNG ramp thêm → thẳng ADAPTIVE
+  #
+  # ADAPTIVE (chung cho cả hai):
+  #   ceiling chỉ GIẢM, không bao giờ tăng
+  #   ceiling = min(ceiling, v_head/k_est * K_RATCH)
+  #   smv → UVP → v_head → 0 → ceiling → 0 (tự nhiên)
+  #
+  # RESET ceiling: CHỈ khi đổi chiều xả → sạc
   # =================================================================
   - platform: copy
     source_id: min_cell_voltage
@@ -698,37 +710,41 @@ sensor:
         - lambda: !lambda |-
 
             // ── STATIC STATE ───────────────────────────────
-            static float         vbuf[5]             = {0,0,0,0,0};
-            static int           vbuf_idx            = 0;
-            static bool          vbuf_ready          = false;
-            static bool          first_run           = true;
-            static bool          was_discharging     = false;
-            static bool          was_charging        = false;
-            static bool          switch_dis_locked   = false;
-            static bool          in_cooldown_dis     = false;
-            static unsigned long cooldown_start_dis  = 0;
-            static float         uvp_trip_ceiling    = -1.0f;
-            static float         current_out_a       = 5.0f;
-            static float         last_published      = -1.0f;
-            static bool          prev_auto_mode      = true;
-            static unsigned long phase_enter_ms      = 0;
-            static unsigned long ramp_last_ms        = 0;
-            // k learning refs (chỉ dùng cho ratchet PH2)
-            static float         k_v0               = 0.0f;
-            static float         k_i0               = 0.0f;
-            static unsigned long k_t0               = 0;
+            static float         vbuf[5]            = {0,0,0,0,0};
+            static int           vbuf_idx           = 0;
+            static bool          vbuf_ready         = false;
+            static bool          first_run          = true;
+            static bool          was_discharging    = false;
+            static bool          was_charging       = false;
+            static bool          switch_dis_locked  = false;
+            static bool          in_cooldown_dis    = false;
+            static unsigned long cooldown_start_dis = 0;
+            static float         uvp_trip_ceiling   = -1.0f;
+            static float         current_out_a      = 5.0f;
+            static float         last_published     = -1.0f;
+            static bool          prev_auto_mode     = true;
+            static unsigned long soft_start_ms      = 0;
+            static unsigned long ramp_last_ms       = 0;
+            static unsigned long log_ms             = 0;
+            // k learning
+            static float         k_v0              = 0.0f;
+            static float         k_i0              = 0.0f;
+            static unsigned long k_t0              = 0;
 
             // ── CONSTANTS ──────────────────────────────────
-            static const unsigned long STARTUP_HOLD_MS  = 10000UL;
-            static const unsigned long SOFT_START_MS    = 3000UL;
-            static const unsigned long STEP_INT_MS      = 3000UL;   // 3s/step — đủ cho inverter phản hồi
-            static const unsigned long COOLDOWN_MS      = 30000UL;
-            static const float         CEILING_DECAY    = 0.70f;
-            static const float         CEILING_MIN_A    = 1.0f;
-            static const float         K_SAFETY_RATCH   = 0.65f;   // chỉ dùng PH2
-            static const float         K_MIN            = 0.5f;
-            static const float         K_MAX            = 50.0f;
-            static const float         PLATEAU_GAP_A    = 3.0f;    // C - B > 3A → lock
+            static const unsigned long STARTUP_HOLD_MS = 10000UL;
+            static const unsigned long SOFT_START_MS   = 3000UL;
+            static const unsigned long STEP_INT_MS     = 3000UL;
+            static const unsigned long COOLDOWN_MS     = 30000UL;
+            static const float         CEILING_DECAY   = 0.70f;
+            static const float         CEILING_MIN_A   = 1.0f;
+            static const float         NEAR_UVP_RATIO  = 0.30f;  // gap*0.3 = ngưỡng unsafe
+            static const float         CX_SAFE_RATIO   = 0.70f;  // Cx khi gap>=3A
+            static const float         CX_NEAR_RATIO   = 0.50f;  // Cx khi near-UVP
+            static const float         K_RATCH         = 0.65f;  // adaptive ratchet
+            static const float         PLATEAU_GAP_A   = 3.0f;
+            static const float         K_MIN           = 0.5f;
+            static const float         K_MAX           = 50.0f;
 
             // ── INPUT GUARD ────────────────────────────────
             if (isnan(x) || isnan(id(current).state)) return;
@@ -753,33 +769,39 @@ sensor:
             bool  auto_mode   = id(can_switch_auto_discharge_current).state;
             bool  dis_enabled = id(switch_discharging).state;
             float soc_stop    = id(can_soc_stop_discharging).state;
-            float taper_start = uvp + gap;
+            float v_head      = smv - uvp;           // headroom trên UVP (mV)
+            float near_uvp_thresh = gap * NEAR_UVP_RATIO;
+            bool  near_uvp    = (v_head < near_uvp_thresh);
 
-            // [B1] probe start: sát UVP → 1A, bình thường → 5A
-            float v_head_now    = smv - uvp;
-            float probe_start_a = (v_head_now < gap * 0.3f)
-                                  ? 1.0f : std::max(5.0f, max_i * 0.05f);
-            float step_a        = std::max(2.0f, max_i * 0.05f);
-
-            bool is_charging    = current_val > 0.5f;
-            bool is_discharging = current_val < -0.5f;
+            float step_a = std::max(2.0f, max_i * 0.05f);
+            bool  is_charging    = current_val > 0.5f;
+            bool  is_discharging = current_val < -0.5f;
 
             // Cache globals
             int   ph      = id(g_dis_phase);
             float ceiling = id(g_dis_ceiling);
             float k_est   = id(g_dis_k_est);
 
+            // ── HELPER: tính Cx an toàn từ headroom + k_est ──
+            // Nếu k_est chưa đủ tin cậy → dùng fallback tuyến tính
+            auto calc_cx = [&](float safety) -> float {
+              float cx = (k_est > K_MIN)
+                         ? (v_head / k_est) * safety
+                         : (v_head / gap) * max_i * safety;
+              return std::max(1.0f, std::min(max_i, cx));
+            };
+
             // ── FIRST RUN ──────────────────────────────────
             if (first_run) {
               for (int i = 0; i < 5; i++) vbuf[i] = raw_mv;
               vbuf_ready = true; smv = raw_mv; first_run = false;
-              current_out_a = probe_start_a;
+              current_out_a = 5.0f;
               if (id(g_startup_ms) == 0) {
                 id(g_startup_ms)   = (uint32_t)now;
                 id(g_startup_done) = false;
               }
-              if (id(charging_a) == 0) id(charging_a) = (int)probe_start_a;
-              id(discharging_a) = (int)probe_start_a;
+              if (id(charging_a) == 0) id(charging_a) = 5;
+              id(discharging_a) = 5;
               id(${name}_adaptive_discharging_current).publish_state(current_out_a);
               last_published = current_out_a;
               ESP_LOGI("DIS", "BOOT V=%.0fmV k=%.2f", smv, k_est);
@@ -788,8 +810,8 @@ sensor:
 
             // ── STARTUP HOLD ───────────────────────────────
             if (!id(g_startup_done)) {
-              if (id(charging_a) == 0) id(charging_a) = (int)probe_start_a;
-              id(discharging_a) = (int)probe_start_a;
+              if (id(charging_a) == 0) id(charging_a) = 5;
+              id(discharging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
                 id(g_startup_done) = true;
                 ESP_LOGI("DIS", "STARTUP DONE");
@@ -827,7 +849,7 @@ sensor:
                 switch_dis_locked = false; in_cooldown_dis = false;
                 id(switch_discharging).turn_on();
                 float ss = (uvp_trip_ceiling > 0.0f)
-                           ? std::min(probe_start_a, uvp_trip_ceiling) : probe_start_a;
+                           ? std::min(5.0f, uvp_trip_ceiling) : 5.0f;
                 current_out_a = ss; was_discharging = false;
                 ceiling = -1.0f; ph = 0;
                 id(g_dis_ceiling) = -1.0f; id(g_dis_phase) = 0;
@@ -839,13 +861,13 @@ sensor:
             if (!dis_enabled || smv <= uvp) {
               current_out_a = 0.0f;
               if (dis_enabled) {
-                float ti = last_published > 0.0f ? last_published : probe_start_a;
+                float ti = last_published > 0.0f ? last_published : 5.0f;
                 uvp_trip_ceiling = std::max(0.0f,
                   (uvp_trip_ceiling > 0.0f) ? uvp_trip_ceiling*CEILING_DECAY : ti*CEILING_DECAY);
                 in_cooldown_dis = true; cooldown_start_dis = now;
                 if (auto_mode) {
                   id(capacity_remaining)->publish_state(soc_stop);
-                  ESP_LOGW("DIS", "UVP %.0fmV→SOC%.0f%%", smv, soc_stop);
+                  ESP_LOGW("DIS", "UVP %.0fmV SOC%.0f%%", smv, soc_stop);
                 } else if (!switch_dis_locked) {
                   switch_dis_locked = true;
                   id(switch_discharging).turn_off();
@@ -855,7 +877,7 @@ sensor:
               goto publish_dis;
             }
 
-            // ── RESET CEILING khi đổi chiều xả→sạc ────────
+            // ── RESET CEILING khi đổi chiều xả → sạc ──────
             if (is_charging && !was_charging && ceiling >= 0.0f) {
               ESP_LOGI("DIS", "DIR→CHG reset ceil=%.1fA", ceiling);
               ceiling = -1.0f; ph = 0;
@@ -865,13 +887,14 @@ sensor:
 
             // ── SESSION EDGE ───────────────────────────────
             if (is_discharging && !was_discharging) {
-              current_out_a  = probe_start_a;
-              phase_enter_ms = now;
+              current_out_a  = 5.0f;
+              soft_start_ms  = now;
               ramp_last_ms   = now;
               ph = 0; id(g_dis_phase) = 0;
               k_v0 = smv; k_i0 = -current_val; k_t0 = now;
-              ESP_LOGI("DIS", "SESSION ceil=%.1f k=%.2f probe=%.1fA",
-                       ceiling, k_est, probe_start_a);
+              // ceiling KHÔNG reset — chỉ reset khi sang sạc
+              ESP_LOGI("DIS", "SESSION ph=0 ceil=%.1f near_uvp=%d v_head=%.0fmV",
+                       ceiling, (int)near_uvp, v_head);
             }
             was_discharging = is_discharging;
 
@@ -890,8 +913,8 @@ sensor:
             }
             if (!auto_mode) { current_out_a = max_i; goto publish_dis; }
 
-            // ── K LEARNING (normal zone, dùng cho ratchet PH2) ──
-            if (smv > taper_start) {
+            // ── K LEARNING (dùng cho adaptive ratchet PH2) ─
+            if (smv > uvp + gap && ph >= 1) {
               float i_act = -current_val;
               float di = i_act - k_i0, dv = k_v0 - smv;
               unsigned long dt = now - k_t0;
@@ -910,82 +933,87 @@ sensor:
             }
 
             // ══════════════════════════════════════════════
-            // PH0: SOFT_START
+            // PH0: SOFT_START — 3s tại 5A
             // ══════════════════════════════════════════════
             if (ph == 0) {
-              current_out_a = probe_start_a;
-              if ((now - phase_enter_ms) >= SOFT_START_MS) {
-                ph = 1; id(g_dis_phase) = 1;
-                ramp_last_ms = now;
-                phase_enter_ms = now;
-                ESP_LOGI("DIS", "PH0→RAMP B=%.1fA", -current_val);
+              current_out_a = 5.0f;
+              if ((now - soft_start_ms) >= SOFT_START_MS) {
+                if (near_uvp) {
+                  // [NEAR-UVP] tính Cx ngay, không ramp
+                  float cx = calc_cx(CX_NEAR_RATIO);
+                  cx = std::max(1.0f, std::min(5.0f, cx));  // cap [1A, 5A]
+                  if (ceiling >= 0.0f) cx = std::min(cx, ceiling);
+                  ceiling = cx; ph = 2;
+                  id(g_dis_ceiling) = ceiling; id(g_dis_phase) = 2;
+                  current_out_a = ceiling;
+                  ESP_LOGI("DIS", "NEAR-UVP→ADAPTIVE: Cx=%.1fA v_head=%.0fmV k=%.2f",
+                           ceiling, v_head, k_est);
+                } else {
+                  // [SAFE] bắt đầu ramp
+                  ph = 1; id(g_dis_phase) = 1;
+                  ramp_last_ms = now;
+                  ESP_LOGI("DIS", "PH0→RAMP v_head=%.0fmV", v_head);
+                }
               }
               goto publish_dis;
             }
 
             // ══════════════════════════════════════════════
-            // PH1: RAMP — step mỗi 3s, nhưng gap check MỌI tick
-            // C - B >= 3A tại BẤT KỲ tick nào → lock ngay
+            // PH1: RAMP — step 3s, gap check MỌI tick
+            // gap = C - B >= 3A → Cx = min(B, v_head/k*0.70)
             // ══════════════════════════════════════════════
             if (ph == 1) {
-              float i_actual = -current_val;           // dương khi xả
-              float c_gap    = current_out_a - i_actual; // C - B
+              float i_actual = -current_val;
+              float c_gap    = current_out_a - i_actual;
+              bool  at_max   = (current_out_a >= max_i - 0.5f);
+              bool  plateau  = (c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
 
-              bool at_max  = (current_out_a >= max_i - 0.5f);
-              bool plateau = (c_gap >= PLATEAU_GAP_A && i_actual > probe_start_a);
-
-              if (plateau || at_max) {
-                // Cx = B_actual tại thời điểm lock
-                float cx = std::max(probe_start_a, i_actual);
+              if (plateau || at_max || near_uvp) {
+                // Cx = min(B_actual, năng lực pin theo headroom)
+                float cx_capacity = calc_cx(CX_SAFE_RATIO);
+                float cx = std::min(i_actual, cx_capacity);
+                cx = std::max(1.0f, std::min(max_i, cx));
                 if (ceiling >= 0.0f) cx = std::min(cx, ceiling);
-                cx = std::min(cx, max_i);
 
                 ceiling = cx; ph = 2;
-                id(g_dis_ceiling) = ceiling;
-                id(g_dis_phase)   = 2;
-                current_out_a     = ceiling;
+                id(g_dis_ceiling) = ceiling; id(g_dis_phase) = 2;
+                current_out_a = ceiling;
+                log_ms = now;
 
-                ESP_LOGI("DIS", "%s: C=%.1f B=%.1f gap=%.1f → Cx=%.1fA",
-                         plateau ? "PLATEAU" : "AT_MAX",
-                         current_out_a, i_actual, c_gap, ceiling);
+                ESP_LOGI("DIS", "LOCK[%s]: B=%.1f gap=%.1f cx_cap=%.1f → Cx=%.1fA",
+                         plateau?"gap>=3":at_max?"max":"near_uvp",
+                         i_actual, c_gap, cx_capacity, ceiling);
               } else if ((now - ramp_last_ms) >= STEP_INT_MS) {
-                // Step tăng C mỗi 3s (đủ thời gian inverter phản hồi)
                 float next_i = std::min(max_i, current_out_a + step_a);
-                if (next_i > current_out_a + 0.1f) {
-                  ESP_LOGI("DIS", "RAMP →%.1fA B=%.1fA gap=%.1fA",
-                           next_i, i_actual, c_gap);
-                  current_out_a = next_i;
-                }
-                ramp_last_ms = now;
+                ESP_LOGI("DIS", "RAMP →%.1fA B=%.1fA gap=%.1fA", next_i, i_actual, c_gap);
+                current_out_a = next_i;
+                ramp_last_ms  = now;
               }
               goto publish_dis;
             }
 
             // ══════════════════════════════════════════════
-            // PH2: CEILING_LOCK — RATCHET
-            // k_est dùng để giảm ceiling khi V sụt (tiệm cận 0 khi smv→UVP)
-            // Không bao giờ tăng
+            // PH2: ADAPTIVE — ratchet chỉ giảm
+            // ceiling giảm khi smv tiến về UVP
+            // ceiling → 0 khi v_head → 0
             // ══════════════════════════════════════════════
             if (ph == 2) {
-              float v_head = std::max(0.0f, smv - uvp);
-              float k_ceil = (k_est > K_MIN)
-                             ? v_head / k_est * K_SAFETY_RATCH
-                             : ceiling;
-              k_ceil = std::max(0.0f, std::min(max_i, k_ceil));
-
+              // k_ceil = năng lực pin tại v_head hiện tại
+              float k_ceil = calc_cx(K_RATCH);
+              // Ratchet: chỉ giảm
               float new_ceil = std::min(ceiling, k_ceil);
+              new_ceil = std::max(0.0f, new_ceil);
               if (new_ceil < ceiling - 0.3f) {
-                ESP_LOGI("DIS", "RATCH↓ %.1f→%.1fA head=%.0f", ceiling, new_ceil, v_head);
+                ESP_LOGI("DIS", "RATCH↓ %.1f→%.1fA v_head=%.0fmV", ceiling, new_ceil, v_head);
                 ceiling = new_ceil;
                 id(g_dis_ceiling) = ceiling;
               }
               current_out_a = ceiling;
 
-              // Log 30s
-              if (ph >= 1 && (now - phase_enter_ms) > 30000UL) {
-                ESP_LOGI("DIS", "LOCK ceil=%.1fA head=%.0fmV k=%.2f",
+              if ((now - log_ms) > 30000UL) {
+                log_ms = now;
+                ESP_LOGI("DIS", "ADAPTIVE: ceil=%.1fA v_head=%.0fmV k=%.2f",
                          ceiling, v_head, k_est);
-                phase_enter_ms = now;
               }
               goto publish_dis;
             }
@@ -995,7 +1023,8 @@ sensor:
             if (std::abs(current_out_a - last_published) >= 0.3f) {
               id(${name}_adaptive_discharging_current).publish_state(current_out_a);
               last_published = current_out_a;
-              ESP_LOGI("DIS", "→%.1fA V=%.0f PH%d", current_out_a, smv, ph);
+              ESP_LOGI("DIS", "→%.1fA V=%.0f PH%d k=%.2f",
+                       current_out_a, smv, ph, k_est);
             }
             id(discharging_a) = (int)current_out_a;
 
