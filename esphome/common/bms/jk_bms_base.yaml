@@ -1,0 +1,175 @@
+# ============================================================
+# jk_bms_base.yaml — JK BMS UART + sensors (trừ cell voltages)
+# Pair với jk_bms_cells_15.yaml HOẶC jk_bms_cells_16.yaml
+# ============================================================
+
+external_components:
+  - source: ${external_components_source}
+    refresh: 0s
+
+uart:
+  id: uart_0
+  baud_rate: 115200
+  rx_buffer_size: 512
+  tx_pin: ${tx_pin}
+  rx_pin: ${rx_pin}
+
+jk_modbus:
+  id: modbus0
+  uart_id: uart_0
+
+jk_bms:
+  id: bms0
+  jk_modbus_id: modbus0
+  update_interval: 15s
+
+binary_sensor:
+  - platform: jk_bms
+    balancing:
+      name: "${name} balancing"
+    balancing_switch:
+      name: "${name} balancing switch"
+    charging:
+      name: "${name} charging"
+    charging_switch:
+      id: charging_switch
+      name: "${name} charging switch"
+    discharging:
+      name: "${name} discharging"
+    discharging_switch:
+      id: discharging_switch
+      name: "${name} discharging switch"
+    dedicated_charger_switch:
+      name: "${name} dedicated charger switch"
+
+sensor:
+  - platform: jk_bms
+    min_cell_voltage:
+      id: min_cell_voltage
+      name: "${name} min cell voltage"
+    max_cell_voltage:
+      id: max_cell_voltage
+      name: "${name} max cell voltage"
+    min_voltage_cell:
+      id: min_voltage_cell
+      name: "${name} min voltage cell"
+    max_voltage_cell:
+      id: max_voltage_cell
+      name: "${name} max voltage cell"
+    delta_cell_voltage:
+      name: "${name} delta cell voltage"
+    average_cell_voltage:
+      name: "${name} average cell voltage"
+      id: ${name}_average_cell_voltage
+    power_tube_temperature:
+      id: power_tube_temperature
+      name: "${name} power tube temperature"
+    temperature_sensor_1:
+      id: temperature_sensor_1
+      name: "${name} temperature sensor 1"
+    temperature_sensor_2:
+      id: temperature_sensor_2
+      name: "${name} temperature sensor 2"
+    total_voltage:
+      id: total_voltage
+      name: "${name} total voltage"
+    current:
+      id: current
+      name: "${name} current"
+    power:
+      name: "${name} power"
+    charging_power:
+      name: "${name} charging power"
+    discharging_power:
+      name: "${name} discharging power"
+    capacity_remaining:
+      id: capacity_remaining
+      name: "${name} capacity remaining"
+    capacity_remaining_derived:
+      id: capacity_remaining_derived
+      name: "${name} capacity remaining derived"
+    temperature_sensors:
+      name: "${name} temperature sensors"
+    charging_cycles:
+      id: charging_cycles
+      name: "${name} charging cycles"
+    total_charging_cycle_capacity:
+      id: total_charging_cycle_capacity
+      name: "${name} total charging cycle capacity"
+    battery_strings:
+      id: battery_strings
+      name: "${name} battery strings"
+    errors_bitmask:
+      id: errors_bitmask
+      name: "${name} errors bitmask"
+    operation_mode_bitmask:
+      name: "${name} operation mode bitmask"
+    total_voltage_overvoltage_protection:
+      name: "${name} total voltage overvoltage protection"
+    total_voltage_undervoltage_protection:
+      name: "${name} total voltage undervoltage protection"
+    cell_voltage_overvoltage_protection:
+      name: "${name} cell voltage overvoltage protection"
+    cell_voltage_overvoltage_recovery:
+      name: "${name} cell voltage overvoltage recovery"
+    cell_voltage_overvoltage_delay:
+      name: "${name} cell voltage overvoltage delay"
+    cell_voltage_undervoltage_protection:
+      name: "${name} cell voltage undervoltage protection"
+    cell_voltage_undervoltage_recovery:
+      name: "${name} cell voltage undervoltage recovery"
+    cell_voltage_undervoltage_delay:
+      name: "${name} cell voltage undervoltage delay"
+    cell_pressure_difference_protection:
+      name: "${name} cell pressure difference protection"
+    discharging_overcurrent_protection:
+      name: "${name} discharging overcurrent protection"
+    discharging_overcurrent_delay:
+      name: "${name} discharging overcurrent delay"
+    charging_overcurrent_protection:
+      name: "${name} charging overcurrent protection"
+    charging_overcurrent_delay:
+      name: "${name} charging overcurrent delay"
+    balance_starting_voltage:
+      name: "${name} balance starting voltage"
+    balance_opening_pressure_difference:
+      name: "${name} balance opening pressure difference"
+    power_tube_temperature_protection:
+      name: "${name} power tube temperature protection"
+    power_tube_temperature_recovery:
+      name: "${name} power tube temperature recovery"
+    temperature_sensor_temperature_protection:
+      name: "${name} temperature sensor temperature protection"
+    temperature_sensor_temperature_recovery:
+      name: "${name} temperature sensor temperature recovery"
+    temperature_sensor_temperature_difference_protection:
+      name: "${name} temperature sensor temperature difference protection"
+    charging_high_temperature_protection:
+      name: "${name} charging high temperature protection"
+    discharging_high_temperature_protection:
+      name: "${name} discharging high temperature protection"
+    charging_low_temperature_protection:
+      name: "${name} charging low temperature protection"
+    charging_low_temperature_recovery:
+      name: "${name} charging low temperature recovery"
+    discharging_low_temperature_protection:
+      name: "${name} discharging low temperature protection"
+    discharging_low_temperature_recovery:
+      name: "${name} discharging low temperature recovery"
+    total_battery_capacity_setting:
+      id: total_battery_capacity_setting
+      name: "${name} total battery capacity setting"
+    current_calibration:
+      name: "${name} current calibration"
+    device_address:
+      name: "${name} device address"
+    sleep_wait_time:
+      name: "${name} sleep wait time"
+    alarm_low_volume:
+      name: "${name} alarm low volume"
+    manufacturing_date:
+      name: "${name} manufacturing date"
+    total_runtime:
+      name: "${name} total runtime"
+    actual_battery_capacity:
+      name: "${name} actual battery capacity"

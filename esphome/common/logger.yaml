@@ -15,7 +15,7 @@ text_sensor:
       name: "${name} Reset Reason"
 
 interval:
-  - interval: 60s
+  - interval: 120s  # ← tăng từ 60s, giảm MQTT allocation spike (không ảnh hưởng logic)
     then:
       - mqtt.publish:
           topic: "${name}/heartbeat"
@@ -29,6 +29,3 @@ interval:
               (unsigned long long)(millis() / 1000)
             );
             return std::string(buf);
-            
-            
-            

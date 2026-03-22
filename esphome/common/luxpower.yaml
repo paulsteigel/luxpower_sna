@@ -37,10 +37,8 @@ external_components:
 luxpower_sna:
   id: lux_hub
   #host_text_id: lux_config_host
-  update_interval: 20s
-  hold_update_interval: 60s
-#  update_interval: 60s       # was 20s — reduce TCP poll frequency
-#  hold_update_interval: 120s # was 60s
+  update_interval: 30s       # ← tăng từ 20s, giảm TCP allocation spike
+  hold_update_interval: 120s # ← tăng từ 60s, giảm TCP allocation spike
 
 # ── Runtime config (set via HA UI, stored in flash) ──────────
 text:
