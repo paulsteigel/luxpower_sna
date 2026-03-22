@@ -43,7 +43,7 @@ mqtt:
 wifi:
   use_address: ${name}.freemyip.com 
   ap:
-    ssid: ${name}
+    ssid: "Esp32S2Lolin"
 
 ota:
   - platform: esphome
