@@ -676,9 +676,13 @@ sensor:
             }
             id(charging_a) = (int)current_out_a;
 
-
-  # =================================================================
-  # DISCHARGE CONTROL V10r
+# =================================================================
+  # DISCHARGE CONTROL V10r — CLEANED
+  # Globals cần khai báo (thêm vào phần globals:):
+  #   g_dis_phase:   int,   restore_value: no,  initial_value: '0'
+  #   g_dis_ceiling: float, restore_value: no,  initial_value: '-1.0'
+  #   g_dis_k_est:   float, restore_value: yes, initial_value: '4.0'
+  # (g_startup_ms, g_startup_done, g_force_dis_stop đã có từ trước)
   # =================================================================
   - platform: copy
     source_id: min_cell_voltage
@@ -706,8 +710,7 @@ sensor:
             // Phase timing — phase_enter_ms reused làm k_log_ms sau PH0
             static unsigned long phase_enter_ms      = 0;
             static unsigned long ramp_last_ms        = 0;
-            // Plateau: chỉ cần B trước bước (dc luôn = step_a ≥ 2A, không cần plat_c_prev)
-            static float         plat_b_prev         = 0.0f;
+
             // K learning refs
             static float         k_v0               = 0.0f;
             static float         k_i0               = 0.0f;
@@ -751,7 +754,10 @@ sensor:
             bool  dis_enabled = id(switch_discharging).state;
             float soc_stop    = id(can_soc_stop_discharging).state;
             float taper_start = uvp + gap;
-            float probe_start_a = std::max(5.0f, max_i * 0.05f);
+            // [B1] Safe start: nếu sát UVP thì 1A, bình thường 5A
+            float v_head_now    = smv - uvp;
+            float probe_start_a = (v_head_now < gap * 0.3f) ? 1.0f
+                                  : std::max(5.0f, max_i * 0.05f);
             float step_a        = std::max(2.0f, max_i * 0.05f);
 
             bool is_charging    = current_val > 0.5f;
@@ -876,7 +882,6 @@ sensor:
               phase_enter_ms  = now;  // PH0 timer (reused làm k_log sau PH0)
               ramp_last_ms    = now;
               ph = 0;
-              plat_b_prev = -current_val;   // seed plateau ref
               k_v0 = smv; k_i0 = -current_val; k_t0 = now;
               id(g_dis_phase) = 0;
               // ceiling KHÔNG reset — chỉ reset khi chuyển sang sạc
@@ -943,14 +948,16 @@ sensor:
 
             // ══════════════════════════════════════════════
             // [PH1] RAMP + PLATEAU DETECT
+            // [B2] Sau mỗi step: gap = C - B > 3A → tải bão hòa → lock Cx
             // ══════════════════════════════════════════════
             if (ph == 1) {
               unsigned long step_int = (smv <= taper_start) ? STEP_INT_TAPER : STEP_INT_NORM;
 
               if ((now - ramp_last_ms) >= step_int) {
                 float i_actual = -current_val;
+                float c_gap    = current_out_a - i_actual;  // C - B
 
-                // Probe ceiling
+                // Probe ceiling: k guard + session ceiling
                 float probe_ceil = (uvp_trip_ceiling > 0.0f) ? uvp_trip_ceiling : max_i;
                 if (k_est > K_MIN) {
                   float ig = (smv - uvp) / k_est * K_SAFETY_PROBE;
@@ -961,15 +968,16 @@ sensor:
                 bool near_taper = (smv <= taper_start + gap * 0.5f);
                 bool at_ceil    = (current_out_a >= probe_ceil - 0.5f);
 
-                // PLATEAU: C tăng step_a ≥ 2A, B chỉ thay đổi < 0.5A
-                float db = i_actual - plat_b_prev;
-                bool plateau = (std::abs(db) < 0.5f && i_actual > probe_start_a);
+                // [B2] C - B > 3A → tải bão hòa → jump Cx ngay
+                bool plateau = (c_gap > 3.0f && i_actual > probe_start_a);
 
                 if (plateau || near_taper || at_ceil) {
-                  float v_head = std::max(0.0f, smv - uvp);
-                  float k_safe = (k_est > K_MIN)
-                                 ? v_head / k_est * K_SAFETY_LOCK : current_out_a;
+                  float v_head  = std::max(0.0f, smv - uvp);
+                  float k_safe  = (k_est > K_MIN)
+                                  ? v_head / k_est * K_SAFETY_LOCK : current_out_a;
                   k_safe = std::max(probe_start_a, std::min(max_i, k_safe));
+
+                  // Cx = min(B_actual, k_safe) — không vượt nhu cầu thực
                   float new_ceil = plateau
                                    ? std::min(i_actual, k_safe)
                                    : std::min(current_out_a, k_safe);
@@ -981,15 +989,16 @@ sensor:
                   id(g_dis_phase)   = 2;
                   current_out_a     = ceiling;
                   if (near_taper && uvp_trip_ceiling > 0.0f) uvp_trip_ceiling = -1.0f;
-                  ESP_LOGI("DIS", "%s: B=%.1f ΔB=%.1f → ceil=%.1fA k=%.2f",
-                           plateau?"PLATEAU":"FORCE", i_actual, db, ceiling, k_est);
+
+                  ESP_LOGI("DIS", "%s: C=%.1fA B=%.1fA gap=%.1fA → Cx=%.1fA k=%.2f",
+                           plateau ? "PLATEAU(gap>3A)" : "FORCE",
+                           current_out_a, i_actual, c_gap, ceiling, k_est);
                 } else {
-                  // Snapshot B TRƯỚC bước tiếp theo
-                  plat_b_prev = i_actual;
+                  // Tiếp tục ramp
                   float next_i = std::min({max_i, probe_ceil, current_out_a + step_a});
                   if (next_i > current_out_a + 0.1f) {
-                    ESP_LOGI("DIS", "RAMP %.1f→%.1fA B=%.1f ΔB=%.1f",
-                             current_out_a, next_i, i_actual, db);
+                    ESP_LOGI("DIS", "RAMP %.1f→%.1fA | B=%.1fA gap=%.1fA",
+                             current_out_a, next_i, i_actual, c_gap);
                     current_out_a = next_i;
                   }
                   ramp_last_ms = now;
@@ -1025,8 +1034,8 @@ sensor:
               ESP_LOGI("DIS", "→%.1fA V=%.0f k=%.2f PH%d",
                        current_out_a, smv, k_est, ph);
             }
-            id(discharging_a) = (int)current_out_a;
-
+            id(discharging_a) = (int)current_out_a;  
+  
 # =================================================================
 # STATUS SENSORS (unchanged structure, updated labels)
 # =================================================================
