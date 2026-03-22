@@ -662,22 +662,30 @@ sensor:
 
 
   # =================================================================
-  # DISCHARGE CONTROL V4.5 → [V8] PATCH
-  # Changes vs V4.5:
-  #  [V8-T] Taper exponent 1.5→2.5, MIN_TAPER_FACTOR removed
-  #         → current reaches 0 naturally at UVP (no relay-trip floor)
-  #  [V8-A] Asymmetric EMA in taper:
-  #         alpha_drop=0.35 (fast down), alpha_rise=0.05/0.10 (slow up)
-  #         → voltage spike → current drops in 2-3 ticks, not 10
-  #  [V8-H] deep_taper hysteresis flag (set pos>=0.55, clear pos<=0.15)
-  #         → once deep in taper, current rises only as a crawl
-  #         → prevents: reduce→V recover→increase→V sag loop
-  #  [V8-R] R_est: online ΔV/ΔI estimation from BMS actual current
-  #         → tracks cell internal resistance continuously
-  #         → seeds from 8.0 mV/A, bounded [0.5, 60] mV/A
-  #  [V8-P] Predictive cap: i_safe = headroom_mV / R_est * 0.60
-  #         applied in taper zone, adaptive zone, AND probe ceiling
-  #         → never requests more current than cell can deliver above UVP
+  # DISCHARGE CONTROL V9 — RATCHET CEILING
+  # Replaces V4.5 discharge lambda entirely.
+  # =================================================================
+  # [V9-K] k_est: online ΔV/ΔI learning trong normal zone
+  #        → seed 4.0 mV/A (conservative LFP end-of-discharge)
+  #        → học mỗi khi tải thay đổi ≥5A trong trạng thái ổn định
+  #        → EMA 0.20: cập nhật nhanh hơn R_est V8, bỏ điều kiện dt phức tạp
+  #
+  # [V9-C] dis_ceiling: van một chiều — chỉ giảm, không bao giờ tăng
+  #        → set khi vào taper: min(current_out_a, v_head/k_est * 0.70)
+  #        → mỗi tick: dis_ceiling = min(dis_ceiling, v_head/k_est * 0.65)
+  #        → current_out_a = dis_ceiling trực tiếp, không qua EMA
+  #        → khi V↑ (tải giảm): dis_ceiling KHÔNG tăng (ratchet)
+  #
+  # [V9-Z] Tự nhiên về 0: khi smv → UVP, v_head → 0 → k_ceil → 0
+  #        → không cần MIN_TAPER_FACTOR, không cần exponent
+  #        → không có sàn nào gây relay trip
+  #
+  # [V9-N] Normal zone: adaptive EMA giữ nguyên V4.5, nhưng nếu
+  #        đã vào taper trong phiên (taper_lock=true), cap thêm bởi dis_ceiling
+  #        → nếu V hồi phục lên normal zone sau khi đã taper → vẫn giữ ceiling
+  #
+  # [V9-R] Reset: dis_ceiling chỉ clear khi new session (was_discharging edge)
+  #        hoặc re-enable sau cooldown — không clear khi V bounce
   # =================================================================
   - platform: copy
     source_id: min_cell_voltage
@@ -706,36 +714,46 @@ sensor:
             static float last_published          = -1.0f;
             static unsigned long last_adj        = 0;
 
-            // [V4] EMA smoothing state
+            // [V4] EMA — chỉ dùng ở normal/probe zone, không dùng trong taper V9
             static float ema_target_dis          = 5.0f;
 
-            // ── [V8] ADAPTIVE TAPER STATE ──────────────────
-            // [V8-R] Online R_internal estimation (mV/A)
-            static float         r_est_dis  = 8.0f;  // seed: 8 mV/A typical LFP end-of-discharge
-            static float         smv_r0     = 0.0f;  // reference smv snapshot
-            static float         i_r0       = 0.0f;  // reference i_actual snapshot (positive)
-            static unsigned long ms_r0      = 0;     // reference timestamp
-            // [V8-H] Hysteresis: once deep in taper, rise is suppressed
-            static bool          deep_taper = false;
+            // ── [V9] RATCHET CEILING STATE ─────────────────
+            // [V9-C] Van một chiều: chỉ giảm, không tăng
+            static float         dis_ceiling     = -1.0f;  // -1 = chưa set
+            static float         dis_ceiling_ref = -1.0f;  // mức lúc vào taper (log only)
+            static bool          taper_lock      = false;  // đã vào taper chưa
+
+            // [V9-K] K learning state
+            // k_est: mV sụt áp per cell / A dòng xả (internal resistance view)
+            // Seed 4.0 mV/A: conservative cho LFP cuối discharge
+            // Ví dụ thực tế 280Ah 16S: ~1–3 mV/A normal, ~3–6 mV/A sâu cuối
+            static float         k_est           = 4.0f;
+            static float         k_i_ref         = -1.0f;  // -1 = chưa có ref
+            static float         k_v_ref         = 0.0f;
+            static unsigned long k_ref_ms        = 0;
+            static unsigned long k_last_log      = 0;
 
             // ── CONSTANTS ──────────────────────────────────
             static const unsigned long STARTUP_HOLD_MS  = 10000UL;
             static const unsigned long PROBE_STEP_MS    = 10000UL;
             static const float         PROBE_START_A    = 5.0f;
-            static const float         TAPER_EXPONENT   = 2.5f;    // [V8-T] was 1.5
-            // MIN_TAPER_FACTOR removed [V8-T]: taper → 0 at UVP naturally
+            // [V9] Taper dùng k_ceil thay exponent → xóa TAPER_EXPONENT, MIN_TAPER_FACTOR
             static const unsigned long MIN_ADJ_MS       = 2000UL;
             static const unsigned long COOLDOWN_MS      = 30000UL;
             static const float         CEILING_DECAY    = 0.70f;
             static const float         CEILING_MIN_A    = 1.0f;
-            // [V8] Predictive cap safety margin: reserve 40% headroom above UVP
-            static const float         R_SAFETY         = 0.60f;   // 60% of R-based safe current
-            static const float         R_SAFETY_PROBE   = 0.80f;   // looser for probe (still in normal zone)
-            static const float         R_SAFETY_ADAPTIVE= 0.80f;   // normal zone guard
+            // [V9-C] Safety factor cho k_ceil
+            static const float         K_SAFETY_ENTRY   = 0.70f;  // lúc vào taper: 70%
+            static const float         K_SAFETY_TAPER   = 0.65f;  // running trong taper: 65%
+            static const float         K_SAFETY_PROBE   = 0.80f;  // probe zone: 80% (lỏng hơn)
+            // [V9-K] Tham số học k
+            static const float         K_ALPHA          = 0.20f;  // EMA cho k learning
+            static const float         K_MIN            = 0.5f;   // mV/A min (LFP rất khỏe)
+            static const float         K_MAX            = 50.0f;  // mV/A max (LFP già/lạnh)
 
             // ── INPUT GUARD ────────────────────────────────
             if (isnan(x) || isnan(id(current).state)) {
-              ESP_LOGW("DIS_V4", "NaN, skip");
+              ESP_LOGW("DIS_V9", "NaN, skip");
               return;
             }
 
@@ -779,11 +797,11 @@ sensor:
               if (id(g_startup_ms) == 0) {
                 id(g_startup_ms)   = (uint32_t)now;
                 id(g_startup_done) = false;
-                ESP_LOGI("DIS_V4", "🔁 BOOT (DIS first): startup timer");
+                ESP_LOGI("DIS_V9", "🔁 BOOT (DIS first): startup timer");
               }
               id(${name}_adaptive_discharging_current).publish_state(current_out_a);
               last_published = current_out_a;
-              ESP_LOGI("DIS_V4", "🔁 BOOT DIS: V=%.1fmV → hold...", smv);
+              ESP_LOGI("DIS_V9", "🔁 BOOT DIS: V=%.1fmV k_est=%.2f", smv, k_est);
               return;
             }
 
@@ -799,15 +817,15 @@ sensor:
             // [V7] FORCE STOP from SOC filter
             // ══════════════════════════════════════════════
             if (id(g_force_dis_stop)) {
-              current_out_a  = 0.0f;
+              current_out_a = 0.0f;
               id(discharging_a) = 0;
               id(g_force_dis_stop) = false;
-              ESP_LOGW("DIS_V4", "🛑 FORCE STOP: SOC filter UVP triggered");
+              ESP_LOGW("DIS_V9", "🛑 FORCE STOP: SOC filter UVP triggered");
               goto publish_dis;
             }
 
             // ══════════════════════════════════════════════
-            // SWITCH RECOVERY + ANTI-HUNTING (unchanged)
+            // SWITCH RECOVERY + ANTI-HUNTING (V4.5 không đổi)
             // ══════════════════════════════════════════════
             if (switch_dis_locked || in_cooldown_dis) {
 
@@ -818,11 +836,12 @@ sensor:
                   uvp_trip_ceiling  = -1.0f;
                   id(switch_discharging).turn_on();
                   was_discharging = false;
-                  deep_taper      = false;  // [V8-H] clear on force-unlock
-                  ESP_LOGI("DIS_V4", "🔓 DIS FORCE-UNLOCK: %s",
+                  // [V9-R] Clear ratchet khi force-unlock
+                  dis_ceiling = -1.0f; taper_lock = false;
+                  ESP_LOGI("DIS_V9", "🔓 DIS FORCE-UNLOCK: %s",
                            auto_mode ? "user→auto" : "chg_session");
                 } else {
-                  ESP_LOGW("DIS_V4", "🛑 DIS CEILING<%.1fA: chờ sạc/auto", CEILING_MIN_A);
+                  ESP_LOGW("DIS_V9", "🛑 DIS CEILING<%.1fA: chờ sạc/auto", CEILING_MIN_A);
                   goto publish_dis;
                 }
               }
@@ -835,7 +854,7 @@ sensor:
 
               if (!cooldown_ok) {
                 if ((now % 5000) < 200)
-                  ESP_LOGI("DIS_V4", "⏳ DIS COOLDOWN: %.0fs | V=%.1fmV",
+                  ESP_LOGI("DIS_V9", "⏳ DIS COOLDOWN: %.0fs | V=%.1fmV",
                            (float)(COOLDOWN_MS - elapsed_cd) / 1000.0f, smv);
                 goto publish_dis;
               }
@@ -852,13 +871,14 @@ sensor:
                 probe_active    = false;
                 probe_done      = false;
                 was_discharging = false;
-                deep_taper      = false;  // [V8-H] clear hysteresis on re-enable
-                ESP_LOGI("DIS_V4", "🔓 DIS RE-ENABLED: %s V=%.1fmV %.1fA",
+                // [V9-R] Clear ratchet khi re-enable (session mới sẽ học lại)
+                dis_ceiling = -1.0f; taper_lock = false;
+                ESP_LOGI("DIS_V9", "🔓 DIS RE-ENABLED: %s V=%.1fmV %.1fA",
                          v_recovered ? "V_ok" : now_auto ? "auto" : "chg",
                          smv, safe_start);
               } else {
                 if ((now % 5000) < 200)
-                  ESP_LOGI("DIS_V4", "⏸ DIS WAIT: %.1fmV > %.1fmV needed",
+                  ESP_LOGI("DIS_V9", "⏸ DIS WAIT: %.1fmV > %.1fmV needed",
                            smv, uvp + gap * 1.5f);
                 goto publish_dis;
               }
@@ -871,7 +891,7 @@ sensor:
               current_out_a = 0.0f;
               probe_active  = false;
               if (!dis_enabled) {
-                ESP_LOGW("DIS_V4", "🚫 DIS DISABLED");
+                ESP_LOGW("DIS_V9", "🚫 DIS DISABLED");
               } else {
                 float trip_i = last_published > 0.0f ? last_published : probe_start_a;
                 float new_ceiling = (uvp_trip_ceiling > 0.0f)
@@ -882,14 +902,14 @@ sensor:
                 cooldown_start_dis = now;
 
                 if (auto_mode) {
-                  ESP_LOGW("DIS_V4", "🚨 UVP AUTO: %.1fmV %.1fA → SOC=%.0f%% ceiling→%.1fA",
+                  ESP_LOGW("DIS_V9", "🚨 UVP AUTO: %.1fmV %.1fA → SOC=%.0f%% ceil→%.1fA",
                            smv, trip_i, soc_stop, uvp_trip_ceiling);
                   id(capacity_remaining)->publish_state(soc_stop);
                 } else {
                   if (!switch_dis_locked) {
                     switch_dis_locked = true;
                     id(switch_discharging).turn_off();
-                    ESP_LOGW("DIS_V4", "🚨 UVP MANUAL: %.1fmV STOP+LOCK ceiling→%.1fA",
+                    ESP_LOGW("DIS_V9", "🚨 UVP MANUAL: %.1fmV STOP+LOCK ceil→%.1fA",
                              smv, uvp_trip_ceiling);
                   }
                 }
@@ -907,129 +927,138 @@ sensor:
               ema_target_dis  = probe_start_a;
               probe_last_step = now;
               last_adj        = now;
-              // [V8-R] Reset R tracking on new session (keep r_est — it's still valid)
-              ms_r0 = 0; smv_r0 = 0.0f; i_r0 = 0.0f;
-              deep_taper = false;  // [V8-H] fresh session starts with no hysteresis
-              ESP_LOGI("DIS_V4", "🔄 NEW DIS SESSION: probe %.1fA (R_est=%.1fmΩ)",
-                       probe_start_a, r_est_dis);
+              // [V9-R] Reset ratchet cho session mới
+              dis_ceiling     = -1.0f;
+              dis_ceiling_ref = -1.0f;
+              taper_lock      = false;
+              // [V9-K] Reset learning ref (giữ k_est đã học từ session trước)
+              k_i_ref = -1.0f; k_v_ref = 0.0f; k_ref_ms = now;
+              ESP_LOGI("DIS_V9", "🔄 NEW DIS SESSION: probe %.1fA | k_est=%.2f mV/A",
+                       probe_start_a, k_est);
             }
             was_discharging = is_discharging;
 
             // ══════════════════════════════════════════════
-            // [V8-R] ONLINE R_EST UPDATE
-            // Uses actual BMS current (Hall sensor) vs smoothed cell voltage.
-            // Updates only when: discharging, ≥3s since last snapshot,
-            // actual current increased ≥3A AND voltage dropped ≥1.5mV.
-            // This captures the true I-V relationship without noise.
+            // [V9-K] K LEARNING — chạy khi đang xả trong normal zone
+            // Nguyên lý: đo ΔV/ΔI khi tải thay đổi ổn định
+            // Chỉ học khi smv > taper_start (tránh nhiễu cuối discharge)
             // ══════════════════════════════════════════════
-            if (is_discharging) {
-              float i_actual = -current_val;  // positive magnitude
-              if (ms_r0 == 0) {
-                // Seed snapshot at first discharging tick
-                smv_r0 = smv; i_r0 = i_actual; ms_r0 = now;
-              } else if ((now - ms_r0) >= 3000UL) {
-                float di = i_actual - i_r0;   // positive = more load
-                float dv = smv_r0 - smv;      // positive = voltage dropped
-                if (di > 3.0f && dv > 1.5f) {
-                  float r_sample = dv / di;   // mV/A
-                  if (r_sample > 0.3f && r_sample < 80.0f) {
-                    r_est_dis = 0.20f * r_sample + 0.80f * r_est_dis;
-                    r_est_dis = std::max(0.5f, std::min(60.0f, r_est_dis));
-                    ESP_LOGI("DIS_V4", "📐 R_est→%.2fmΩ (ΔI=+%.1fA ΔV=-%.1fmV)",
-                             r_est_dis, di, dv);
+            if (is_discharging && smv > taper_start && !probe_active) {
+              float i_actual = -current_val;  // dương = đang xả
+              if (k_i_ref < 0.0f) {
+                // Lần đầu: seed reference
+                k_i_ref = i_actual; k_v_ref = smv; k_ref_ms = now;
+              } else {
+                float di = i_actual - k_i_ref;   // dương = tải tăng
+                float dv = k_v_ref - smv;         // dương = V giảm
+                unsigned long dt = now - k_ref_ms;
+
+                // Học khi: tải tăng ≥5A, V giảm ≥2mV, đủ thời gian settle (3-25s)
+                if (di >= 5.0f && dv >= 2.0f && dt >= 3000UL && dt <= 25000UL) {
+                  float k_sample = dv / di;
+                  if (k_sample >= K_MIN && k_sample <= K_MAX) {
+                    float k_old = k_est;
+                    k_est = K_ALPHA * k_sample + (1.0f - K_ALPHA) * k_est;
+                    k_est = std::max(K_MIN, std::min(K_MAX, k_est));
+                    ESP_LOGI("DIS_V9", "📐 k_est: %.2f→%.2f mV/A (ΔI=+%.1fA ΔV=-%.1fmV dt=%.0fs)",
+                             k_old, k_est, di, dv, (float)dt/1000.0f);
                   }
+                  // Update ref sau khi học
+                  k_i_ref = i_actual; k_v_ref = smv; k_ref_ms = now;
+                } else if (std::abs(di) < 1.0f && dt > 8000UL) {
+                  // Current ổn định đủ lâu → refresh reference
+                  k_i_ref = i_actual; k_v_ref = smv; k_ref_ms = now;
                 }
-                smv_r0 = smv; i_r0 = i_actual; ms_r0 = now;
+              }
+              // Log k_est mỗi 30s
+              if (now - k_last_log > 30000UL) {
+                k_last_log = now;
+                ESP_LOGI("DIS_V9", "📊 k_est=%.2f mV/A | V=%.1fmV | I=%.1fA",
+                         k_est, smv, -current_val);
               }
             }
 
             // ══════════════════════════════════════════════
-            // [V8-P] PREDICTIVE SAFE CURRENT (helper, used below)
-            // Headroom above UVP divided by estimated R_internal.
-            // Safety factor 60% in taper (tight), 80% in normal zone (relaxed).
-            // Returns max_i when R_est not yet reliable (<0.5 mV/A).
-            // ══════════════════════════════════════════════
-            // (computed inline where needed to use the right safety factor)
-
-            // ══════════════════════════════════════════════
-            // TAPER ZONE: uvp < smv ≤ taper_start
-            // [V8] Complete redesign of auto_mode branch
+            // [V9] TAPER ZONE — RATCHET CEILING
+            // uvp < smv ≤ taper_start
+            // Không EMA, không exponent, không sàn
+            // dis_ceiling = van một chiều, chỉ giảm
             // ══════════════════════════════════════════════
             if (is_discharging && gap > 1.0f && smv <= taper_start) {
+
               if (probe_active) {
                 probe_active   = false;
                 probe_done     = true;
                 ema_target_dis = current_out_a;
-                ESP_LOGI("DIS_V4", "🔍 PROBE END → TAPER: %.1fA V=%.1fmV", current_out_a, smv);
+                ESP_LOGI("DIS_V9", "🔍 PROBE END → TAPER: %.1fA V=%.1fmV", current_out_a, smv);
               }
 
-              float pos = (taper_start - smv) / gap;
-              pos = std::max(0.0f, std::min(1.0f, pos));
-
-              // [V8-H] Deep taper hysteresis:
-              //   Set once pos crosses 0.55 (55% into gap below taper_start).
-              //   Only cleared when pos drops back to 0.15 (well-recovered).
-              //   While set: EMA rise is suppressed to a crawl (alpha_rise=0.05).
-              if (pos >= 0.55f) deep_taper = true;
-              else if (pos <= 0.15f) deep_taper = false;
-
-              // [V8-P] Predictive cap in taper zone (60% safety margin)
-              float v_headroom  = smv - uvp;
-              float i_safe_taper = (r_est_dis > 0.5f)
-                                   ? (v_headroom / r_est_dis) * R_SAFETY
-                                   : max_i;
-              i_safe_taper = std::max(0.0f, std::min(max_i, i_safe_taper));
-
               if (auto_mode) {
-                // [V8-T] Steeper curve (exp 2.5), NO floor → smoothly → 0 at pos=1
-                float curve_target = max_i * std::pow(1.0f - pos, TAPER_EXPONENT);
-                curve_target = std::max(0.0f, curve_target);
+                float v_head = smv - uvp;  // headroom trên UVP (mV)
+                v_head = std::max(0.0f, v_head);
 
-                // Take the more conservative of: taper curve AND predictive cap
-                float target = std::min(curve_target, i_safe_taper);
-
-                bool can_adj = (now - last_adj) >= MIN_ADJ_MS;
-                if (can_adj) {
-                  // [V8-A] Asymmetric EMA:
-                  //   Drop  → fast  (0.35): responds in ~2 ticks when V sags
-                  //   Rise  → slow  (0.10): gentle rise when V recovers in shallow taper
-                  //   Rise  → crawl (0.05): hysteresis when deep in taper
-                  float alpha = (target < ema_target_dis)
-                                ? 0.35f
-                                : (deep_taper ? 0.05f : 0.10f);
-
-                  ema_target_dis = alpha * target + (1.0f - alpha) * ema_target_dis;
-                  // min(instant_target, EMA): fast-drop guarantee retained from V4
-                  float smoothed = std::min(target, ema_target_dis);
-
-                  // Tighter deadband in taper zone [V8]: 0.2A (was 0.5A)
-                  if (std::abs(current_out_a - smoothed) >= 0.2f) {
-                    current_out_a = smoothed;
-                  }
-                  last_adj = now;
+                // [V9-C] Lần đầu vào taper: set ceiling ban đầu
+                if (!taper_lock) {
+                  taper_lock = true;
+                  float k_safe_entry = (k_est > K_MIN)
+                                       ? v_head / k_est * K_SAFETY_ENTRY
+                                       : current_out_a;
+                  k_safe_entry = std::max(0.0f, std::min(max_i, k_safe_entry));
+                  dis_ceiling     = std::min(current_out_a, k_safe_entry);
+                  dis_ceiling_ref = dis_ceiling;
+                  ema_target_dis  = dis_ceiling;  // sync EMA
+                  ESP_LOGI("DIS_V9",
+                    "🔒 TAPER ENTRY: I=%.1fA v_head=%.1fmV k=%.2f → ceil=%.1fA",
+                    current_out_a, v_head, k_est, dis_ceiling);
                 }
+
+                // [V9-C] K-based ceiling: v_head/k * safety
+                // Tự nhiên → 0 khi smv → UVP, không cần bất kỳ điều kiện nào
+                float k_ceil = (k_est > K_MIN)
+                               ? v_head / k_est * K_SAFETY_TAPER
+                               : dis_ceiling;
+                k_ceil = std::max(0.0f, std::min(max_i, k_ceil));
+
+                // RATCHET: chỉ giảm — đây là điểm then chốt chống hunting
+                // Khi V↑ (tải giảm): k_ceil↑ nhưng min() giữ dis_ceiling
+                // Khi V↓ (tải tăng): k_ceil↓ → dis_ceiling↓ theo
+                float new_ceil = std::min(dis_ceiling, k_ceil);
+                if (new_ceil < dis_ceiling - 0.5f) {
+                  ESP_LOGI("DIS_V9",
+                    "🔻 CEIL↓: %.1fA→%.1fA | v_head=%.1fmV k=%.2f",
+                    dis_ceiling, new_ceil, v_head, k_est);
+                }
+                dis_ceiling = new_ceil;
+
+                // Hard output: không EMA, không smoothing
+                // Inverter nhận lệnh giảm ngay lập tức khi cần
+                current_out_a  = dis_ceiling;
+                ema_target_dis = dis_ceiling;  // keep in sync
+
+                // Periodic log trong taper
                 if ((now % 3000) < 300)
-                  ESP_LOGI("DIS_V4",
-                    "📉 TAPER[V8]: pos=%.2f cur=%.1fA curve=%.1fA pred=%.1fA R=%.1f deep=%d",
-                    pos, current_out_a, max_i * std::pow(1.0f-pos, TAPER_EXPONENT),
-                    i_safe_taper, r_est_dis, (int)deep_taper);
+                  ESP_LOGI("DIS_V9",
+                    "📉 TAPER[V9]: V=%.1fmV head=%.1fmV ceil=%.1fA k=%.2f",
+                    smv, v_head, dis_ceiling, k_est);
+
               } else {
+                // Manual mode: không áp dụng ratchet
                 current_out_a  = max_i;
                 ema_target_dis = max_i;
-                deep_taper     = false;  // manual mode: no hysteresis
-                ESP_LOGI("DIS_V4", "📉 TAPER MANUAL: %.1fA", max_i);
+                dis_ceiling    = max_i;
+                ESP_LOGI("DIS_V9", "📉 TAPER MANUAL: %.1fA", max_i);
               }
               goto publish_dis;
             }
 
-            // Outside taper zone: clear deep_taper only when well clear (pos<0.15 equivalent)
-            // i.e. smv > taper_start + gap * 0.15 is already handled by pos<0.15 path above,
-            // but on exit we also clear to be safe.
-            if (smv > taper_start + gap * 0.20f) {
-              deep_taper = false;  // [V8-H] well outside taper → reset
-            }
+            // ══════════════════════════════════════════════
+            // NORMAL ZONE (smv > taper_start)
+            // [V9-N] Nếu đã từng vào taper: vẫn cap bởi dis_ceiling
+            // Tránh trường hợp V bounce lên trên taper_start, rồi kéo I lên cao
+            // và sag ngay khi V vừa tụt xuống taper_start lần nữa
+            // ══════════════════════════════════════════════
 
-            // ── EDGE DETECTION auto↔manual (unchanged) ────
+            // ── EDGE DETECTION auto↔manual (không đổi) ────
             {
               bool switched_to_manual = ( prev_auto_mode && !auto_mode);
               bool switched_to_auto   = (!prev_auto_mode &&  auto_mode);
@@ -1041,7 +1070,9 @@ sensor:
                 current_out_a  = max_i;
                 ema_target_dis = max_i;
                 last_published = -1.0f;
-                ESP_LOGI("DIS_V4", "🔧 → MANUAL: %.1fA", max_i);
+                // Manual mode: tắt ratchet
+                dis_ceiling = -1.0f; taper_lock = false;
+                ESP_LOGI("DIS_V9", "🔧 → MANUAL: %.1fA (ratchet cleared)", max_i);
               } else if (!auto_mode && std::abs(current_out_a - max_i) > 0.5f) {
                 current_out_a  = max_i;
                 ema_target_dis = max_i;
@@ -1051,8 +1082,8 @@ sensor:
                   probe_active    = true;
                   probe_last_step = now;
                 }
-                ESP_LOGI("DIS_V4", "🔄 → AUTO: %.1fA probe=%s",
-                         current_out_a, probe_active ? "active" : "done");
+                ESP_LOGI("DIS_V9", "🔄 → AUTO: %.1fA probe=%s taper_lock=%d",
+                         current_out_a, probe_active ? "active" : "done", (int)taper_lock);
               }
             }
 
@@ -1065,7 +1096,7 @@ sensor:
               goto publish_dis;
             }
 
-            // ── [V3] PROBE PHASE: zone-based steps ─────────
+            // ── [V3] PROBE PHASE: zone-based steps (không đổi) ──
             if (probe_active) {
               float dist_to_uvp = (smv - uvp) - sag_v;
               dist_to_uvp = std::max(0.0f, dist_to_uvp);
@@ -1083,34 +1114,40 @@ sensor:
                 step_interval = PROBE_STEP_MS;
               }
 
+              // [V9-N] Probe ceiling cũng bị giới hạn bởi dis_ceiling nếu đã set
               float probe_ceil = (uvp_trip_ceiling > 0.0f) ? uvp_trip_ceiling : max_i;
-              // [V8-P] Probe ceiling also capped by R_est safe current (looser: 80%)
-              if (r_est_dis > 0.5f) {
-                float v_headroom  = smv - uvp;
-                float i_r_probe   = (v_headroom / r_est_dis) * R_SAFETY_PROBE;
-                i_r_probe = std::max(probe_start_a, i_r_probe);
-                probe_ceil = std::min(probe_ceil, i_r_probe);
+              if (taper_lock && dis_ceiling >= 0.0f) {
+                probe_ceil = std::min(probe_ceil, dis_ceiling);
+              }
+              // [V9-K] Thêm guard từ k_est ngay trong probe (K_SAFETY_PROBE = 80%)
+              if (k_est > K_MIN) {
+                float v_head  = smv - uvp;
+                float k_probe = v_head / k_est * K_SAFETY_PROBE;
+                k_probe = std::max(probe_start_a, k_probe);
+                probe_ceil = std::min(probe_ceil, k_probe);
               }
 
-              bool near_taper  = (smv <= taper_start + gap);
-              bool at_max      = (current_out_a >= std::min(max_i, probe_ceil) - 0.5f);
+              bool near_taper = (smv <= taper_start + gap);
+              bool at_max     = (current_out_a >= std::min(max_i, probe_ceil) - 0.5f);
 
               if (near_taper || at_max) {
                 probe_active   = false;
                 probe_done     = true;
                 ema_target_dis = current_out_a;
                 if (near_taper && uvp_trip_ceiling > 0.0f) {
-                  ESP_LOGI("DIS_V4", "🟢 PROBE OK → ceiling reset (%.1fA→free)", uvp_trip_ceiling);
+                  ESP_LOGI("DIS_V9", "🟢 PROBE OK → uvp_ceiling reset (%.1fA→free)",
+                           uvp_trip_ceiling);
                   uvp_trip_ceiling = -1.0f;
                 }
-                ESP_LOGI("DIS_V4", "🔍 PROBE DONE: V=%.1fmV I=%.1fA reason=%s",
+                ESP_LOGI("DIS_V9", "🔍 PROBE DONE: V=%.1fmV I=%.1fA reason=%s",
                          smv, current_out_a, near_taper ? "near_taper" : "at_max_i");
               } else {
                 bool step_time = (now - probe_last_step) >= step_interval;
                 if (step_time) {
                   float next_i = std::min({max_i, probe_ceil, current_out_a + probe_step_a});
-                  ESP_LOGI("DIS_V4", "🔍 PROBE STEP: %.1fA→%.1fA (step=%.1fA dist=%.0fmV ceil=%.1fA)",
-                           current_out_a, next_i, probe_step_a, dist_to_uvp, probe_ceil);
+                  ESP_LOGI("DIS_V9",
+                    "🔍 PROBE STEP: %.1fA→%.1fA (step=%.1fA dist=%.0fmV ceil=%.1fA)",
+                    current_out_a, next_i, probe_step_a, dist_to_uvp, probe_ceil);
                   current_out_a   = next_i;
                   probe_last_step = now;
                 }
@@ -1118,7 +1155,8 @@ sensor:
               }
             }
 
-            // ── [V4/V8] ADAPTIVE PHASE: EMA + R_est guard ──
+            // ── [V4] ADAPTIVE PHASE (V4.5 EMA, không đổi) ──
+            // [V9-N] Thêm dis_ceiling cap nếu đã từng vào taper
             {
               bool can_adj = (now - last_adj) >= MIN_ADJ_MS;
               if (can_adj) {
@@ -1135,21 +1173,14 @@ sensor:
                 }
                 target = std::max(max_i * 0.1f, std::min(max_i, target));
 
-                // [V8-P] R_est guard in normal zone: prevent sag into taper on next tick
-                if (r_est_dis > 0.5f) {
-                  float v_headroom  = smv - uvp;
-                  float i_r_guard   = (v_headroom / r_est_dis) * R_SAFETY_ADAPTIVE;
-                  i_r_guard = std::max(max_i * 0.1f, i_r_guard);
-                  target = std::min(target, i_r_guard);
+                // [V9-N] Cap bởi ratchet ceiling nếu đã từng vào taper phiên này
+                // Ngăn I tăng cao rồi lại sag khi V bounce về normal zone
+                if (taper_lock && dis_ceiling >= 0.0f) {
+                  target = std::min(target, dis_ceiling);
                 }
 
-                // [V8-A] Asymmetric EMA in adaptive zone too
-                // If recently in deep taper: rise is suppressed (alpha_up=0.04)
-                float alpha_d = 0.15f;
-                float alpha_u = deep_taper ? 0.04f : 0.15f;
-                float alpha   = (target < ema_target_dis) ? alpha_d : alpha_u;
-
-                ema_target_dis = alpha * target + (1.0f - alpha) * ema_target_dis;
+                // V4.5 EMA (giữ nguyên cho normal zone)
+                ema_target_dis = 0.15f * target + 0.85f * ema_target_dis;
                 float smoothed = std::min(target, ema_target_dis);
 
                 if (std::abs(current_out_a - smoothed) >= 0.5f) {
@@ -1157,8 +1188,10 @@ sensor:
                   last_adj = now;
                 }
 
-                ESP_LOGI("DIS_V4", "🎯 ADAPTIVE[V8]: dist_eff=%.1fmV tgt=%.1fA I=%.1fA R=%.1f deep=%d",
-                         dist_eff, target, current_out_a, r_est_dis, (int)deep_taper);
+                ESP_LOGI("DIS_V9",
+                  "🎯 ADAPTIVE: dist_eff=%.1fmV tgt=%.1fA I=%.1fA%s",
+                  dist_eff, target, current_out_a,
+                  (taper_lock && dis_ceiling >= 0.0f) ? " [ratchet]" : "");
               }
             }
 
@@ -1169,9 +1202,11 @@ sensor:
             if (std::abs(current_out_a - last_published) >= 0.3f) {
               id(${name}_adaptive_discharging_current).publish_state(current_out_a);
               last_published = current_out_a;
-              ESP_LOGI("DIS_V4", "📡 DIS→%.1fA | V=%.1fmV | R=%.1f | %s",
-                       current_out_a, smv, r_est_dis,
-                       probe_active ? "PROBE" : (deep_taper ? "TAPER-deep" : "ADAPTIVE"));
+              ESP_LOGI("DIS_V9", "📡 DIS→%.1fA | V=%.1fmV | k=%.2f | %s",
+                       current_out_a, smv, k_est,
+                       probe_active ? "PROBE"
+                       : taper_lock ? "TAPER-ratchet"
+                       : "ADAPTIVE");
             }
             id(discharging_a) = (int)current_out_a;
 
