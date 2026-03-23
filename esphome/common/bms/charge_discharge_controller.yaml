@@ -136,21 +136,24 @@ sensor:
         if (soc >= 98) {
           if (max_cv <= id(can_over_voltage_protection).state) soc = 98;
         } else {
+          uint16_t soc_stop_val = (uint16_t)id(can_soc_stop_discharging).state;
           if (min_cv < id(can_under_voltage_protection).state) {
-            // Dừng xả ngay — ghi thẳng, idempotent, không dùng flag
+            // Dừng xả ngay — ghi thẳng, idempotent
             id(discharging_a) = 0;
-            soc = id(can_soc_stop_discharging).state;
+            soc = soc_stop_val;
           } else if (id(capacity_remaining).state <= id(can_soc_stop_discharging).state) {
             float margin = id(min_cell_voltage).state * 1000.0f
                            - id(can_under_voltage_protection).state;
             float gap    = id(${name}_voltage_recovery_gap).state;
-            soc = (margin > gap) ? id(can_soc_stop_discharging).state + 1
-                                 : id(can_soc_stop_discharging).state;
+            soc = (margin > gap) ? soc_stop_val + 1 : soc_stop_val;
           } else {
             soc = uint16_t(id(capacity_remaining).state);
           }
+          // Clamp tối thiểu — không bao giờ báo dưới soc_stop
+          // tránh inverter cấm sạc do hiểu nhầm SOC=0%
+          if (soc < soc_stop_val) soc = soc_stop_val;
         }
-        // Luôn ghi report_soc ở cuối — một chỗ duy nhất
+        // Một điểm ghi report_soc duy nhất
         id(report_soc) = soc;
         return soc;
 
@@ -268,7 +271,8 @@ sensor:
 
             // ── STARTUP HOLD ───────────────────────────────
             if (!id(g_startup_done)) {
-              id(discharging_a) = 0;
+              // Gửi giá trị nhỏ thay vì 0 — tránh inverter đọc là "Forbidden"
+              id(discharging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
                 id(g_startup_done) = true;
                 ESP_LOGI("DIS", "STARTUP DONE");
@@ -282,17 +286,19 @@ sensor:
               goto publish_dis;
             }
 
-            // ── DIRECTION CHANGE: xả→sạc → reset về SOFTSTART ──
-            // Chỉ reset ở đây, KHÔNG reset do UVP/trip
+            // ── DIRECTION CHANGE: xả→sạc ──────────────────
+            // Reset DIS về SOFTSTART + reset CHG để nó sẵn sàng sạc
             if (is_charging && !was_charging) {
-              if (state != 0) {
-                ESP_LOGI("DIS", "DIR→CHG: SOFTSTART reset (state=%d cx=%.1f ceil=%.1f)",
-                         state, cx, ceiling);
-                state = 0; cx = -1.0f; ceiling = -1.0f;
-                id(g_dis_state) = 0;
-                id(g_dis_cx) = -1.0f;
-                id(g_dis_ceiling) = -1.0f;
-              }
+              ESP_LOGI("DIS", "DIR→CHG: reset DIS(state=%d) + CHG SOFTSTART", state);
+              // Reset discharge
+              state = 0; cx = -1.0f; ceiling = -1.0f;
+              id(g_dis_state) = 0;
+              id(g_dis_cx) = -1.0f;
+              id(g_dis_ceiling) = -1.0f;
+              // Reset charge — tránh CHG bị kẹt STOPPED từ session trước
+              id(g_chg_state) = 0;
+              id(g_chg_cx) = -1.0f;
+              id(g_chg_ceiling) = -1.0f;
             }
             was_charging = is_charging;
 
@@ -598,7 +604,8 @@ sensor:
 
             // ── STARTUP HOLD ───────────────────────────────
             if (!id(g_startup_done)) {
-              id(charging_a) = 0;
+              // Gửi giá trị nhỏ thay vì 0 — tránh inverter đọc là "Forbidden"
+              id(charging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
                 id(g_startup_done) = true;
                 ESP_LOGI("CHG", "STARTUP DONE");
@@ -612,16 +619,19 @@ sensor:
               goto publish_chg;
             }
 
-            // ── DIRECTION CHANGE: sạc→xả → reset về SOFTSTART ──
+            // ── DIRECTION CHANGE: sạc→xả ──────────────────
+            // Reset CHG về SOFTSTART + reset DIS để nó sẵn sàng xả
             if (is_discharging && !was_discharging) {
-              if (state != 0) {
-                ESP_LOGI("CHG", "DIR→DIS: SOFTSTART reset (state=%d cx=%.1f ceil=%.1f)",
-                         state, cx, ceiling);
-                state = 0; cx = -1.0f; ceiling = -1.0f;
-                id(g_chg_state) = 0;
-                id(g_chg_cx) = -1.0f;
-                id(g_chg_ceiling) = -1.0f;
-              }
+              ESP_LOGI("CHG", "DIR→DIS: reset CHG(state=%d) + DIS SOFTSTART", state);
+              // Reset charge
+              state = 0; cx = -1.0f; ceiling = -1.0f;
+              id(g_chg_state) = 0;
+              id(g_chg_cx) = -1.0f;
+              id(g_chg_ceiling) = -1.0f;
+              // Reset discharge — tránh DIS bị kẹt STOPPED từ session trước
+              id(g_dis_state) = 0;
+              id(g_dis_cx) = -1.0f;
+              id(g_dis_ceiling) = -1.0f;
             }
             was_discharging = is_discharging;
 
