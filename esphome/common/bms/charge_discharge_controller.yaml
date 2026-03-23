@@ -389,14 +389,14 @@ sensor:
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
                 if (plateau || at_max) {
-                  // Tìm được Cx — lock và chuyển ADAPTIVE
-                  float cx_cap = calc_cx(CX_SAFE_RATIO, -1.0f);
-                  cx = (float)(int)std::max(1.0f, std::min({max_i, i_actual, cx_cap}));
+                  // Plateau = tải/sag đang ở mức tự nhiên → Cx = max_i
+                  // ADAPTIVE sẽ là người thực sự giới hạn theo voltage
+                  cx = max_i;
                   ceiling = cx; state = 1;
                   id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
                   current_out_a = cx;
-                  ESP_LOGI("DIS", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA → Cx=%.0fA v_head=%.0f",
-                           plateau?"plateau":"max_i", i_actual, c_gap, cx, v_head);
+                  ESP_LOGI("DIS", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA → Cx=max_i=%.0fA",
+                           plateau?"plateau":"at_max", i_actual, c_gap, cx);
                   goto publish_dis;
                 }
 
@@ -413,20 +413,22 @@ sensor:
             }
 
             // ══════════════════════════════════════════════
-            // STATE 1: ADAPTIVE — ratchet chỉ giảm
+            // STATE 1: ADAPTIVE — ratchet CHỈ khi gần UVP
+            // Safe zone: giữ nguyên ceiling, KHÔNG ratchet
+            // Unsafe zone: ratchet nhẹ để tránh UVP
+            // Below UVP: về 0
             // ══════════════════════════════════════════════
             if (state == 1) {
 
-              // Tính ceiling mới theo zone hiện tại
               float k_ceil;
               if (below_uvp) {
                 k_ceil = 0.0f;
               } else if (unsafe_zone) {
-                // Vẫn dùng cap 1A khi ratchet trong unsafe
+                // Gần UVP: ratchet xuống để giảm sag, cap 1A
                 k_ceil = calc_cx(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
               } else {
-                // Safe zone: ratchet bình thường
-                k_ceil = calc_cx(K_RATCH, -1.0f);
+                // Safe zone: voltage ổn, KHÔNG ratchet — giữ nguyên ceiling
+                k_ceil = ceiling;
               }
 
               float new_ceil = std::min(ceiling, k_ceil);
@@ -701,8 +703,9 @@ sensor:
                   if (unsafe_zone) {
                     cx_raw = calc_cx_chg(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
                   } else {
-                    float cx_cap = calc_cx_chg(CX_SAFE_RATIO, -1.0f);
-                    cx_raw = (float)(int)std::max(1.0f, std::min({max_i, i_actual, cx_cap}));
+                    // Plateau/at_max = solar ở mức tự nhiên → Cx = max_i
+                    // ADAPTIVE taper sẽ giới hạn thực theo voltage OVP
+                    cx_raw = max_i;
                   }
                   cx = std::max(0.5f, cx_raw);
                   ceiling = cx; state = 1;
