@@ -137,9 +137,8 @@ sensor:
           if (max_cv <= id(can_over_voltage_protection).state) soc = 98;
         } else {
           if (min_cv < id(can_under_voltage_protection).state) {
-            // Ghi thẳng — idempotent, không dùng flag
+            // Dừng xả ngay — ghi thẳng, idempotent, không dùng flag
             id(discharging_a) = 0;
-            id(report_soc) = id(can_soc_stop_discharging).state;
             soc = id(can_soc_stop_discharging).state;
           } else if (id(capacity_remaining).state <= id(can_soc_stop_discharging).state) {
             float margin = id(min_cell_voltage).state * 1000.0f
@@ -151,6 +150,7 @@ sensor:
             soc = uint16_t(id(capacity_remaining).state);
           }
         }
+        // Luôn ghi report_soc ở cuối — một chỗ duy nhất
         id(report_soc) = soc;
         return soc;
 
