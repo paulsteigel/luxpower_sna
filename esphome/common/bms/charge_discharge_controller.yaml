@@ -660,6 +660,7 @@ sensor:
                     id(g_chg_state) = 2; id(g_chg_ceiling) = 0.0f; id(charging_a) = 0;
                     id(${name}_eoc) = true;
                     id(report_soc) = 100;
+                    id(charge_status) = "FULL";   // status string cho inverter/HA
                     id(${name}_cc_memory_valid) = false;
                     auto t = id(my_time).now();
                     if (t.is_valid()) id(${name}_eoc_timestamp) = t.timestamp;
