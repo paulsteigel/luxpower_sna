@@ -192,9 +192,8 @@ sensor:
             static const unsigned long STEP_INT_MS      = 3000UL;
             static const float         PROBE_A          = 5.0f;
             static const float         PLATEAU_GAP_A    = 3.0f;
-            // CX_UNSAFE_RATIO: dùng trong SOFTSTART (cap 1A) và ADAPTIVE (không cap)
-            static const float         CX_UNSAFE_RATIO  = 0.50f;
-            static const float         CX_UNSAFE_CAP_A  = 1.0f;  // chỉ dùng trong SOFTSTART
+            static const float         CX_SAFE_RATIO    = 0.70f;   // plateau lock: v_head/k_est × 0.7
+            static const float         CX_UNSAFE_RATIO  = 0.50f;   // adaptive ratchet unsafe zone
             static const float         K_MIN            = 0.5f;
             static const float         K_MAX            = 50.0f;
 
@@ -345,20 +344,22 @@ sensor:
                 goto publish_dis;
               }
 
-              // Priority 2: unsafe zone → Cx≤1A, thẳng ADAPTIVE
-              // Cap 1A chỉ tại SOFTSTART — ADAPTIVE sẽ ratchet dần, không cliff
+              // Priority 2: unsafe zone (UVP < smv < UVP+gap)
+              // Spec: Cx=5A → ADAPTIVE ratchet từ 5A xuống tự nhiên theo v_head
+              // KHÔNG cap 1A tại đây — để ADAPTIVE tự scale xuống mượt
               if (unsafe_zone) {
-                float raw = calc_cx(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
-                cx = std::max(0.5f, raw);
+                cx = std::min(5.0f, max_i);
                 ceiling = cx; state = 1;
                 id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
                 current_out_a = cx;
-                ESP_LOGI("DIS", "SOFT→ADAPTIVE(unsafe): Cx=%.1fA v_head=%.0f k=%.2f",
-                         cx, v_head, k_est);
+                ESP_LOGI("DIS", "SOFT→ADAPTIVE(unsafe): Cx=5A v_head=%.0f k=%.2f",
+                         v_head, k_est);
                 goto publish_dis;
               }
 
-              // Priority 3: safe zone → probe 3s → ramp → plateau → Cx=max_i
+              // Priority 3: safe zone → probe 3s → ramp → plateau
+              // Plateau lock: Cx = v_head/k_est × 0.7 (voltage-safe limit tại thời điểm này)
+              // Với 280Ah LFP k_est≈1.0 mV/A: v_head=50mV → Cx≈35A, 100mV → 70A (cap max_i)
               current_out_a = ramp_cur;
               if ((now - soft_start_ms) < SOFT_START_MS) {
                 goto publish_dis;
@@ -367,16 +368,22 @@ sensor:
               {
                 float i_actual = -current_val;
                 float c_gap    = ramp_cur - i_actual;
+                // Plateau: tải không lấy thêm dù limit tăng — bất kể zone
                 bool  plateau  = (c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
                 if (plateau || at_max) {
-                  // Cx = max_i: ADAPTIVE là người thực sự giới hạn theo voltage
-                  cx = max_i; ceiling = cx; state = 1;
+                  // Cx = v_head/k_est × 0.7 — voltage-safe limit tại thời điểm plateau
+                  // k_est học được = mV/A sag của pack
+                  // 280Ah LFP k_est≈1.0: v_head=50mV→35A, 100mV→70A (capped max_i)
+                  // Không floor theo i_actual — nếu v_head thấp thì Cx thấp là đúng
+                  cx = std::max(1.0f, std::min(max_i,
+                         (float)(int)calc_cx(CX_SAFE_RATIO, -1.0f)));
+                  ceiling = cx; state = 1;
                   id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
                   current_out_a = cx;
-                  ESP_LOGI("DIS", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA → Cx=max_i=%.0fA",
-                           plateau?"plateau":"at_max", i_actual, c_gap, cx);
+                  ESP_LOGI("DIS", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA v_head=%.0f k=%.2f → Cx=%.0fA",
+                           plateau?"plateau":"at_max", i_actual, c_gap, v_head, k_est, cx);
                   goto publish_dis;
                 }
 
@@ -512,8 +519,6 @@ sensor:
             static const float         PROBE_A          = 5.0f;
             static const float         PLATEAU_GAP_A    = 3.0f;
             static const float         TAPER_EXP        = 2.0f;
-            static const float         CX_UNSAFE_RATIO  = 0.50f;
-            static const float         CX_UNSAFE_CAP_A  = 1.0f;  // chỉ dùng trong SOFTSTART
             static const float         FREE_ZONE_RATIO  = 1.50f;
 
             // ── INPUT GUARD ────────────────────────────────
@@ -665,7 +670,9 @@ sensor:
               {
                 float i_actual = current_val;
                 float c_gap    = ramp_cur - i_actual;
-                bool  plateau  = (!free_zone && c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
+                // Plateau detection: bất kể zone — "đòi nhiều hơn nhưng không lấy được"
+                // free_zone chỉ ảnh hưởng step interval, không tắt plateau
+                bool  plateau  = (c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
                 if (plateau || at_max || unsafe_zone) {
@@ -673,15 +680,15 @@ sensor:
                     float raw = calc_cx_chg(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
                     cx = std::max(0.5f, raw);
                   } else {
-                    // plateau/at_max: Cx = max_i, ADAPTIVE taper xử lý
+                    // plateau/at_max: Cx = max_i, ADAPTIVE taper xử lý theo voltage
                     cx = max_i;
                   }
                   ceiling = cx; state = 1;
                   id(g_chg_cx) = cx; id(g_chg_ceiling) = ceiling; id(g_chg_state) = 1;
                   current_out_a = cx;
-                  ESP_LOGI("CHG", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA → Cx=%.0fA",
+                  ESP_LOGI("CHG", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA zone=%s → Cx=%.0fA",
                            plateau?"plateau":at_max?"at_max":"unsafe",
-                           i_actual, c_gap, cx);
+                           i_actual, c_gap, free_zone?"FREE":"APPR", cx);
                   goto publish_chg;
                 }
 
