@@ -904,4 +904,4 @@ text_sensor:
       }
       std::string r;
       for (auto& s : w) r += s + " | ";
-      return {r};
+      return {r}; 
