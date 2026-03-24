@@ -7,27 +7,21 @@
 #
 # SOFTSTART = gatekeeper: quyết định Cx một lần duy nhất
 #   - below danger threshold  → Cx=0  → STOPPED  (không qua ADAPTIVE)
-#   - unsafe zone             → Cx=1A → ADAPTIVE
-#   - safe zone               → ramp → plateau → Cx=B → ADAPTIVE
+#   - unsafe zone             → Cx≤1A → ADAPTIVE  (cap 1A chỉ ở đây)
+#   - safe zone               → ramp → plateau → Cx=max_i → ADAPTIVE
 #
-# ADAPTIVE = ratchet chỉ giảm theo voltage headroom
-#   - ceiling < 0.5A          → STOPPED
+# ADAPTIVE = ratchet chỉ giảm, CHỈ khi voltage nguy hiểm
+#   - safe zone:  ceiling giữ nguyên — KHÔNG ratchet
+#   - unsafe zone: ratchet dần theo v_head (không cliff, không cap cứng)
+#   - ceiling < 0.5A → STOPPED
 #
 # STOPPED = giữ output=0, chờ direction change → SOFTSTART mới
 #
 # Reset về SOFTSTART: CHỈ khi đổi chiều (dis→chg hoặc chg→dis)
 #   KHÔNG reset do UVP/OVP trip, KHÔNG reset do cooldown
 #
-# Globals cần khai báo ở file chính:
-#   g_startup_done  bool      no       false
-#   g_startup_ms    uint32_t  no       0
-#   g_dis_state     int       no       0      # 0=SOFT 1=ADAP 2=STOP
-#   g_dis_cx        float     no      -1.0
-#   g_dis_ceiling   float     no      -1.0
-#   g_dis_k_est     float     YES      4.0    # persist qua reboot
-#   g_chg_state     int       no       0
-#   g_chg_cx        float     no      -1.0
-#   g_chg_ceiling   float     no      -1.0
+# Safety: below_uvp / above_ovp dùng RAW voltage (không smooth)
+#         để phản ứng ngay khi chạm ngưỡng nguy hiểm
 # =================================================================
 
 globals:
@@ -117,7 +111,9 @@ sensor:
 
   # ──────────────────────────────────────────────────────────────
   # SOC FILTER
-  # Fix: ghi thẳng discharging_a=0 và report_soc thay vì dùng flag
+  # - Dùng raw min_cv từ BMS (không smooth) để phát hiện UVP ngay
+  # - Clamp report_soc ≥ soc_stop_val tránh inverter cấm sạc
+  # - Ghi thẳng discharging_a=0 khi UVP, idempotent
   # ──────────────────────────────────────────────────────────────
   - platform: copy
     source_id: capacity_remaining
@@ -130,28 +126,28 @@ sensor:
       lambda: !lambda |-
         if (isnan(id(max_cell_voltage).state) || isnan(id(min_cell_voltage).state) ||
             isnan(id(capacity_remaining).state)) return NAN;
-        uint16_t max_cv = id(max_cell_voltage).state * 1000.0;
-        uint16_t min_cv = id(min_cell_voltage).state * 1000.0;
-        uint16_t soc    = id(capacity_remaining).state;
+        uint16_t max_cv     = id(max_cell_voltage).state * 1000.0;
+        uint16_t min_cv     = id(min_cell_voltage).state * 1000.0;
+        uint16_t soc        = id(capacity_remaining).state;
+        uint16_t soc_stop_v = (uint16_t)id(can_soc_stop_discharging).state;
+
         if (soc >= 98) {
           if (max_cv <= id(can_over_voltage_protection).state) soc = 98;
         } else {
-          uint16_t soc_stop_val = (uint16_t)id(can_soc_stop_discharging).state;
           if (min_cv < id(can_under_voltage_protection).state) {
-            // Dừng xả ngay — ghi thẳng, idempotent
+            // UVP: dừng xả ngay — ghi thẳng, idempotent, không dùng flag
             id(discharging_a) = 0;
-            soc = soc_stop_val;
+            soc = soc_stop_v;
           } else if (id(capacity_remaining).state <= id(can_soc_stop_discharging).state) {
             float margin = id(min_cell_voltage).state * 1000.0f
                            - id(can_under_voltage_protection).state;
             float gap    = id(${name}_voltage_recovery_gap).state;
-            soc = (margin > gap) ? soc_stop_val + 1 : soc_stop_val;
+            soc = (margin > gap) ? soc_stop_v + 1 : soc_stop_v;
           } else {
             soc = uint16_t(id(capacity_remaining).state);
           }
-          // Clamp tối thiểu — không bao giờ báo dưới soc_stop
-          // tránh inverter cấm sạc do hiểu nhầm SOC=0%
-          if (soc < soc_stop_val) soc = soc_stop_val;
+          // Clamp — không bao giờ báo dưới soc_stop, tránh inverter cấm sạc
+          if (soc < soc_stop_v) soc = soc_stop_v;
         }
         // Một điểm ghi report_soc duy nhất
         id(report_soc) = soc;
@@ -184,7 +180,7 @@ sensor:
             static unsigned long soft_start_ms   = 0;
             static unsigned long ramp_last_ms    = 0;
             static unsigned long log_ms          = 0;
-            static float         ramp_cur        = 5.0f;  // current target trong SOFTSTART ramp
+            static float         ramp_cur        = 5.0f;
             // k learning
             static float         k_v0            = 0.0f;
             static float         k_i0            = 0.0f;
@@ -192,14 +188,13 @@ sensor:
 
             // ── CONSTANTS ──────────────────────────────────
             static const unsigned long STARTUP_HOLD_MS  = 10000UL;
-            static const unsigned long SOFT_START_MS    = 3000UL;   // probe hold
-            static const unsigned long STEP_INT_MS      = 3000UL;   // ramp step
+            static const unsigned long SOFT_START_MS    = 3000UL;
+            static const unsigned long STEP_INT_MS      = 3000UL;
             static const float         PROBE_A          = 5.0f;
             static const float         PLATEAU_GAP_A    = 3.0f;
-            static const float         K_RATCH          = 0.65f;    // adaptive ratchet ratio
-            static const float         CX_SAFE_RATIO    = 0.70f;    // lock khi tìm plateau
-            static const float         CX_UNSAFE_RATIO  = 0.50f;    // unsafe zone ratio
-            static const float         CX_UNSAFE_CAP_A  = 1.0f;    // cap cứng unsafe
+            // CX_UNSAFE_RATIO: dùng trong SOFTSTART (cap 1A) và ADAPTIVE (không cap)
+            static const float         CX_UNSAFE_RATIO  = 0.50f;
+            static const float         CX_UNSAFE_CAP_A  = 1.0f;  // chỉ dùng trong SOFTSTART
             static const float         K_MIN            = 0.5f;
             static const float         K_MAX            = 50.0f;
 
@@ -225,14 +220,15 @@ sensor:
             float max_i       = id(discharging_current).state;
             bool  auto_mode   = id(can_switch_auto_discharge_current).state;
             bool  dis_enabled = id(switch_discharging).state;
-            float soc_stop    = id(can_soc_stop_discharging).state;
 
+            // Safety checks dùng RAW (không smooth) — phản ứng ngay
+            bool  below_uvp   = (raw_mv <= uvp);
+            // Zone detection dùng smv (smooth) — tránh flicker
             float v_head      = smv - uvp;
-            bool  below_uvp   = (smv <= uvp);
-            bool  unsafe_zone = (!below_uvp && v_head < gap);   // UVP < smv < UVP+gap
+            bool  unsafe_zone = (!below_uvp && v_head < gap);
             bool  safe_zone   = (v_head >= gap);
 
-            float step_a      = std::max(2.0f, max_i * 0.05f);
+            float step_a         = std::max(2.0f, max_i * 0.05f);
             bool  is_charging    = current_val >  0.5f;
             bool  is_discharging = current_val < -0.5f;
 
@@ -242,8 +238,8 @@ sensor:
             float ceiling = id(g_dis_ceiling);
             float k_est   = id(g_dis_k_est);
 
-            // calc_cx: v_head / k_est × ratio, cap tùy zone
-            // cap < 0 = không cap thêm
+            // calc_cx: v_head / k_est × ratio
+            // cap > 0: áp trần; cap < 0: không cap
             auto calc_cx = [&](float ratio, float cap) -> float {
               float raw = (k_est > K_MIN)
                           ? (v_head / k_est) * ratio
@@ -271,7 +267,6 @@ sensor:
 
             // ── STARTUP HOLD ───────────────────────────────
             if (!id(g_startup_done)) {
-              // Gửi giá trị nhỏ thay vì 0 — tránh inverter đọc là "Forbidden"
               id(discharging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
                 id(g_startup_done) = true;
@@ -287,18 +282,12 @@ sensor:
             }
 
             // ── DIRECTION CHANGE: xả→sạc ──────────────────
-            // Reset DIS về SOFTSTART + reset CHG để nó sẵn sàng sạc
+            // Reset cả DIS lẫn CHG để không bị kẹt STOPPED
             if (is_charging && !was_charging) {
-              ESP_LOGI("DIS", "DIR→CHG: reset DIS(state=%d) + CHG SOFTSTART", state);
-              // Reset discharge
+              ESP_LOGI("DIS", "DIR→CHG: reset DIS(state=%d) + CHG state", state);
               state = 0; cx = -1.0f; ceiling = -1.0f;
-              id(g_dis_state) = 0;
-              id(g_dis_cx) = -1.0f;
-              id(g_dis_ceiling) = -1.0f;
-              // Reset charge — tránh CHG bị kẹt STOPPED từ session trước
-              id(g_chg_state) = 0;
-              id(g_chg_cx) = -1.0f;
-              id(g_chg_ceiling) = -1.0f;
+              id(g_dis_state) = 0; id(g_dis_cx) = -1.0f; id(g_dis_ceiling) = -1.0f;
+              id(g_chg_state) = 0; id(g_chg_cx) = -1.0f; id(g_chg_ceiling) = -1.0f;
             }
             was_charging = is_charging;
 
@@ -311,20 +300,17 @@ sensor:
 
             // ── SESSION EDGE: bắt đầu xả mới ──────────────
             if (is_discharging && !was_discharging) {
-              // Reset về SOFTSTART, không giữ bất kỳ ceiling nào
               state = 0; cx = -1.0f; ceiling = -1.0f;
-              ramp_cur = PROBE_A;
+              ramp_cur = std::min(PROBE_A, max_i);
               soft_start_ms = now; ramp_last_ms = now;
               k_v0 = smv; k_i0 = -current_val; k_t0 = now;
-              id(g_dis_state) = 0;
-              id(g_dis_cx) = -1.0f;
-              id(g_dis_ceiling) = -1.0f;
+              id(g_dis_state) = 0; id(g_dis_cx) = -1.0f; id(g_dis_ceiling) = -1.0f;
               ESP_LOGI("DIS", "SESSION START smv=%.0f zone=%s v_head=%.0f k=%.2f",
                        smv, below_uvp?"DEAD":unsafe_zone?"UNSAFE":"SAFE", v_head, k_est);
             }
             was_discharging = is_discharging;
 
-            // ── K LEARNING (chỉ khi safe zone + ADAPTIVE) ─
+            // ── K LEARNING (safe zone + ADAPTIVE only) ─────
             if (safe_zone && state == 1) {
               float i_act = -current_val;
               float di = i_act - k_i0, dv = k_v0 - smv;
@@ -345,22 +331,22 @@ sensor:
 
             // ══════════════════════════════════════════════
             // STATE 0: SOFTSTART — gatekeeper
-            // Quyết định Cx một lần, không quay lại sau khi xong
+            // Quyết định Cx một lần duy nhất, không quay lại
             // ══════════════════════════════════════════════
             if (state == 0) {
 
-              // ── Priority 1: hard stop ──────────────────
+              // Priority 1: hard stop ────────────────────
               if (!dis_enabled || below_uvp) {
                 cx = 0.0f; state = 2;
-                id(g_dis_cx) = 0.0f; id(g_dis_state) = 2;
+                id(g_dis_cx) = 0.0f; id(g_dis_state) = 2; id(g_dis_ceiling) = 0.0f;
                 current_out_a = 0.0f;
                 ESP_LOGW("DIS", "SOFT→STOPPED: %s smv=%.0f",
                          below_uvp?"below_uvp":"disabled", smv);
                 goto publish_dis;
               }
 
-              // ── Priority 2: unsafe zone (UVP < smv < UVP+gap) ──
-              // Cx=1A cap, thẳng ADAPTIVE — không ramp
+              // Priority 2: unsafe zone → Cx≤1A, thẳng ADAPTIVE
+              // Cap 1A chỉ tại SOFTSTART — ADAPTIVE sẽ ratchet dần, không cliff
               if (unsafe_zone) {
                 float raw = calc_cx(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
                 cx = std::max(0.5f, raw);
@@ -372,16 +358,12 @@ sensor:
                 goto publish_dis;
               }
 
-              // ── Priority 3: safe zone → probe → ramp ──
-              // Probe PROBE_A trong SOFT_START_MS, tick nào cũng check zone
+              // Priority 3: safe zone → probe 3s → ramp → plateau → Cx=max_i
               current_out_a = ramp_cur;
-
-              // Trong thời gian probe: zone check vẫn chạy mỗi tick (đã cover ở trên)
               if ((now - soft_start_ms) < SOFT_START_MS) {
                 goto publish_dis;
               }
 
-              // Hết probe → kiểm tra plateau và ramp
               {
                 float i_actual = -current_val;
                 float c_gap    = ramp_cur - i_actual;
@@ -389,10 +371,8 @@ sensor:
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
                 if (plateau || at_max) {
-                  // Plateau = tải/sag đang ở mức tự nhiên → Cx = max_i
-                  // ADAPTIVE sẽ là người thực sự giới hạn theo voltage
-                  cx = max_i;
-                  ceiling = cx; state = 1;
+                  // Cx = max_i: ADAPTIVE là người thực sự giới hạn theo voltage
+                  cx = max_i; ceiling = cx; state = 1;
                   id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
                   current_out_a = cx;
                   ESP_LOGI("DIS", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA → Cx=max_i=%.0fA",
@@ -400,10 +380,10 @@ sensor:
                   goto publish_dis;
                 }
 
-                // Chưa plateau → step up mỗi STEP_INT_MS
+                // Zone drop trong khi ramp → unsafe hoặc below (priority check ở trên đã cover)
                 if ((now - ramp_last_ms) >= STEP_INT_MS) {
-                  ramp_cur      = std::min(max_i, ramp_cur + step_a);
-                  ramp_last_ms  = now;
+                  ramp_cur     = std::min(max_i, ramp_cur + step_a);
+                  ramp_last_ms = now;
                   current_out_a = ramp_cur;
                   ESP_LOGI("DIS", "RAMP →%.1fA B=%.1fA gap=%.1fA v_head=%.0f",
                            ramp_cur, i_actual, c_gap, v_head);
@@ -413,10 +393,11 @@ sensor:
             }
 
             // ══════════════════════════════════════════════
-            // STATE 1: ADAPTIVE — ratchet CHỈ khi gần UVP
-            // Safe zone: giữ nguyên ceiling, KHÔNG ratchet
-            // Unsafe zone: ratchet nhẹ để tránh UVP
-            // Below UVP: về 0
+            // STATE 1: ADAPTIVE
+            // Safe zone:   ceiling giữ nguyên — KHÔNG ratchet
+            // Unsafe zone: ratchet dần theo v_head, không cap cứng
+            //              → giảm mượt, không cliff tại ranh giới
+            // Below UVP:   về 0 ngay
             // ══════════════════════════════════════════════
             if (state == 1) {
 
@@ -424,10 +405,11 @@ sensor:
               if (below_uvp) {
                 k_ceil = 0.0f;
               } else if (unsafe_zone) {
-                // Gần UVP: ratchet xuống để giảm sag, cap 1A
-                k_ceil = calc_cx(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
+                // Ratchet dần: không cap 1A ở đây — để calc_cx tự scale theo v_head
+                // v_head=80mV→~10A, 40mV→~5A, 8mV→~1A, 4mV→0A
+                k_ceil = calc_cx(CX_UNSAFE_RATIO, -1.0f);
               } else {
-                // Safe zone: voltage ổn, KHÔNG ratchet — giữ nguyên ceiling
+                // Safe zone: voltage ổn, giữ nguyên ceiling
                 k_ceil = ceiling;
               }
 
@@ -445,19 +427,18 @@ sensor:
 
               // Ceiling về 0 → STOPPED, không bao giờ tự reset
               if (ceiling < 0.5f) {
-                current_out_a = 0.0f;
-                state = 2;
-                id(g_dis_state) = 2;
+                current_out_a = 0.0f; state = 2;
+                id(g_dis_state) = 2; id(g_dis_ceiling) = 0.0f;
                 id(discharging_a) = 0;
-                ESP_LOGW("DIS", "ADAPTIVE→STOPPED: ceil=%.1fA v_head=%.0f smv=%.0f",
-                         ceiling, v_head, smv);
+                ESP_LOGW("DIS", "ADAPTIVE→STOPPED: ceil→0 v_head=%.0f smv=%.0f",
+                         v_head, smv);
                 goto publish_dis;
               }
 
               if ((now - log_ms) > 30000UL) {
                 log_ms = now;
-                ESP_LOGI("DIS", "ADAPTIVE: ceil=%.0fA v_head=%.0fmV k=%.2f",
-                         ceiling, v_head, k_est);
+                ESP_LOGI("DIS", "ADAPTIVE: ceil=%.0fA v_head=%.0fmV k=%.2f zone=%s",
+                         ceiling, v_head, k_est, unsafe_zone?"UNSAFE":"SAFE");
               }
               goto publish_dis;
             }
@@ -465,7 +446,7 @@ sensor:
             // ══════════════════════════════════════════════
             // STATE 2: STOPPED
             // Giữ output=0, chờ direction change → SOFTSTART mới
-            // KHÔNG tự reset, KHÔNG check voltage để re-enable
+            // KHÔNG tự reset theo voltage, KHÔNG re-enable tự động
             // ══════════════════════════════════════════════
             if (state == 2) {
               current_out_a = 0.0f;
@@ -531,10 +512,9 @@ sensor:
             static const float         PROBE_A          = 5.0f;
             static const float         PLATEAU_GAP_A    = 3.0f;
             static const float         TAPER_EXP        = 2.0f;
-            static const float         CX_SAFE_RATIO    = 0.70f;
             static const float         CX_UNSAFE_RATIO  = 0.50f;
-            static const float         CX_UNSAFE_CAP_A  = 1.0f;
-            static const float         FREE_ZONE_RATIO  = 1.50f;  // v_head > gap×1.5 = free
+            static const float         CX_UNSAFE_CAP_A  = 1.0f;  // chỉ dùng trong SOFTSTART
+            static const float         FREE_ZONE_RATIO  = 1.50f;
 
             // ── INPUT GUARD ────────────────────────────────
             if (isnan(x) || isnan(id(current).state)) return;
@@ -559,12 +539,13 @@ sensor:
             bool  auto_mode   = id(can_switch_auto_charge_current).state;
             bool  chg_enabled = id(switch_charging).state;
 
-            float v_head      = ovp - smv;           // headroom dưới OVP
+            // Safety check dùng RAW — phản ứng ngay khi chạm OVP
+            bool  above_ovp   = (raw_mv >= ovp);
+            // Zone detection dùng smv — tránh flicker
+            float v_head      = ovp - smv;
             float taper_start = ovp - gap;
-            bool  above_ovp   = (smv >= ovp);         // danger
-            bool  unsafe_zone = (!above_ovp && v_head < gap);   // gần OVP: smv > taper_start
+            bool  unsafe_zone = (!above_ovp && v_head < gap);  // smv > taper_start
             bool  free_zone   = (v_head > gap * FREE_ZONE_RATIO);
-            bool  safe_zone   = (!unsafe_zone && !above_ovp);
 
             float step_a = std::max(2.0f, max_i * 0.05f);
             bool  is_charging    = current_val >  0.5f;
@@ -579,8 +560,8 @@ sensor:
             float cx      = id(g_chg_cx);
             float ceiling = id(g_chg_ceiling);
 
-            // calc_cx cho charge: dựa vào headroom OVP
-            // ratio × v_head/gap × max_i, cap tùy zone
+            // calc_cx_chg: v_head/gap × max_i × ratio
+            // cap > 0: áp trần; cap < 0: không cap
             auto calc_cx_chg = [&](float ratio, float cap) -> float {
               float raw = (v_head / gap) * max_i * ratio;
               raw = std::max(0.0f, std::min(max_i, raw));
@@ -606,7 +587,6 @@ sensor:
 
             // ── STARTUP HOLD ───────────────────────────────
             if (!id(g_startup_done)) {
-              // Gửi giá trị nhỏ thay vì 0 — tránh inverter đọc là "Forbidden"
               id(charging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
                 id(g_startup_done) = true;
@@ -622,18 +602,12 @@ sensor:
             }
 
             // ── DIRECTION CHANGE: sạc→xả ──────────────────
-            // Reset CHG về SOFTSTART + reset DIS để nó sẵn sàng xả
+            // Reset cả CHG lẫn DIS để không bị kẹt STOPPED
             if (is_discharging && !was_discharging) {
-              ESP_LOGI("CHG", "DIR→DIS: reset CHG(state=%d) + DIS SOFTSTART", state);
-              // Reset charge
+              ESP_LOGI("CHG", "DIR→DIS: reset CHG(state=%d) + DIS state", state);
               state = 0; cx = -1.0f; ceiling = -1.0f;
-              id(g_chg_state) = 0;
-              id(g_chg_cx) = -1.0f;
-              id(g_chg_ceiling) = -1.0f;
-              // Reset discharge — tránh DIS bị kẹt STOPPED từ session trước
-              id(g_dis_state) = 0;
-              id(g_dis_cx) = -1.0f;
-              id(g_dis_ceiling) = -1.0f;
+              id(g_chg_state) = 0; id(g_chg_cx) = -1.0f; id(g_chg_ceiling) = -1.0f;
+              id(g_dis_state) = 0; id(g_dis_cx) = -1.0f; id(g_dis_ceiling) = -1.0f;
             }
             was_discharging = is_discharging;
 
@@ -647,12 +621,10 @@ sensor:
             // ── SESSION EDGE: bắt đầu sạc mới ─────────────
             if (is_charging && !was_charging) {
               state = 0; cx = -1.0f; ceiling = -1.0f;
-              ramp_cur = PROBE_A;
+              ramp_cur = std::min(PROBE_A, max_i);
               soft_start_ms = now; ramp_last_ms = now;
               below_cterm_ms = 0; cterm_check_ms = now;
-              id(g_chg_state) = 0;
-              id(g_chg_cx) = -1.0f;
-              id(g_chg_ceiling) = -1.0f;
+              id(g_chg_state) = 0; id(g_chg_cx) = -1.0f; id(g_chg_ceiling) = -1.0f;
               ESP_LOGI("CHG", "SESSION START smv=%.0f zone=%s v_head=%.0f",
                        smv, above_ovp?"ABOVE":unsafe_zone?"UNSAFE":free_zone?"FREE":"APPR", v_head);
             }
@@ -663,17 +635,17 @@ sensor:
             // ══════════════════════════════════════════════
             if (state == 0) {
 
-              // ── Priority 1: hard stop ──────────────────
+              // Priority 1: hard stop ────────────────────
               if (!chg_enabled || above_ovp) {
                 cx = 0.0f; state = 2;
-                id(g_chg_cx) = 0.0f; id(g_chg_state) = 2;
+                id(g_chg_cx) = 0.0f; id(g_chg_state) = 2; id(g_chg_ceiling) = 0.0f;
                 current_out_a = 0.0f;
                 ESP_LOGW("CHG", "SOFT→STOPPED: %s smv=%.0f",
                          above_ovp?"above_ovp":"disabled", smv);
                 goto publish_chg;
               }
 
-              // ── Priority 2: unsafe zone (gần OVP: smv > taper_start) ──
+              // Priority 2: unsafe zone → Cx≤1A, thẳng ADAPTIVE
               if (unsafe_zone) {
                 float raw = calc_cx_chg(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
                 cx = std::max(0.5f, raw);
@@ -684,40 +656,35 @@ sensor:
                 goto publish_chg;
               }
 
-              // ── Priority 3: safe zone → probe → ramp ──
+              // Priority 3: safe zone → probe 3s → ramp → plateau → Cx=max_i
               current_out_a = ramp_cur;
-
               if ((now - soft_start_ms) < SOFT_START_MS) {
                 goto publish_chg;
               }
 
-              // Hết probe → ramp
               {
-                float i_actual = current_val;   // dương khi sạc
+                float i_actual = current_val;
                 float c_gap    = ramp_cur - i_actual;
                 bool  plateau  = (!free_zone && c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
                 if (plateau || at_max || unsafe_zone) {
-                  float cx_raw;
                   if (unsafe_zone) {
-                    cx_raw = calc_cx_chg(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
+                    float raw = calc_cx_chg(CX_UNSAFE_RATIO, CX_UNSAFE_CAP_A);
+                    cx = std::max(0.5f, raw);
                   } else {
-                    // Plateau/at_max = solar ở mức tự nhiên → Cx = max_i
-                    // ADAPTIVE taper sẽ giới hạn thực theo voltage OVP
-                    cx_raw = max_i;
+                    // plateau/at_max: Cx = max_i, ADAPTIVE taper xử lý
+                    cx = max_i;
                   }
-                  cx = std::max(0.5f, cx_raw);
                   ceiling = cx; state = 1;
                   id(g_chg_cx) = cx; id(g_chg_ceiling) = ceiling; id(g_chg_state) = 1;
                   current_out_a = cx;
                   ESP_LOGI("CHG", "SOFT LOCK[%s]: B=%.1fA gap=%.1fA → Cx=%.0fA",
-                           plateau?"plateau":at_max?"max_i":"unsafe",
+                           plateau?"plateau":at_max?"at_max":"unsafe",
                            i_actual, c_gap, cx);
                   goto publish_chg;
                 }
 
-                // Tiếp tục ramp — free zone nhanh hơn
                 unsigned long step_int = free_zone ? STEP_FREE_MS : STEP_APPR_MS;
                 if ((now - ramp_last_ms) >= step_int) {
                   ramp_cur     = std::min(max_i, ramp_cur + step_a);
@@ -731,7 +698,12 @@ sensor:
             }
 
             // ══════════════════════════════════════════════
-            // STATE 1: ADAPTIVE — ratchet theo vị trí OVP
+            // STATE 1: ADAPTIVE
+            // Safe zone:   ceiling giữ nguyên — KHÔNG ratchet
+            // Unsafe zone: ratchet theo pos² — KHÔNG cap cứng 1A
+            //              pos=0 → k_ceil=max_i (no ratchet tại boundary)
+            //              pos→1 → k_ceil→0 (gradual taper, không cliff)
+            // Above OVP:   về 0 ngay
             // ══════════════════════════════════════════════
             if (state == 1) {
 
@@ -739,14 +711,14 @@ sensor:
               if (above_ovp) {
                 k_ceil = 0.0f;
               } else if (unsafe_zone) {
-                // Taper zone: ratchet theo pos^2
+                // pos² taper: mượt, không cliff tại ranh giới
                 float pos = std::max(0.0f, std::min(1.0f,
                               (smv - taper_start) / gap));
                 k_ceil = (float)(int)(max_i * std::pow(1.0f - pos, TAPER_EXP));
-                k_ceil = std::max(1.0f, k_ceil);
-                k_ceil = std::min(k_ceil, CX_UNSAFE_CAP_A);  // cap 1A vùng unsafe
+                k_ceil = std::max(0.0f, k_ceil);
+                // KHÔNG min(k_ceil, 1A) — để pos² tự giảm mượt đến 0
               } else {
-                // Free/approach: ceiling giữ nguyên (không ratchet)
+                // Safe zone: voltage ổn, giữ nguyên ceiling
                 k_ceil = ceiling;
               }
 
@@ -754,9 +726,9 @@ sensor:
               new_ceil = std::max(0.0f, new_ceil);
 
               if (new_ceil < ceiling - 0.9f) {
-                float pos = (smv - taper_start) / gap;
-                ESP_LOGI("CHG", "RATCH↓ %.0f→%.0fA pos=%.2f v_head=%.0f",
-                         ceiling, new_ceil, pos, v_head);
+                float pos = unsafe_zone ? (smv - taper_start) / gap : 0.0f;
+                ESP_LOGI("CHG", "RATCH↓ %.0f→%.0fA pos=%.2f v_head=%.0f zone=%s",
+                         ceiling, new_ceil, pos, v_head, unsafe_zone?"UNSAFE":"SAFE");
                 ceiling = new_ceil;
                 id(g_chg_ceiling) = ceiling;
               }
@@ -764,11 +736,9 @@ sensor:
 
               // Ceiling về 0 → STOPPED
               if (ceiling < 0.5f) {
-                current_out_a = 0.0f;
-                state = 2;
-                id(g_chg_state) = 2;
-                id(charging_a) = 0;
-                ESP_LOGW("CHG", "ADAPTIVE→STOPPED: ceil=%.1fA smv=%.0f", ceiling, smv);
+                current_out_a = 0.0f; state = 2;
+                id(g_chg_state) = 2; id(g_chg_ceiling) = 0.0f; id(charging_a) = 0;
+                ESP_LOGW("CHG", "ADAPTIVE→STOPPED: ceil→0 smv=%.0f", smv);
                 goto publish_chg;
               }
 
@@ -780,10 +750,9 @@ sensor:
                   below_cterm_ms += dt;
                   if (below_cterm_ms >= 60000UL) {
                     current_out_a = 0.0f; state = 2;
-                    id(g_chg_state) = 2; id(charging_a) = 0;
+                    id(g_chg_state) = 2; id(g_chg_ceiling) = 0.0f; id(charging_a) = 0;
                     id(${name}_eoc) = true;
-                    id(report_soc) = 100; id(charge_status) = "FULL";
-                    id(g_chg_ceiling) = 0.0f;
+                    id(report_soc) = 100;
                     id(${name}_cc_memory_valid) = false;
                     auto t = id(my_time).now();
                     if (t.is_valid()) id(${name}_eoc_timestamp) = t.timestamp;
@@ -801,9 +770,9 @@ sensor:
 
               if ((now - log_ms) > 30000UL) {
                 log_ms = now;
-                float pos = (smv - taper_start) / gap;
-                ESP_LOGI("CHG", "ADAPTIVE: ceil=%.0fA pos=%.2f v_head=%.0fmV",
-                         ceiling, pos, v_head);
+                float pos = unsafe_zone ? (smv - taper_start) / gap : 0.0f;
+                ESP_LOGI("CHG", "ADAPTIVE: ceil=%.0fA pos=%.2f v_head=%.0fmV zone=%s",
+                         ceiling, pos, v_head, unsafe_zone?"UNSAFE":"SAFE");
               }
               goto publish_chg;
             }
