@@ -47,9 +47,12 @@ globals:
     restore_value: no
     initial_value: '-1.0'
   - id: g_dis_k_est      # sag mV/A — persist qua reboot
+    # 280Ah LFP thực tế ~1.5-2.0 mV/A
+    # LẦN ĐẦU DEPLOY: đổi restore_value: no → flash → đổi lại yes
+    # để xóa giá trị cũ 4.0 còn lưu trong flash
     type: float
-    restore_value: yes
-    initial_value: '4.0'
+    restore_value: no
+    initial_value: '1.8'
 
   # ── Charge state machine ───────────────────────────────────────
   - id: g_chg_state      # 0=SOFTSTART  1=ADAPTIVE  2=STOPPED
@@ -135,7 +138,13 @@ sensor:
             float margin = id(min_cell_voltage).state * 1000.0f
                            - id(can_under_voltage_protection).state;
             float gap    = id(${name}_voltage_recovery_gap).state;
-            soc = (margin > gap) ? soc_stop_v + 1 : soc_stop_v;
+            // Nếu voltage vẫn ổn (margin > gap×2) dù BMS SOC drift về 0
+            // → cho phép tiếp tục xả ở soc_stop+1, không chặn hoàn toàn
+            if (margin > gap * 2.0f) {
+              soc = soc_stop_v + 1;  // voltage-based override: vẫn còn dùng được
+            } else {
+              soc = soc_stop_v;
+            }
           } else {
             soc = uint16_t(id(capacity_remaining).state);
           }
@@ -326,7 +335,7 @@ sensor:
                 goto publish_dis;
               }
 
-              // Safe zone: probe 3s → ramp → plateau → Cx=v_head/k_est×0.7
+              // Safe zone: probe 3s → ramp → 2 exit paths
               current_out_a = ramp_cur;
               if ((now - soft_start_ms) < SOFT_START_MS) goto publish_dis;
 
@@ -336,16 +345,40 @@ sensor:
                 bool  plateau  = (c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
-                if (plateau || at_max) {
-                  cx = std::max(1.0f, std::min(max_i,
-                         (float)(int)calc_cx(CX_SAFE_RATIO, -1.0f)));
+                // Exit 1.1.1.1: voltage drop vào unsafe TRONG KHI ramp
+                // → Cx = ramp_cur hiện tại, ADAPTIVE chỉ ratchet xuống
+                if (unsafe_zone) {
+                  cx = ramp_cur;
                   ceiling = cx; state = 1;
                   id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
-                  current_out_a = cx;
-                  ESP_LOGI("DIS", "SOFT LOCK[%s]: B=%.1f gap=%.1f v_head=%.0f k=%.2f → Cx=%.0fA",
-                           plateau?"plateau":"at_max", i_actual, c_gap, v_head, k_est, cx);
+                  current_out_a = ceiling;
+                  ESP_LOGI("DIS", "SOFT EXIT1 [volt drop]: ramp=%.0fA → Cx=%.0fA v_head=%.0f",
+                           ramp_cur, cx, v_head);
                   goto publish_dis;
                 }
+
+                // Exit 1.1.1.2: tải bão hòa (gap≥3A) hoặc đạt max_i
+                // → Cx = max_i, ADAPTIVE tracking 2 chiều
+                if (plateau || at_max) {
+                  cx = max_i;
+                  ceiling = std::max(1.0f, std::min(cx,
+                              (float)(int)calc_cx(CX_SAFE_RATIO, -1.0f)));
+                  state = 1;
+                  id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
+                  current_out_a = ceiling;
+                  ESP_LOGI("DIS", "SOFT EXIT2 [%s]: B=%.1fA gap=%.1fA v_head=%.0f → Cx=max ceil=%.0fA",
+                           plateau?"plateau":"at_max", i_actual, c_gap, v_head, ceiling);
+                  goto publish_dis;
+                }
+
+                if ((now - ramp_last_ms) >= STEP_INT_MS) {
+                  ramp_cur     = std::min(max_i, ramp_cur + step_a);
+                  ramp_last_ms = now;
+                  current_out_a = ramp_cur;
+                  ESP_LOGI("DIS", "RAMP →%.1fA B=%.1fA gap=%.1fA", ramp_cur, i_actual, c_gap);
+                }
+              }
+              goto publish_dis;
 
                 if ((now - ramp_last_ms) >= STEP_INT_MS) {
                   ramp_cur     = std::min(max_i, ramp_cur + step_a);
@@ -359,25 +392,39 @@ sensor:
 
             // ══════════════════════════════════════════════
             // STATE 1: ADAPTIVE
-            // safe zone:   ceiling giữ nguyên
-            // unsafe zone: ratchet dần theo v_head, không cliff
-            // below_uvp:   về 0 ngay
+            // Phân biệt qua cx:
+            //   cx < max_i  → EXIT 1.1.1.1: chỉ ratchet XUỐNG (ban đêm)
+            //   cx = max_i  → EXIT 1.1.1.2: tracking 2 chiều (ban ngày)
+            // Unsafe zone: luôn ratchet xuống bất kể exit
+            // Below UVP:   về 0 ngay
             // ══════════════════════════════════════════════
             if (state == 1) {
               float k_ceil;
               if (below_uvp) {
                 k_ceil = 0.0f;
               } else if (unsafe_zone) {
-                k_ceil = calc_cx(CX_UNSAFE_RATIO, -1.0f);  // không cap — gradient mượt
+                // Luôn ratchet xuống trong unsafe — không cho tăng lại
+                float candidate = calc_cx(CX_UNSAFE_RATIO, -1.0f);
+                k_ceil = std::min(ceiling, candidate);
               } else {
-                k_ceil = ceiling;  // safe zone: giữ nguyên
+                // Safe zone — phân biệt exit
+                float v_based = std::min(cx, (float)(int)calc_cx(CX_SAFE_RATIO, -1.0f));
+                if (cx >= max_i - 0.5f) {
+                  // EXIT 1.1.1.2: tracking 2 chiều theo v_head
+                  k_ceil = v_based;
+                } else {
+                  // EXIT 1.1.1.1: chỉ giảm, không vượt Cx ban đầu
+                  k_ceil = std::min(ceiling, v_based);
+                }
               }
 
-              float new_ceil = std::min(ceiling, std::max(0.0f, k_ceil));
-              if (new_ceil < ceiling - 0.9f) {
-                ESP_LOGI("DIS", "RATCH↓ %.0f→%.0fA v_head=%.0f k=%.2f zone=%s",
-                         ceiling, new_ceil, v_head, k_est,
-                         below_uvp?"DEAD":unsafe_zone?"UNSAFE":"SAFE");
+              float new_ceil = std::max(0.0f, k_ceil);
+              if (std::abs(new_ceil - ceiling) > 0.9f) {
+                bool going_up = (new_ceil > ceiling);
+                ESP_LOGI("DIS", "ADAP%s %.0f→%.0fA v_head=%.0f k=%.2f [%s/%s]",
+                         going_up?"↑":"↓", ceiling, new_ceil, v_head, k_est,
+                         unsafe_zone?"UNSAFE":"SAFE",
+                         cx>=max_i-0.5f?"TRACK":"CAP");
                 ceiling = new_ceil;
                 id(g_dis_ceiling) = ceiling;
               }
