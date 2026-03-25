@@ -70,19 +70,6 @@ select:
     restore_value: true
     optimistic: true
 
-number:
-  - platform: template
-    name: "${name} Sag Compensation mV"
-    id: ${name}_sag_compensation_mv
-    min_value: 0
-    max_value: 80
-    step: 5
-    initial_value: 10
-    restore_value: true
-    optimistic: true
-    unit_of_measurement: "mV"
-    icon: mdi:lightning-bolt-circle
-
 sensor:
   - platform: template
     name: "${name} Adaptive Charging Current"
@@ -829,15 +816,14 @@ text_sensor:
       float ovp  = id(can_over_voltage_protection).state;
       float uvp  = id(can_under_voltage_protection).state;
       float gap  = id(${name}_voltage_recovery_gap).state;
-      float sag  = id(${name}_sag_compensation_mv).state;
       std::vector<std::string> w;
       if (ovp > 3650.0f) w.push_back("OVP>3650 HUY HOAI!");
       if (uvp < 2500.0f) w.push_back("UVP<2500 HUY HOAI!");
       if (ovp > 3550.0f && ovp <= 3650.0f) w.push_back("OVP>3550 tuoi tho giam");
       if (uvp < 2800.0f && uvp >= 2500.0f) w.push_back("UVP<2800 xa sau");
-      float td = uvp + gap + sag, tc = ovp - gap - sag;
-      if (td >= ovp) w.push_back("UVP+gap+sag>=OVP!");
-      if (tc <= uvp) w.push_back("OVP-gap-sag<=UVP!");
+      float td = uvp + gap, tc = ovp - gap;
+      if (td >= ovp) w.push_back("UVP+gap>=OVP!");
+      if (tc <= uvp) w.push_back("OVP-gap<=UVP!");
       float mid = tc - td;
       if (mid < 20.0f) w.push_back("Normal zone " + to_string((int)mid) + "mV narrow");
       if (w.empty()) {
