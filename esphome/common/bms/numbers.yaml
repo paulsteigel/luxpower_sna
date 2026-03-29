@@ -3,7 +3,7 @@
 # +--------------------------------------+
 number:
   - platform: template
-    name: "${name} Max charge voltage"
+    name: " Max charge voltage"
     id: "max_charge_voltage"
     step: 10
     min_value: 3450
@@ -18,7 +18,7 @@ number:
     
 
   - platform: template
-    name: "${name} Float voltage"
+    name: " Float voltage"
     id: "float_voltage"
     step: 10
     min_value: 3400
@@ -36,7 +36,7 @@ number:
             float slider_value = id(float_voltage).state;
 
   - platform: template
-    name: "${name} Charging current max"
+    name: " Charging current max"
     id: "charging_current"
     step: 1
     min_value: 0
@@ -55,7 +55,7 @@ number:
     
 
   - platform: template
-    name: "${name} Discharging current max"
+    name: " Discharging current max"
     id: "discharging_current"
     step: 1
     min_value: 0
@@ -74,7 +74,7 @@ number:
 
 # this for helping to calculate the proper current seding to the inverter    
   - platform: template
-    name: "${name} Parrallel packs's capacity (Ah)"
+    name: " Parrallel packs's capacity (Ah)"
     id: "parrallel_packs_capacity_ah"
     step: 1
     min_value: 0
@@ -88,7 +88,7 @@ number:
     entity_category: config 
 
   - platform: template
-    name: "${name} Over voltage protection"
+    name: " Over voltage protection"
     id: "can_over_voltage_protection"
     step: 5
     min_value: 3400
@@ -102,7 +102,7 @@ number:
     entity_category: config    
 
   - platform: template
-    name: "${name} Under voltage protection CAN bus"
+    name: " Under voltage protection CAN bus"
     id: "can_under_voltage_protection"
     step: 10
     min_value: 3100
@@ -117,7 +117,7 @@ number:
            
   
   - platform: template
-    name: "${name} Stop discharging SOC"
+    name: " Stop discharging SOC"
     id: "can_soc_stop_discharging"
     step: 1
     min_value: 10
@@ -130,8 +130,8 @@ number:
     entity_category: config
  
   - platform: template
-    name: "${name} Voltage recovery gap"
-    id: "${name}_voltage_recovery_gap"
+    name: " Voltage recovery gap"
+    id: "_voltage_recovery_gap"
     step: 1
     min_value: 5
     max_value: 50

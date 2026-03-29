@@ -85,7 +85,7 @@ luxpower_sna:
 text:
   - platform: template
     id: lux_config_host
-    name: "${luxid}_Inverter Host"
+    name: "lux_Inverter Host"
     entity_category: config
     mode: text
     optimistic: true
@@ -100,7 +100,7 @@ text:
 
   - platform: template
     id: lux_config_dongle
-    name: "${luxid}_Dongle Serial"
+    name: "lux_Dongle Serial"
     entity_category: config
     mode: text
     optimistic: true
@@ -115,7 +115,7 @@ text:
 
   - platform: template
     id: lux_config_inverter
-    name: "${luxid}_Inverter Serial"
+    name: "lux_Inverter Serial"
     entity_category: config
     mode: text
     optimistic: true
@@ -173,7 +173,7 @@ button:
   - platform: luxpower_sna
     luxpower_sna_id: lux_hub
     scan_luxpower_dongle:
-      name: "${luxid}_Scan Dongle IP"
+      name: "lux_Scan Dongle IP"
       icon: "mdi:magnify"
       entity_category: config
 
@@ -181,7 +181,7 @@ sensor:
   - platform: luxpower_sna
     luxpower_sna_id: lux_hub
     scan_status_text:
-      name: "${luxid}_Scan Status"
+      name: "lux_Scan Status"
       icon: "mdi:magnify"
       entity_category: diagnostic
 ```

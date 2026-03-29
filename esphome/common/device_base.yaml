@@ -28,23 +28,27 @@ esp32:
     sdkconfig_options:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
+esphome:
+  name: bms_node
+  name_add_mac_suffix: true   # ← bms_node_a4cf12, unique theo MAC
+
 logger:
   level: WARN
 
 # ── Connectivity ─────────────────────────────────────────────
 mqtt:
   keepalive: 60s
-  reboot_timeout: 15min
+  reboot_timeout: 15min       # ← sửa từ 0s
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
-  client_id: ${name}_mqtt
-  clean_session: true
+  client_id: !lambda |-       # ← unique theo MAC, không cần compile
+    return "esp_" + get_mac_address();
+  clean_session: true         # ← fix OOM broker
 
 wifi:
-  use_address: ${name}.freemyip.com 
   ap:
-    ssid: "Esp32S2Lolin"
+    ssid: "ESPHome Setup"
 
 ota:
   - platform: esphome

@@ -1,16 +1,9 @@
-# ============================================================
-# homehna.yaml — chỉ những thứ THỰC SỰ unique
-# ============================================================
-
+# homehnm.yaml — chỉ còn thế này!
 substitutions:
-  name: homehna
-  luxid: lux_3253631886
-  dyndnsurl: https://freemyip.com/update?token=09b0a2807898a8d32ac01a4f&domain=homehna.freemyip.com
-  mqtt_pass: !secret mqtt_password
-  ota_pass: !secret ota_password
+  luxid: lux
 
 esphome:
-  name: ${name}
+  name: bms_node
   on_boot:
     then:
       - switch.turn_on: switch_charging
@@ -22,15 +15,13 @@ packages:
   remote_packages:
     url: https://github.com/paulsteigel/luxpower_sna
     ref: main
-    refresh: 1d
+    refresh: 0s
     files:
-      # ── esphome/common/ ──────────────────────────────────
       - esphome/common/device_base.yaml
+      - esphome/common/dyndns.yaml
       - esphome/common/luxpower.yaml
       - esphome/common/logger.yaml
-      # ── esphome/common/bms/ ──────────────────────────────
       - esphome/common/bms/dev_info.yaml
-      - esphome/common/bms/dyndns.yaml
       - esphome/common/bms/globals.yaml
       - esphome/common/bms/text_sensors.yaml
       - esphome/common/bms/numbers.yaml
@@ -38,5 +29,4 @@ packages:
       - esphome/common/bms/canbus_luxpower.yaml
       - esphome/common/bms/charge_discharge_controller.yaml
       - esphome/common/bms/jk_bms_base.yaml
-      # ── 16 cell ──────────────────────────────────────────
-      - esphome/common/bms/jk_bms_cells_16.yaml
+      - esphome/common/bms/jk_bms_cells_15.yaml

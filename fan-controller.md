@@ -64,7 +64,7 @@ sensor:
   - platform: dallas_temp
     address: 0xb200000cc1dd0e28
     id: ${name}_temp_sensor1
-    name: "${name} Heat sink 1"
+    name: " Heat sink 1"
     update_interval: 10s
     accuracy_decimals: 2
     filters:
@@ -77,7 +77,7 @@ sensor:
   - platform: copy
     source_id: ${name}_temp_sensor1
     id: ${name}_copy_temp_sensor1
-    name: "${name} Copy of source_sensor 1"
+    name: " Copy of source_sensor 1"
     internal: True
     on_value:
       then:
@@ -86,7 +86,7 @@ sensor:
   - platform: dallas_temp
     address: 0x7b3c01d6079a0b28
     id: ${name}_temp_sensor2
-    name: "${name} Heat sink 2"
+    name: " Heat sink 2"
     update_interval: 10s
     accuracy_decimals: 2
     filters:
@@ -98,7 +98,7 @@ sensor:
     # Example configuration entry
   - platform: copy
     source_id: ${name}_temp_sensor2
-    name: "${name}Copy of source_sensor"
+    name: "Copy of source_sensor"
     id: ${name}_copy_temp_sensor2
     internal: True
     on_value:
@@ -109,7 +109,7 @@ sensor:
   - platform: pulse_counter
     pin: D1
     id: ${name}_fan_rpm_1
-    name: "${name} Fan RPM 1"
+    name: " Fan RPM 1"
     update_interval: 5s
     unit_of_measurement: "V/phút"
     accuracy_decimals: 0
@@ -119,7 +119,7 @@ sensor:
   - platform: pulse_counter
     pin: D6
     id: ${name}_fan_rpm_2
-    name: "${name} Fan RPM 2"
+    name: " Fan RPM 2"
     update_interval: 5s
     unit_of_measurement: "V/phút"
     accuracy_decimals: 0

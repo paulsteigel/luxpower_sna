@@ -6,47 +6,47 @@
 sensor:
   - platform: jk_bms
     cell_voltage_1:
-      name: "${name} cell voltage 1"
+      name: " cell voltage 1"
       id: ${name}_cell_votage_1
     cell_voltage_2:
-      name: "${name} cell voltage 2"
+      name: " cell voltage 2"
       id: ${name}_cell_votage_2
     cell_voltage_3:
-      name: "${name} cell voltage 3"
+      name: " cell voltage 3"
       id: ${name}_cell_votage_3
     cell_voltage_4:
-      name: "${name} cell voltage 4"
+      name: " cell voltage 4"
       id: ${name}_cell_votage_4
     cell_voltage_5:
-      name: "${name} cell voltage 5"
+      name: " cell voltage 5"
       id: ${name}_cell_votage_5
     cell_voltage_6:
-      name: "${name} cell voltage 6"
+      name: " cell voltage 6"
       id: ${name}_cell_votage_6
     cell_voltage_7:
-      name: "${name} cell voltage 7"
+      name: " cell voltage 7"
       id: ${name}_cell_votage_7
     cell_voltage_8:
-      name: "${name} cell voltage 8"
+      name: " cell voltage 8"
       id: ${name}_cell_votage_8
     cell_voltage_9:
-      name: "${name} cell voltage 9"
+      name: " cell voltage 9"
       id: ${name}_cell_votage_9
     cell_voltage_10:
-      name: "${name} cell voltage 10"
+      name: " cell voltage 10"
       id: ${name}_cell_votage_10
     cell_voltage_11:
-      name: "${name} cell voltage 11"
+      name: " cell voltage 11"
       id: ${name}_cell_votage_11
     cell_voltage_12:
-      name: "${name} cell voltage 12"
+      name: " cell voltage 12"
       id: ${name}_cell_votage_12
     cell_voltage_13:
-      name: "${name} cell voltage 13"
+      name: " cell voltage 13"
       id: ${name}_cell_votage_13
     cell_voltage_14:
-      name: "${name} cell voltage 14"
+      name: " cell voltage 14"
       id: ${name}_cell_votage_14
     cell_voltage_15:
-      name: "${name} cell voltage 15"
+      name: " cell voltage 15"
       id: ${name}_cell_votage_15

@@ -44,7 +44,7 @@ luxpower_sna:
 text:
   - platform: template
     id: lux_config_host
-    name: "${luxid}_Inverter Host"
+    name: "lux_Inverter Host"
     entity_category: config
     mode: text
     optimistic: true
@@ -60,7 +60,7 @@ text:
 
   - platform: template
     id: lux_config_dongle
-    name: "${luxid}_Dongle Serial"
+    name: "lux_Dongle Serial"
     icon: "mdi:identifier"
     entity_category: config
     mode: text
@@ -79,7 +79,7 @@ text:
 
   - platform: template
     id: lux_config_inverter
-    name: "${luxid}_Inverter Serial"
+    name: "lux_Inverter Serial"
     icon: "mdi:identifier"
     entity_category: config
     mode: text
@@ -100,7 +100,7 @@ text:
 number:
   - platform: template
     id: lux_config_port
-    name: "${luxid}_Inverter Port"
+    name: "lux_Inverter Port"
     icon: "mdi:ethernet"
     entity_category: config
     optimistic: true
@@ -120,65 +120,65 @@ number:
     luxpower_sna_id: lux_hub
     # ── Essential charge/discharge controls ──
     charge_power_percent:
-      name: "${luxid}_System Charge Power Rate"
+      name: "lux_System Charge Power Rate"
       icon: "mdi:battery-arrow-up"
     discharge_power_percent:
-      name: "${luxid}_System Discharge Power Rate"
+      name: "lux_System Discharge Power Rate"
       icon: "mdi:battery-arrow-down"
     ac_charge_power_percent:
-      name: "${luxid}_AC Charge Power Rate"
+      name: "lux_AC Charge Power Rate"
       icon: "mdi:transmission-tower-import"
     ac_charge_soc_limit:
-      name: "${luxid}_AC Charge Battery Level"
+      name: "lux_AC Charge Battery Level"
       icon: "mdi:battery-charging-100"
     discharge_cutoff_soc:
-      name: "${luxid}_On-grid Discharge Cut-off SOC"
+      name: "lux_On-grid Discharge Cut-off SOC"
       icon: "mdi:battery-low"
     forced_discharge_power_percent:
-      name: "${luxid}_Forced Discharge Power Rate"
+      name: "lux_Forced Discharge Power Rate"
       icon: "mdi:battery-arrow-down"
     priority_charge_rate:
-      name: "${luxid}_Priority Charge Rate"
+      name: "lux_Priority Charge Rate"
       icon: "mdi:battery-arrow-up"
     priority_charge_soc:
-      name: "${luxid}_Priority Charge Level"
+      name: "lux_Priority Charge Level"
       icon: "mdi:battery-charging-80"
     ct_clamp_offset:
-      name: "${luxid}_CT Clamp Offset"
+      name: "lux_CT Clamp Offset"
       icon: "mdi:current-ac"
     # ── Uncomment if needed ──
     # offgrid_discharge_cutoff_soc:
-    #   name: "${luxid}_Off-grid Discharge Cut-off SOC"
+    #   name: "lux_Off-grid Discharge Cut-off SOC"
     # charge_voltage:
-    #   name: "${luxid}_Charge Voltage"
+    #   name: "lux_Charge Voltage"
     # discharge_cutoff_voltage:
-    #   name: "${luxid}_Discharge Cut-off Voltage"
+    #   name: "lux_Discharge Cut-off Voltage"
     # ac_charge_start_soc:
-    #   name: "${luxid}_AC Charge Start SOC"
+    #   name: "lux_AC Charge Start SOC"
     # ac_charge_end_soc:
-    #   name: "${luxid}_AC Charge End SOC"
+    #   name: "lux_AC Charge End SOC"
     # charge_current_limit:
-    #   name: "${luxid}_Charge Current Limit"
+    #   name: "lux_Charge Current Limit"
     # discharge_current_limit:
-    #   name: "${luxid}_Discharge Current Limit"
+    #   name: "lux_Discharge Current Limit"
     # grid_peak_shaving_power:
-    #   name: "${luxid}_Grid Peak Shaving Power"
+    #   name: "lux_Grid Peak Shaving Power"
 
 # ── Button ────────────────────────────────────────────────────
 button:
   - platform: luxpower_sna
     luxpower_sna_id: lux_hub
     restart:
-      name: "${luxid}_Inverter Restart"
+      name: "lux_Inverter Restart"
       icon: "mdi:restart"
       entity_category: config
     scan_luxpower_dongle:
-      name: "${luxid}_Scan Dongle IP"
+      name: "lux_Scan Dongle IP"
       icon: "mdi:search"
       entity_category: config
     # reset_all is commented – dangerous, uncomment only when needed
     # reset_all:
-    #   name: "${luxid}_Reset All Settings"
+    #   name: "lux_Reset All Settings"
     #   icon: "mdi:restore"
     #   entity_category: config
 
@@ -188,46 +188,46 @@ switch:
     luxpower_sna_id: lux_hub
     # ── Main operating modes ──
     normal_or_standby:
-      name: "${luxid}_Normal or Standby"
+      name: "lux_Normal or Standby"
       icon: "mdi:power"
     ac_charge_enable:
-      name: "${luxid}_AC Charge Enable"
+      name: "lux_AC Charge Enable"
       icon: "mdi:battery-charging"
     feed_in_grid:
-      name: "${luxid}_Feed In Grid"
+      name: "lux_Feed In Grid"
       icon: "mdi:transmission-tower-export"
     charge_priority:
-      name: "${luxid}_Charge Priority"
+      name: "lux_Charge Priority"
       icon: "mdi:battery-arrow-up"
     power_backup_enable:
-      name: "${luxid}_Power Backup Enable"
+      name: "lux_Power Backup Enable"
       icon: "mdi:home-battery"
     charge_last:
-      name: "${luxid}_Charge Last"
+      name: "lux_Charge Last"
       icon: "mdi:battery-clock"
     # ── Uncomment if needed ──
     # forced_discharge_enable:
-    #   name: "${luxid}_Force Discharge Enable"
+    #   name: "lux_Force Discharge Enable"
     # enable_peak_shaving:
-    #   name: "${luxid}_Grid Peak Shaving"
+    #   name: "lux_Grid Peak Shaving"
     # seamless_eps_switching:
-    #   name: "${luxid}_Seamless EPS Switching"
+    #   name: "lux_Seamless EPS Switching"
     # anti_island_enable:
-    #   name: "${luxid}_Anti Island Enable"
+    #   name: "lux_Anti Island Enable"
     # drms_enable:
-    #   name: "${luxid}_DRMS Enable"
+    #   name: "lux_DRMS Enable"
     # dci_enable:
-    #   name: "${luxid}_DCI Enable"
+    #   name: "lux_DCI Enable"
     # gfci_enable:
-    #   name: "${luxid}_GFCI Enable"
+    #   name: "lux_GFCI Enable"
     # neutral_detect_enable:
-    #   name: "${luxid}_Neutral Detect Enable"
+    #   name: "lux_Neutral Detect Enable"
     # ovf_load_derate_enable:
-    #   name: "${luxid}_OVF Load Derate Enable"
+    #   name: "lux_OVF Load Derate Enable"
     # take_load_together:
-    #   name: "${luxid}_Take Load Together"
+    #   name: "lux_Take Load Together"
     # grid_on_power_ss:
-    #   name: "${luxid}_Grid On Power SS"
+    #   name: "lux_Grid On Power SS"
 
 # ── Sensors ───────────────────────────────────────────────────
 sensor:
@@ -236,165 +236,165 @@ sensor:
 
     # ── Grid (used by Lovelace) ──
     lux_grid_voltage_live:
-      name: "${luxid} Grid Voltage Live"
+      name: "lux_Grid Voltage Live"
     lux_grid_frequency_live:
-      name: "${luxid} Grid Frequency Live"
+      name: "lux_Grid Frequency Live"
     lux_grid_flow:
-      name: "${luxid} Grid Flow Live"
+      name: "lux_Grid Flow Live"
     lux_power_from_grid_daily:
-      name: "${luxid} Power From Grid Daily"
+      name: "lux_Power From Grid Daily"
     lux_power_to_grid_daily:
-      name: "${luxid} Power To Grid Daily"
+      name: "lux_Power To Grid Daily"
     # lux_power_from_inverter_live:
-    #   name: "${luxid} Power From Inverter Live"
+    #   name: "lux_Power From Inverter Live"
     # lux_power_to_inverter_live:
-    #   name: "${luxid} Power To Inverter Live"
+    #   name: "lux_Power To Inverter Live"
     # lux_power_from_grid_total:
-    #   name: "${luxid} Power From Grid Total"
+    #   name: "lux_Power From Grid Total"
     # lux_power_to_grid_total:
-    #   name: "${luxid} Power To Grid Total"
+    #   name: "lux_Power To Grid Total"
 
     # ── Battery (used by Lovelace) ──
     lux_battery_percent:
-      name: "${luxid} Battery"
+      name: "lux_Battery"
     lux_battery_voltage:
-      name: "${luxid} Battery Voltage Live"
+      name: "lux_Battery Voltage Live"
     lux_battery_flow:
-      name: "${luxid} Battery Flow Live"
+      name: "lux_Battery Flow Live"
     lux_battery_current:
-      name: "${luxid} Battery Current Live"
+      name: "lux_Battery Current Live"
     lux_battery_temperature_live:
-      name: "${luxid} Battery Temperature Live"
+      name: "lux_Battery Temperature Live"
     lux_daily_battery_charge:
-      name: "${luxid} Battery Charge Daily"
+      name: "lux_Battery Charge Daily"
     lux_daily_battery_discharge:
-      name: "${luxid} Battery Discharge Daily"
+      name: "lux_Battery Discharge Daily"
     lux_battery_capacity_ah:
-      name: "${luxid} Battery Capacity Ah"
+      name: "lux_Battery Capacity Ah"
       entity_category: diagnostic
     # lux_battery_charge:
-    #   name: "${luxid} Battery Charge Live"
+    #   name: "lux_Battery Charge Live"
     # lux_battery_discharge:
-    #   name: "${luxid} Battery Discharge Live"
+    #   name: "lux_Battery Discharge Live"
     # lux_total_battery_charge:
-    #   name: "${luxid} Battery Charge Total"
+    #   name: "lux_Battery Charge Total"
     # lux_total_battery_discharge:
-    #   name: "${luxid} Battery Discharge Total"
+    #   name: "lux_Battery Discharge Total"
     # lux_battery_cycle_count:
-    #   name: "${luxid} Battery Cycle Count"
+    #   name: "lux_Battery Cycle Count"
     # soh:
-    #   name: "${luxid} Battery Soh"
+    #   name: "lux_Battery Soh"
 
     # ── Solar (used by Lovelace) ──
     lux_current_solar_output:
-      name: "${luxid} Solar Output Live"
+      name: "lux_Solar Output Live"
     lux_daily_solar:
-      name: "${luxid} Solar Output Daily"
+      name: "lux_Solar Output Daily"
     lux_current_solar_output_1:
-      name: "${luxid} Solar Output Array 1 Live"
+      name: "lux_Solar Output Array 1 Live"
     lux_current_solar_output_2:
-      name: "${luxid} Solar Output Array 2 Live"
+      name: "lux_Solar Output Array 2 Live"
     lux_current_solar_voltage_1:
-      name: "${luxid} Solar Voltage Array 1 Live"
+      name: "lux_Solar Voltage Array 1 Live"
     lux_current_solar_voltage_2:
-      name: "${luxid} Solar Voltage Array 2 Live"
+      name: "lux_Solar Voltage Array 2 Live"
     lux_daily_solar_array_1:
-      name: "${luxid} Solar Output Array 1 Daily"
+      name: "lux_Solar Output Array 1 Daily"
     lux_daily_solar_array_2:
-      name: "${luxid} Solar Output Array 2 Daily"
+      name: "lux_Solar Output Array 2 Daily"
     # lux_current_solar_output_3:
-    #   name: "${luxid} Solar Output Array 3 Live"
+    #   name: "lux_Solar Output Array 3 Live"
     # lux_current_solar_voltage_3:
-    #   name: "${luxid} Solar Voltage Array 3 Live"
+    #   name: "lux_Solar Voltage Array 3 Live"
     # lux_daily_solar_array_3:
-    #   name: "${luxid} Solar Output Array 3 Daily"
+    #   name: "lux_Solar Output Array 3 Daily"
     # lux_total_solar:
-    #   name: "${luxid} Solar Output Total"
+    #   name: "lux_Solar Output Total"
 
     # ── Home consumption (used by Lovelace) ──
     lux_home_consumption_live:
-      name: "${luxid} Home Consumption Live"
+      name: "lux_Home Consumption Live"
     lux_home_consumption:
-      name: "${luxid} Home Consumption Daily"
+      name: "lux_Home Consumption Daily"
     p_load_ongrid:
-      name: "${luxid} Power From Inverter To Home Daily"
+      name: "lux_Power From Inverter To Home Daily"
     # lux_home_consumption_total:
-    #   name: "${luxid} Home Consumption Total"
+    #   name: "lux_Home Consumption Total"
     # lux_home_consumption_2_live:
-    #   name: "${luxid} Home Consumption 2 Live"
+    #   name: "lux_Home Consumption 2 Live"
 
     # ── Temperatures (used by Lovelace) ──
     lux_radiator1_temp:
-      name: "${luxid} Radiator 1 Temperature Live"
+      name: "lux_Radiator 1 Temperature Live"
     lux_radiator2_temp:
-      name: "${luxid} Radiator 2 Temperature Live"
+      name: "lux_Radiator 2 Temperature Live"
     # lux_internal_temp:
-    #   name: "${luxid} Internal Temperature Live"
+    #   name: "lux_Internal Temperature Live"
     #   entity_category: diagnostic
 
     # ── Diagnostic (uncomment if needed) ──
     # lux_fault_code:
-    #   name: "${luxid} Fault Code"
+    #   name: "lux_Fault Code"
     #   entity_category: diagnostic
     # lux_warning_code:
-    #   name: "${luxid} Warning Code"
+    #   name: "lux_Warning Code"
     #   entity_category: diagnostic
     # lux_internal_fault:
-    #   name: "${luxid} Internal Fault"
+    #   name: "lux_Internal Fault"
     #   entity_category: diagnostic
     # lux_uptime:
-    #   name: "${luxid} Uptime"
+    #   name: "lux_Uptime"
     #   entity_category: diagnostic
     # max_cell_volt:
-    #   name: "${luxid} Cell Voltage Max"
+    #   name: "lux_Cell Voltage Max"
     #   entity_category: diagnostic
     # min_cell_volt:
-    #   name: "${luxid} Cell Voltage Min"
+    #   name: "lux_Cell Voltage Min"
     #   entity_category: diagnostic
     # lux_bms_limit_charge:
-    #   name: "${luxid} Bms Limit Charge"
+    #   name: "lux_Bms Limit Charge"
     #   entity_category: diagnostic
     # lux_bms_limit_discharge:
-    #   name: "${luxid} Bms Limit Discharge"
+    #   name: "lux_Bms Limit Discharge"
     #   entity_category: diagnostic
     # bus1_voltage:
-    #   name: "${luxid} Bus1 Voltage"
+    #   name: "lux_Bus1 Voltage"
     #   entity_category: diagnostic
     # bus2_voltage:
-    #   name: "${luxid} Bus2 Voltage"
+    #   name: "lux_Bus2 Voltage"
     #   entity_category: diagnostic
     # grid_power_factor:
-    #   name: "${luxid} Grid Power Factor"
+    #   name: "lux_Grid Power Factor"
     #   entity_category: diagnostic
     # lux_power_current_clamp:
-    #   name: "${luxid} Current Clamp"
+    #   name: "lux_Current Clamp"
     #   entity_category: diagnostic
 
     # ── Generator (uncomment if applicable) ──
     # lux_current_generator_voltage:
-    #   name: "${luxid} Generator Voltage Live"
+    #   name: "lux_Generator Voltage Live"
     # lux_current_generator_frequency:
-    #   name: "${luxid} Generator Frequency Live"
+    #   name: "lux_Generator Frequency Live"
     # lux_current_generator_power:
-    #   name: "${luxid} Generator Power Live"
+    #   name: "lux_Generator Power Live"
     # lux_current_generator_power_daily:
-    #   name: "${luxid} Generator Power Daily"
+    #   name: "lux_Generator Power Daily"
 
     # ── EPS (uncomment if applicable) ──
     # lux_power_to_eps:
-    #   name: "${luxid} Power To Eps Live"
+    #   name: "lux_Power To Eps Live"
     # lux_power_to_eps_daily:
-    #   name: "${luxid} Power To Eps Daily"
+    #   name: "lux_Power To Eps Daily"
 
     # ── Text sensors ──
   - platform: luxpower_sna
     luxpower_sna_id: lux_hub
     lux_status_text:
-      name: "${luxid} Status"
+      name: "lux_Status"
     lux_battery_status_text:
-      name: "${luxid} Battery Status"
+      name: "lux_Battery Status"
       entity_category: diagnostic
     scan_status_text:
-      name: "${luxid}_Scan Status"
+      name: "lux_Scan Status"
       icon: "mdi:magnify"
       entity_category: diagnostic

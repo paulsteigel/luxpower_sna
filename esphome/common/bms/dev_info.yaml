@@ -2,14 +2,14 @@ switch:
   - platform: restart
     icon: "mdi:restart"
     id: ${name}_btn_restart
-    name: "${name}_Restart"
+    name: "_Restart"
     entity_category: config
 
 text_sensor:
 # Ip address and other
   - platform: wifi_info
     ip_address:
-      name: "${name} ESP IP Address"
+      name: " ESP IP Address"
       #address_0:
       #  name: "${id_prefix} ESP IP Address 0"
 # wifi strength
@@ -25,7 +25,7 @@ text_sensor:
 sensor:
   - platform: wifi_signal
     entity_category: diagnostic
-    name: "${name} WiFi Signal Strength"
+    name: " WiFi Signal Strength"
     id: ${name}_esp_wifi_signal_strength
     unit_of_measurement: dBm
     device_class: signal_strength

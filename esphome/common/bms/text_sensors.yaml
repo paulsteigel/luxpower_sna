@@ -1,24 +1,24 @@
 text_sensor:
   - platform: jk_bms
     errors:
-      name: "${name} errors"
+      name: " errors"
     operation_mode:
-      name: "${name} operation mode"
+      name: " operation mode"
     battery_type:
-      name: "${name} battery type"
+      name: " battery type"
     password:
-      name: "${name} password"
+      name: " password"
     device_type:
-      name: "${name} device type"
+      name: " device type"
     software_version:
-      name: "${name} software version"
+      name: " software version"
     manufacturer:
-      name: "${name} manufacturer"
+      name: " manufacturer"
     total_runtime_formatted:
-      name: "${name} total runtime formatted"
+      name: " total runtime formatted"
   - platform: template
-    name: "${name} Charging Status"
+    name: " Charging Status"
     id: ${name}_charging_status
   - platform: template
-    name: "${name} CANBUS Status"
+    name: " CANBUS Status"
     id: ${name}_canbus_status

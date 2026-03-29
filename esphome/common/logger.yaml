@@ -6,19 +6,19 @@ debug:
 sensor:
   - platform: debug
     free:                          # ← đổi từ free_heap thành free
-      name: "${name} Free Heap"
+      name: " Free Heap"
       id: free_heap_sensor
 
 text_sensor:
   - platform: debug
     reset_reason:
-      name: "${name} Reset Reason"
+      name: " Reset Reason"
 
 interval:
   - interval: 120s  # ← tăng từ 60s, giảm MQTT allocation spike (không ảnh hưởng logic)
     then:
       - mqtt.publish:
-          topic: "${name}/heartbeat"
+          topic: "/heartbeat"
           retain: true
           payload: !lambda |-
             char buf[128];
