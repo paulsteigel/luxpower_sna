@@ -34,11 +34,12 @@ logger:
 # ── Connectivity ─────────────────────────────────────────────
 mqtt:
   keepalive: 60s
-  reboot_timeout: 0s
+  reboot_timeout: 15min
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
   client_id: ${name}_mqtt
+  clean_session: true
 
 wifi:
   use_address: ${name}.freemyip.com 
