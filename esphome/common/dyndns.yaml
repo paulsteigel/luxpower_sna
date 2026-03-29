@@ -55,4 +55,5 @@ text:
     optimistic: true
     restore_value: true
     initial_value: ""
+    mode: text
     entity_category: config
