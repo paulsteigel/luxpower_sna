@@ -4,7 +4,7 @@
 # ============================================================
 
 substitutions:
-  name: bms_node 
+  name: homehna 
   # ── GPIO pins (cố định trên PCB) ─────────────────────────
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
@@ -30,8 +30,8 @@ esp32:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 esphome:
-  name: bms_node
-  name_add_mac_suffix: true   # ← bms_node_a4cf12, unique theo MAC
+  name: homehna
+  name_add_mac_suffix: true   # ← homehna_a4cf12, unique theo MAC
 
 logger:
   level: WARN
