@@ -43,8 +43,8 @@ mqtt:
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
-  client_id: !lambda |-       # ← unique theo MAC, không cần compile
-    return "esp_" + get_mac_address();
+  #client_id: !lambda |-       # ← unique theo MAC, không cần compile
+  #  return "esp_" + get_mac_address();
   clean_session: true         # ← fix OOM broker
 
 wifi:
