@@ -60,7 +60,7 @@ globals:
 
 select:
   - platform: template
-    name: " LFP DOD Profile"
+    name: "LFP DOD Profile"
     id: ${name}_battery_chemistry
     options:
       - "LFP Conservative (DOD 65%)"
@@ -72,7 +72,7 @@ select:
 
 sensor:
   - platform: template
-    name: " Adaptive Charging Current"
+    name: "Adaptive Charging Current"
     id: ${name}_adaptive_charging_current
     unit_of_measurement: "A"
     accuracy_decimals: 1
@@ -80,7 +80,7 @@ sensor:
     state_class: measurement
 
   - platform: template
-    name: " Adaptive Discharging Current"
+    name: "Adaptive Discharging Current"
     id: ${name}_adaptive_discharging_current
     unit_of_measurement: "A"
     accuracy_decimals: 1
@@ -90,8 +90,8 @@ sensor:
   # ── SOC FILTER ─────────────────────────────────────────────────
   - platform: copy
     source_id: capacity_remaining
-    name: " capacity_remaining"
-    id: "_capacity_remaining"
+    name: "capacity_remaining"
+    id: "${name}_capacity_remaining"
     unit_of_measurement: "%"
     device_class: battery
     internal: true
@@ -127,7 +127,7 @@ sensor:
   # =================================================================
   - platform: copy
     source_id: min_cell_voltage
-    name: " Adaptive Discharge Control"
+    name: "Adaptive Discharge Control"
     id: ${name}_adaptive_discharge_control
     internal: true
     on_value:
@@ -438,7 +438,7 @@ sensor:
   # =================================================================
   - platform: copy
     source_id: max_cell_voltage
-    name: " Adaptive Charge Control"
+    name: "Adaptive Charge Control"
     id: ${name}_adaptive_charge_control
     internal: true
     on_value:
@@ -749,7 +749,7 @@ sensor:
 # =================================================================
 text_sensor:
   - platform: template
-    name: " CCCV Phase"
+    name: "CCCV Phase"
     id: ${name}_adaptive_status
     update_interval: 2s
     lambda: |-
@@ -796,7 +796,7 @@ text_sensor:
       return {s};
 
   - platform: template
-    name: " Battery Health"
+    name: "Battery Health"
     id: ${name}_battery_health
     update_interval: 30s
     lambda: |-
@@ -809,7 +809,7 @@ text_sensor:
       return {h + " (dV=" + to_string((int)dv) + "mV)"};
 
   - platform: template
-    name: " LFP Settings Check"
+    name: "LFP Settings Check"
     id: ${name}_chemistry_check
     update_interval: 30s
     lambda: |-

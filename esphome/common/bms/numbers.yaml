@@ -3,7 +3,7 @@
 # +--------------------------------------+
 number:
   - platform: template
-    name: " Max charge voltage"
+    name: "Max charge voltage"
     id: "max_charge_voltage"
     step: 10
     min_value: 3450
@@ -14,11 +14,10 @@ number:
     icon: mdi:battery-charging
     optimistic: true
     restore_value: true
-    entity_category: config    
-    
+    entity_category: config
 
   - platform: template
-    name: " Float voltage"
+    name: "Float voltage"
     id: "float_voltage"
     step: 10
     min_value: 3400
@@ -36,12 +35,11 @@ number:
             float slider_value = id(float_voltage).state;
 
   - platform: template
-    name: " Charging current max"
+    name: "Charging current max"
     id: "charging_current"
     step: 1
     min_value: 0
     max_value: "${charge_a}"
-    #mode: slider
     initial_value: "${charge_a}"
     unit_of_measurement: A
     icon: mdi:current-dc
@@ -52,29 +50,26 @@ number:
       then:
         - lambda: |-
             float slider_value = id(charging_current).state;
-    
 
   - platform: template
-    name: " Discharging current max"
+    name: "Discharging current max"
     id: "discharging_current"
     step: 1
     min_value: 0
     max_value: "${discharge_a}"
-    #mode: slider
     initial_value: "${discharge_a}"
     unit_of_measurement: A
     icon: mdi:current-dc
     optimistic: true
     restore_value: true
-    entity_category: config         
+    entity_category: config
     on_value:
       then:
         - lambda: |-
             float slider_value = id(discharging_current).state;
 
-# this for helping to calculate the proper current seding to the inverter    
   - platform: template
-    name: " Parrallel packs's capacity (Ah)"
+    name: "Parallel packs capacity (Ah)"
     id: "parrallel_packs_capacity_ah"
     step: 1
     min_value: 0
@@ -84,11 +79,11 @@ number:
     unit_of_measurement: Ah
     icon: mdi:sine-wave
     optimistic: true
-    restore_value: true    
-    entity_category: config 
+    restore_value: true
+    entity_category: config
 
   - platform: template
-    name: " Over voltage protection"
+    name: "Over voltage protection"
     id: "can_over_voltage_protection"
     step: 5
     min_value: 3400
@@ -99,10 +94,10 @@ number:
     icon: mdi:sine-wave
     optimistic: true
     restore_value: true
-    entity_category: config    
+    entity_category: config
 
   - platform: template
-    name: " Under voltage protection CAN bus"
+    name: "Under voltage protection CAN bus"
     id: "can_under_voltage_protection"
     step: 10
     min_value: 3100
@@ -113,11 +108,10 @@ number:
     icon: mdi:sine-wave
     optimistic: true
     restore_value: true
-    entity_category: config    
-           
-  
+    entity_category: config
+
   - platform: template
-    name: " Stop discharging SOC"
+    name: "Stop discharging SOC"
     id: "can_soc_stop_discharging"
     step: 1
     min_value: 10
@@ -128,10 +122,10 @@ number:
     optimistic: true
     restore_value: true
     entity_category: config
- 
+
   - platform: template
-    name: " Voltage recovery gap"
-    id: "_voltage_recovery_gap"
+    name: "Voltage recovery gap"
+    id: "${name}_voltage_recovery_gap"
     step: 1
     min_value: 5
     max_value: 50
