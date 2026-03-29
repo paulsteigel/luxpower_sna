@@ -1,7 +1,7 @@
 # homehnm.yaml — chỉ còn thế này!
 substitutions:
   luxid: lux
-
+  #09b0a2807898a8d32ac01a4f
 esphome:
   name: bms_node
   on_boot:

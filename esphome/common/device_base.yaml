@@ -4,6 +4,7 @@
 # ============================================================
 
 substitutions:
+  name: bms_node 
   # ── GPIO pins (cố định trên PCB) ─────────────────────────
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
