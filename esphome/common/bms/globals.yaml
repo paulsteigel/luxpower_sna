@@ -1,111 +1,72 @@
-# +--------------------------------------+
-# | ** Don't make changes below this **  |
-# +--------------------------------------+
+# =================================================================
+# globals.yaml — Shared state only
+# =================================================================
+# Chỉ chứa globals được đọc/ghi bởi NHIỀU HƠN 1 module.
+# Controller-internal globals → charge_discharge_controller.yaml
+# Numbers/sliders             → charge_discharge_controller.yaml
+#
+# Interface CVL/DVL (controller → transport):
+#   g_cvl_v  : CVL pack voltage (V) — viết bởi CVL Calculator
+#   g_dvl_v  : DVL pack voltage (V) — viết bởi CVL Calculator
+#              đọc bởi 0x351 / modbus / bất kỳ transport nào
+# =================================================================
+
 globals:
+
+  # ── CAN Bus state ──────────────────────────────────────────────
   - id: can_ack_counter
     type: int
     restore_value: no
     initial_value: '0'
-  - id: cv_counter
-    type: int
-    restore_value: yes
-    initial_value: '0'
-  - id: charge_status
-    type: std::string
-    restore_value: no
-    initial_value: '"Wait"'
-  - id: can_status
-    type: std::string
-    restore_value: no
-    initial_value: '"OFF"'
-  - id: alarm_status
-    type: std::string
-    restore_value: no
-    initial_value: '"NoAlarm"'
-  - id: charging_v
-    type: uint16_t
-    restore_value: no
-  - id: report_soc
-    type: uint16_t
-    restore_value: no
-    initial_value: '0'
-  - id: charging_a
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: discharging_a
-    type: int
-    restore_value: no
-    initial_value: '0'
+
   - id: can_msg_counter
     type: int
     restore_value: no
     initial_value: '0'
-  - id: ${name}_service
-    type: bool
-    restore_value: no
-    initial_value: 'true'
-  - id: ${name}_charge_status
-    type: std::string
-    restore_value: no
-    initial_value: '"Wait"'
-  - id: ${name}_canbus_name
-    type: std::string
-    restore_value: no
-  - id: ${name}_canbus_protocol
-    type: std::string
-    restore_value: no
-  - id: ${name}_mominal_v
-    type: float
-    restore_value: no
-    initial_value: '0.0'
-  - id: ${name}_min_charge_v
-    type: float
-    restore_value: no
-    initial_value: '0.0'
-  - id: ${name}_max_charge_v
-    type: float
-    restore_value: no
-    initial_value: '0.0'
-  - id: ${name}_auto_cvl
-    type: float
-    restore_value: no
-    initial_value: '-1.0'
-  - id: ${name}_auto_ccl
-    type: float
-    restore_value: no
-    initial_value: '-1.0'
-  - id: ${name}_auto_dcl
-    type: float
-    restore_value: no
-    initial_value: '-1.0'
-  - id: ${name}_eoc
-    type: bool
-    restore_value: no
-    initial_value: 'false'
-  - id: ${name}_eoc_timestamp
-    type: time_t
-    restore_value: yes
-    initial_value: '0'
 
-  # ── NEW: required by charge_discharge_control.yaml V4.5 ────
-  - id: ${name}_cc_memory_valid
-    type: bool
+  - id: can_status
+    type: std::string
     restore_value: no
-    initial_value: 'false'
-  - id: ${name}_last_safe_cc_a
-    type: float
-    restore_value: no
-    initial_value: '5.0'
-  - id: ${name}_last_charge_end_ms
-    type: uint32_t
-    restore_value: no
-    initial_value: '0'
-  - id: ${name}_charge_phase
+    initial_value: '"OFF"'
+
+  # ── Controller → Transport interface ───────────────────────────
+  - id: charging_a
     type: int
     restore_value: no
     initial_value: '0'
-  - id: g_force_dis_stop
-    type: bool
+
+  - id: discharging_a
+    type: int
     restore_value: no
-    initial_value: 'false'
+    initial_value: '0'
+
+  - id: charge_status
+    type: std::string
+    restore_value: no
+    initial_value: '"Wait"'
+
+  - id: alarm_status
+    type: std::string
+    restore_value: no
+    initial_value: '"NoAlarm"'
+
+  - id: report_soc
+    type: uint16_t
+    restore_value: no
+    initial_value: '0'
+
+  # ── CVL / DVL interface: controller → transport ─────────────────
+  - id: g_cvl_v
+    type: float
+    restore_value: no
+    initial_value: '-1.0'
+
+  - id: g_dvl_v
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+  # ── Device identity ────────────────────────────────────────────
+  - id: ${name}_canbus_name
+    type: std::string
+    restore_value: no

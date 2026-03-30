@@ -3,7 +3,7 @@ substitutions:
   luxid: lux
   #09b0a2807898a8d32ac01a4f
 esphome:
-  name: bms_node
+  name: homehna
   on_boot:
     then:
       - switch.turn_on: switch_charging
@@ -29,4 +29,4 @@ packages:
       - esphome/common/bms/canbus_luxpower.yaml
       - esphome/common/bms/charge_discharge_controller.yaml
       - esphome/common/bms/jk_bms_base.yaml
-      - esphome/common/bms/jk_bms_cells_15.yaml
+      - esphome/common/bms/jk_bms_cells_16.yaml

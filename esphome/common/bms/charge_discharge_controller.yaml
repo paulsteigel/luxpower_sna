@@ -1,8 +1,9 @@
 # =================================================================
 # ADAPTIVE BATTERY CONTROL SYSTEM - V12
 # =================================================================
-# Mỗi chiều (CHG / DIS) là một state machine độc lập:
+# Self-contained: globals nội bộ + sliders + logic CHG/DIS + CVL
 #
+# Mỗi chiều (CHG / DIS) là một state machine độc lập:
 #   SOFTSTART (0) → ADAPTIVE (1) → STOPPED (2)
 #
 # DISCHARGE SOFTSTART — 2 exit paths:
@@ -18,58 +19,245 @@
 # STOPPED = giữ output=0, chờ direction change → SOFTSTART mới
 # Reset về SOFTSTART: CHỈ khi đổi chiều
 # Safety: below_uvp / above_ovp dùng RAW voltage
+#
+# CVL CALCULATOR (cuối file):
+#   CVL = max_charge_voltage × cells  (user slider, không dynamic)
+#   DVL = (UVP + gap × 0.5) × cells
+#   Rate limit ±0.5V/s → tránh DC bus spike
+#   Output → g_cvl_v / g_dvl_v (globals.yaml) → đọc bởi transport
 # =================================================================
 
+# =================================================================
+# GLOBALS — Controller-internal
+# =================================================================
 globals:
+
   - id: g_startup_done
     type: bool
     restore_value: no
     initial_value: 'false'
+
   - id: g_startup_ms
     type: uint32_t
     restore_value: no
     initial_value: '0'
+
   - id: g_dis_state
     type: int
     restore_value: no
     initial_value: '0'
+
   - id: g_dis_cx
     type: float
     restore_value: no
     initial_value: '-1.0'
+
   - id: g_dis_ceiling
     type: float
     restore_value: no
     initial_value: '-1.0'
+
   - id: g_dis_k_est      # sag mV/A — persist qua reboot, 280Ah LFP ≈ 1.8
     type: float
-    restore_value: yes    # đổi lại yes sau lần flash đầu để reset giá trị cũ
+    restore_value: yes
     initial_value: '1.8'
+
   - id: g_chg_state
     type: int
     restore_value: no
     initial_value: '0'
+
   - id: g_chg_cx
     type: float
     restore_value: no
     initial_value: '-1.0'
+
   - id: g_chg_ceiling
     type: float
     restore_value: no
     initial_value: '-1.0'
 
-select:
-  - platform: template
-    name: "LFP DOD Profile"
-    id: ${name}_battery_chemistry
-    options:
-      - "LFP Conservative (DOD 65%)"
-      - "LFP Balanced (DOD 70%)"
-      - "LFP Performance (DOD 80%)"
-    initial_option: "LFP Balanced (DOD 70%)"
-    restore_value: true
-    optimistic: true
+  - id: cv_counter
+    type: int
+    restore_value: yes
+    initial_value: '0'
 
+  - id: ${name}_eoc
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ${name}_eoc_timestamp
+    type: time_t
+    restore_value: yes
+    initial_value: '0'
+
+  - id: ${name}_cc_memory_valid
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ${name}_last_safe_cc_a
+    type: float
+    restore_value: no
+    initial_value: '5.0'
+
+  - id: ${name}_last_charge_end_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: ${name}_charge_phase
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: g_force_dis_stop
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# =================================================================
+# SLIDERS — Tất cả tunables tập trung tại đây
+# =================================================================
+# Default đã ở chế độ tối ưu — chỉnh khi có lý do cụ thể
+# =================================================================
+number:
+
+  - platform: template
+    name: "Max charge voltage"
+    id: max_charge_voltage
+    # CVL target gửi cho inverter.
+    # Tăng khi solar yếu để lấy thêm dòng (vd 3650mV → ~48A).
+    # CCL adaptive lo CV phase, BMS OVP là safety backstop.
+    # Cảnh báo: không đặt cao hơn can_over_voltage_protection!
+    step: 10
+    min_value: 3450
+    max_value: 3700
+    mode: slider
+    initial_value: 3450
+    unit_of_measurement: mV
+    icon: mdi:battery-charging
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+  - platform: template
+    name: "Over voltage protection"
+    id: can_over_voltage_protection
+    # BMS hard stop — lớp bảo vệ pin thực sự.
+    # CCL adaptive bắt đầu taper khi max_cell vào (OVP - gap).
+    # ≤ 3450mV để bảo toàn tuổi thọ LFP.
+    step: 5
+    min_value: 3400
+    max_value: 3510
+    mode: slider
+    initial_value: 3400
+    unit_of_measurement: mV
+    icon: mdi:sine-wave
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+  - platform: template
+    name: "Under voltage protection"
+    id: can_under_voltage_protection
+    # BMS stop discharge.
+    # DVL = (UVP + gap/2) × cells — inverter dừng trước UVP taper.
+    step: 10
+    min_value: 3100
+    max_value: 3350
+    mode: slider
+    initial_value: 3150
+    unit_of_measurement: mV
+    icon: mdi:sine-wave
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+  - platform: template
+    name: "Charging current max"
+    id: charging_current
+    # CCL ceiling — adaptive controller không vượt giá trị này.
+    step: 1
+    min_value: 0
+    max_value: "${charge_a}"
+    initial_value: "${charge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      then:
+        - lambda: |-
+            float slider_value = id(charging_current).state;
+
+  - platform: template
+    name: "Discharging current max"
+    id: discharging_current
+    # DCL ceiling — adaptive controller không vượt giá trị này.
+    step: 1
+    min_value: 0
+    max_value: "${discharge_a}"
+    initial_value: "${discharge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      then:
+        - lambda: |-
+            float slider_value = id(discharging_current).state;
+
+  - platform: template
+    name: "Voltage recovery gap"
+    id: ${name}_voltage_recovery_gap
+    # Khoảng cách (mV) từ UVP/OVP mà adaptive bắt đầu taper.
+    # Nhỏ → taper muộn hơn, dùng được nhiều pin hơn.
+    # Lớn → taper sớm hơn, an toàn hơn với pin yếu.
+    step: 1
+    min_value: 5
+    max_value: 50
+    mode: slider
+    initial_value: 5
+    icon: mdi:battery-20
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+  - platform: template
+    name: "Stop discharging SOC"
+    id: can_soc_stop_discharging
+    step: 1
+    min_value: 10
+    max_value: 50
+    mode: slider
+    initial_value: 20
+    icon: mdi:battery-20
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+  - platform: template
+    name: "Parallel packs capacity (Ah)"
+    id: parrallel_packs_capacity_ah
+    # Để 0 nếu chỉ 1 pack (capacity đọc trực tiếp từ BMS).
+    step: 1
+    min_value: 0
+    max_value: 480
+    mode: slider
+    initial_value: 0
+    unit_of_measurement: Ah
+    icon: mdi:sine-wave
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+# =================================================================
+# SENSORS
+# =================================================================
 sensor:
   - platform: template
     name: "Adaptive Charging Current"
@@ -199,7 +387,6 @@ sensor:
               return (float)(int)r;
             };
 
-            // FIRST RUN
             if (first_run) {
               for (int i = 0; i < 5; i++) vbuf[i] = raw_mv;
               vbuf_ready = true; smv = raw_mv; first_run = false;
@@ -215,7 +402,6 @@ sensor:
               return;
             }
 
-            // STARTUP HOLD
             if (!id(g_startup_done)) {
               id(discharging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
@@ -225,13 +411,11 @@ sensor:
               return;
             }
 
-            // MANUAL MODE
             if (!auto_mode) {
               current_out_a = dis_enabled ? max_i : 0.0f;
               goto publish_dis;
             }
 
-            // DIRECTION CHANGE: xả→sạc
             if (is_charging && !was_charging) {
               ESP_LOGI("DIS", "DIR→CHG: reset state=%d", state);
               state = 0; cx = -1.0f; ceiling = -1.0f;
@@ -246,7 +430,6 @@ sensor:
               goto publish_dis;
             }
 
-            // SESSION EDGE
             if (is_discharging && !was_discharging) {
               state = 0; cx = -1.0f; ceiling = -1.0f;
               ramp_cur = std::min(PROBE_A, max_i);
@@ -258,7 +441,6 @@ sensor:
             }
             was_discharging = is_discharging;
 
-            // K LEARNING
             if (safe_zone && state == 1) {
               float i_act = -current_val;
               float di = i_act - k_i0, dv = k_v0 - smv;
@@ -277,11 +459,7 @@ sensor:
               }
             }
 
-            // ══════════════════════════════════════════════
-            // STATE 0: SOFTSTART
-            // ══════════════════════════════════════════════
             if (state == 0) {
-              // Hard stop
               if (!dis_enabled || below_uvp) {
                 cx = 0.0f; state = 2; ceiling = 0.0f;
                 id(g_dis_cx) = 0.0f; id(g_dis_state) = 2; id(g_dis_ceiling) = 0.0f;
@@ -291,7 +469,6 @@ sensor:
                 goto publish_dis;
               }
 
-              // Unsafe zone: Cx=5A → ADAPTIVE ratchet xuống
               if (unsafe_zone) {
                 cx = std::min(5.0f, max_i);
                 ceiling = cx; state = 1;
@@ -301,24 +478,17 @@ sensor:
                 goto publish_dis;
               }
 
-              // Safe zone: probe 3s → ramp
               current_out_a = ramp_cur;
-              if ((now - soft_start_ms) < SOFT_START_MS) {
-                goto publish_dis;
-              }
+              if ((now - soft_start_ms) < SOFT_START_MS) goto publish_dis;
 
-              // Sau probe: kiểm tra exit
               {
                 float i_actual = -current_val;
                 float c_gap    = ramp_cur - i_actual;
                 bool  plateau  = (c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
-                // EXIT 1.1.1.1: voltage drop vào unsafe TRONG KHI ramp
-                // → Cx = ramp_cur, ADAPTIVE chỉ ratchet xuống (ban đêm)
                 if (unsafe_zone) {
-                  cx = ramp_cur;
-                  ceiling = cx; state = 1;
+                  cx = ramp_cur; ceiling = cx; state = 1;
                   id(g_dis_cx) = cx; id(g_dis_ceiling) = ceiling; id(g_dis_state) = 1;
                   current_out_a = ceiling;
                   ESP_LOGI("DIS", "EXIT1[volt drop]: ramp=%.0fA→Cx=%.0fA v_head=%.0f",
@@ -326,8 +496,6 @@ sensor:
                   goto publish_dis;
                 }
 
-                // EXIT 1.1.1.2: tải bão hòa hoặc at_max
-                // → Cx = max_i, ADAPTIVE tracking 2 chiều (ban ngày)
                 if (plateau || at_max) {
                   cx = max_i;
                   ceiling = std::max(1.0f, std::min(cx,
@@ -340,7 +508,6 @@ sensor:
                   goto publish_dis;
                 }
 
-                // Tiếp tục ramp
                 if ((now - ramp_last_ms) >= STEP_INT_MS) {
                   ramp_cur     = std::min(max_i, ramp_cur + step_a);
                   ramp_last_ms = now;
@@ -351,28 +518,16 @@ sensor:
               goto publish_dis;
             }
 
-            // ══════════════════════════════════════════════
-            // STATE 1: ADAPTIVE
-            // cx < max_i → EXIT1: chỉ ratchet XUỐNG
-            // cx = max_i → EXIT2: tracking 2 chiều theo v_head
-            // unsafe zone: luôn chỉ giảm
-            // below_uvp:   về 0 ngay
-            // ══════════════════════════════════════════════
             if (state == 1) {
               float k_ceil;
               if (below_uvp) {
                 k_ceil = 0.0f;
               } else if (unsafe_zone) {
                 float candidate = calc_cx(CX_UNSAFE_RATIO, -1.0f);
-                k_ceil = std::min(ceiling, candidate);  // chỉ giảm
+                k_ceil = std::min(ceiling, candidate);
               } else {
-                // safe zone
                 float v_based = std::min(cx, (float)(int)calc_cx(CX_SAFE_RATIO, -1.0f));
-                if (cx >= max_i - 0.5f) {
-                  k_ceil = v_based;               // EXIT2: 2 chiều
-                } else {
-                  k_ceil = std::min(ceiling, v_based);  // EXIT1: chỉ giảm
-                }
+                k_ceil = (cx >= max_i - 0.5f) ? v_based : std::min(ceiling, v_based);
               }
 
               float new_ceil = std::max(0.0f, k_ceil);
@@ -404,9 +559,6 @@ sensor:
               goto publish_dis;
             }
 
-            // ══════════════════════════════════════════════
-            // STATE 2: STOPPED — chờ direction change
-            // ══════════════════════════════════════════════
             if (state == 2) {
               current_out_a = 0.0f;
               id(discharging_a) = 0;
@@ -431,10 +583,6 @@ sensor:
 
   # =================================================================
   # CHARGE CONTROLLER V12
-  # Đối xứng với Discharge, thay UVP↔OVP, min_cv↔max_cv
-  # SOFTSTART EXIT tương tự:
-  #   EXIT 1.1.1.1: cell_max tăng vào unsafe → Cx=ramp_cur, chỉ ratchet xuống
-  #   EXIT 1.1.1.2: solar bão hòa → Cx=max_i, ADAPTIVE taper pos²
   # =================================================================
   - platform: copy
     source_id: max_cell_voltage
@@ -503,7 +651,6 @@ sensor:
             float cx      = id(g_chg_cx);
             float ceiling = id(g_chg_ceiling);
 
-            // FIRST RUN
             if (first_run) {
               for (int i = 0; i < 5; i++) vbuf[i] = raw_mv;
               vbuf_ready = true; smv = raw_mv; first_run = false;
@@ -519,7 +666,6 @@ sensor:
               return;
             }
 
-            // STARTUP HOLD
             if (!id(g_startup_done)) {
               id(charging_a) = 5;
               if ((now - (unsigned long)id(g_startup_ms)) >= STARTUP_HOLD_MS) {
@@ -529,13 +675,11 @@ sensor:
               return;
             }
 
-            // MANUAL MODE
             if (!auto_mode) {
               current_out_a = chg_enabled ? max_i : 0.0f;
               goto publish_chg;
             }
 
-            // DIRECTION CHANGE: sạc→xả
             if (is_discharging && !was_discharging) {
               ESP_LOGI("CHG", "DIR→DIS: reset state=%d", state);
               state = 0; cx = -1.0f; ceiling = -1.0f;
@@ -550,7 +694,6 @@ sensor:
               goto publish_chg;
             }
 
-            // SESSION EDGE
             if (is_charging && !was_charging) {
               state = 0; cx = -1.0f; ceiling = -1.0f;
               ramp_cur = std::min(PROBE_A, max_i);
@@ -562,11 +705,7 @@ sensor:
             }
             was_charging = is_charging;
 
-            // ══════════════════════════════════════════════
-            // STATE 0: SOFTSTART
-            // ══════════════════════════════════════════════
             if (state == 0) {
-              // Hard stop
               if (!chg_enabled || above_ovp) {
                 cx = 0.0f; state = 2; ceiling = 0.0f;
                 id(g_chg_cx) = 0.0f; id(g_chg_state) = 2; id(g_chg_ceiling) = 0.0f;
@@ -576,21 +715,16 @@ sensor:
                 goto publish_chg;
               }
 
-              // Unsafe zone: Cx=5A → ADAPTIVE taper từ 5A xuống
               if (unsafe_zone) {
-                cx = std::min(5.0f, max_i);
-                ceiling = cx; state = 1;
+                cx = std::min(5.0f, max_i); ceiling = cx; state = 1;
                 id(g_chg_cx) = cx; id(g_chg_ceiling) = ceiling; id(g_chg_state) = 1;
                 current_out_a = cx;
                 ESP_LOGI("CHG", "SOFT→ADAP(unsafe): Cx=5A v_head=%.0f", v_head);
                 goto publish_chg;
               }
 
-              // Safe zone: probe 3s → ramp
               current_out_a = ramp_cur;
-              if ((now - soft_start_ms) < SOFT_START_MS) {
-                goto publish_chg;
-              }
+              if ((now - soft_start_ms) < SOFT_START_MS) goto publish_chg;
 
               {
                 float i_actual = current_val;
@@ -598,11 +732,8 @@ sensor:
                 bool  plateau  = (c_gap >= PLATEAU_GAP_A && i_actual > 2.0f);
                 bool  at_max   = (ramp_cur >= max_i - 0.5f);
 
-                // EXIT 1.1.1.1: cell_max tăng vào unsafe TRONG KHI ramp
-                // → Cx = ramp_cur, ADAPTIVE chỉ ratchet xuống
                 if (unsafe_zone) {
-                  cx = ramp_cur;
-                  ceiling = cx; state = 1;
+                  cx = ramp_cur; ceiling = cx; state = 1;
                   id(g_chg_cx) = cx; id(g_chg_ceiling) = ceiling; id(g_chg_state) = 1;
                   current_out_a = ceiling;
                   ESP_LOGI("CHG", "EXIT1[volt rise]: ramp=%.0fA→Cx=%.0fA v_head=%.0f",
@@ -610,11 +741,8 @@ sensor:
                   goto publish_chg;
                 }
 
-                // EXIT 1.1.1.2: solar bão hòa hoặc at_max
-                // → Cx = max_i, ADAPTIVE taper pos²
                 if (plateau || at_max) {
-                  cx = max_i;
-                  ceiling = cx; state = 1;
+                  cx = max_i; ceiling = cx; state = 1;
                   id(g_chg_cx) = cx; id(g_chg_ceiling) = ceiling; id(g_chg_state) = 1;
                   current_out_a = ceiling;
                   ESP_LOGI("CHG", "EXIT2[%s]: B=%.1fA gap=%.1fA→Cx=max=%.0fA v_head=%.0f",
@@ -622,7 +750,6 @@ sensor:
                   goto publish_chg;
                 }
 
-                // Tiếp tục ramp
                 unsigned long step_int = free_zone ? STEP_FREE_MS : STEP_APPR_MS;
                 if ((now - ramp_last_ms) >= step_int) {
                   ramp_cur     = std::min(max_i, ramp_cur + step_a);
@@ -635,30 +762,21 @@ sensor:
               goto publish_chg;
             }
 
-            // ══════════════════════════════════════════════
-            // STATE 1: ADAPTIVE
-            // cx < max_i → EXIT1: chỉ ratchet XUỐNG
-            // cx = max_i → EXIT2: taper pos² trong unsafe, giữ nguyên safe
-            // above_ovp:  về 0 ngay
-            // ══════════════════════════════════════════════
             if (state == 1) {
               float k_ceil;
               if (above_ovp) {
                 k_ceil = 0.0f;
               } else if (unsafe_zone) {
                 if (cx >= max_i - 0.5f) {
-                  // EXIT2: taper pos²
                   float pos = std::max(0.0f, std::min(1.0f,
                                 (smv - taper_start) / gap));
                   k_ceil = (float)(int)(max_i * std::pow(1.0f - pos, TAPER_EXP));
                   k_ceil = std::max(0.0f, k_ceil);
                 } else {
-                  // EXIT1: chỉ giảm
                   float candidate = (float)(int)((v_head / gap) * cx * 0.5f);
                   k_ceil = std::min(ceiling, std::max(0.0f, candidate));
                 }
               } else {
-                // safe zone: giữ nguyên
                 k_ceil = ceiling;
               }
 
@@ -682,7 +800,6 @@ sensor:
                 goto publish_chg;
               }
 
-              // C/20 EOC
               if (smv >= taper_start) {
                 unsigned long dt = now - cterm_check_ms;
                 cterm_check_ms = now;
@@ -720,9 +837,6 @@ sensor:
               goto publish_chg;
             }
 
-            // ══════════════════════════════════════════════
-            // STATE 2: STOPPED
-            // ══════════════════════════════════════════════
             if (state == 2) {
               current_out_a = 0.0f;
               id(charging_a) = 0;
@@ -743,6 +857,95 @@ sensor:
               ESP_LOGI("CHG", "→%.0fA V=%.0f %s", current_out_a, smv, s < 3 ? sn[s] : "?");
             }
             id(charging_a) = (int)current_out_a;
+
+  # =================================================================
+  # CVL / DVL CALCULATOR
+  # =================================================================
+  # Logic cố ý đơn giản — KHÔNG dynamic:
+  #   CVL = max_charge_voltage × cells
+  #         User chỉnh slider khi muốn tăng dòng solar.
+  #         CCL adaptive lo CV phase, BMS OVP là safety backstop.
+  #   DVL = (UVP + gap × 0.5) × cells
+  #         Inverter stop discharge trước UVP taper của DCL adaptive.
+  # Rate limit ±0.5V/s → tránh DC bus spike khi chỉnh slider.
+  # Output: g_cvl_v / g_dvl_v (globals.yaml) → transport layer.
+  # =================================================================
+  - platform: copy
+    source_id: max_cell_voltage
+    name: "CVL Calculator"
+    id: ${name}_cvl_calculator
+    internal: true
+    on_value:
+      then:
+        - lambda: !lambda |-
+            static const float CV_RATE_MAX = 0.5f;
+            static float last_cvl = -1.0f;
+            static float last_dvl = -1.0f;
+
+            if (isnan(x)) return;
+
+            float cells = (!isnan(id(battery_strings).state) &&
+                            id(battery_strings).state > 0)
+                          ? id(battery_strings).state : 16.0f;
+
+            float max_chg_mv = id(max_charge_voltage).state;
+            float uvp_mv     = id(can_under_voltage_protection).state;
+            float gap_mv     = id(${name}_voltage_recovery_gap).state;
+
+            if (isnan(max_chg_mv) || isnan(uvp_mv) || isnan(gap_mv) ||
+                max_chg_mv <= 0  || uvp_mv <= 0    || gap_mv <= 0)
+              return;
+
+            float cvl_v = (max_chg_mv / 1000.0f) * cells;
+            float dvl_v = ((uvp_mv + gap_mv * 0.5f) / 1000.0f) * cells;
+
+            if (last_cvl < 0.0f) { last_cvl = cvl_v; last_dvl = dvl_v; }
+
+            float dc = cvl_v - last_cvl;
+            if      (dc >  CV_RATE_MAX) cvl_v = last_cvl + CV_RATE_MAX;
+            else if (dc < -CV_RATE_MAX) cvl_v = last_cvl - CV_RATE_MAX;
+            last_cvl = cvl_v;
+
+            float dd = dvl_v - last_dvl;
+            if      (dd >  CV_RATE_MAX) dvl_v = last_dvl + CV_RATE_MAX;
+            else if (dd < -CV_RATE_MAX) dvl_v = last_dvl - CV_RATE_MAX;
+            last_dvl = dvl_v;
+
+            id(g_cvl_v) = cvl_v;
+            id(g_dvl_v) = dvl_v;
+
+            static float prev_cvl = -1.0f;
+            static float prev_dvl = -1.0f;
+            if (std::abs(cvl_v - prev_cvl) > 0.05f ||
+                std::abs(dvl_v - prev_dvl) > 0.05f) {
+              ESP_LOGI("CVL", "CVL=%.2fV (%.0fmV×%.0f) DVL=%.2fV (UVP=%.0f+%.0f)",
+                       cvl_v, max_chg_mv, cells, dvl_v, uvp_mv, gap_mv * 0.5f);
+              prev_cvl = cvl_v; prev_dvl = dvl_v;
+            }
+
+  - platform: template
+    name: "CVL Pack Voltage"
+    id: ${name}_cvl_pack_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+    update_interval: 10s
+    lambda: |-
+      float v = id(g_cvl_v);
+      return (v > 0.0f) ? v : NAN;
+
+  - platform: template
+    name: "DVL Pack Voltage"
+    id: ${name}_dvl_pack_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+    update_interval: 10s
+    lambda: |-
+      float v = id(g_dvl_v);
+      return (v > 0.0f) ? v : NAN;
 
 # =================================================================
 # STATUS SENSORS
@@ -816,11 +1019,13 @@ text_sensor:
       float ovp  = id(can_over_voltage_protection).state;
       float uvp  = id(can_under_voltage_protection).state;
       float gap  = id(${name}_voltage_recovery_gap).state;
+      float mcv  = id(max_charge_voltage).state;
       std::vector<std::string> w;
       if (ovp > 3650.0f) w.push_back("OVP>3650 HUY HOAI!");
       if (uvp < 2500.0f) w.push_back("UVP<2500 HUY HOAI!");
       if (ovp > 3550.0f && ovp <= 3650.0f) w.push_back("OVP>3550 tuoi tho giam");
       if (uvp < 2800.0f && uvp >= 2500.0f) w.push_back("UVP<2800 xa sau");
+      if (mcv > ovp) w.push_back("MaxChgV>OVP: BMS se ngat lien tuc!");
       float td = uvp + gap, tc = ovp - gap;
       if (td >= ovp) w.push_back("UVP+gap>=OVP!");
       if (tc <= uvp) w.push_back("OVP-gap<=UVP!");

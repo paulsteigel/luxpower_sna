@@ -136,56 +136,42 @@ interval:
                   canbus.send:
                     can_id: 0x351
                     data: !lambda |-
-                      float cells = (!isnan(id(battery_strings).state) &&
-                                     id(battery_strings).state > 0)
-                                    ? id(battery_strings).state : 16.0f;
+                      // ── CVL / DVL: đọc từ controller ─────────────
+                      // g_cvl_v / g_dvl_v được tính bởi CVL Calculator
+                      // trong charge_discharge_controller.yaml
+                      float cvl_v = id(g_cvl_v);
+                      float dvl_v = id(g_dvl_v);
 
-                      // ── CVL: Auto or Manual ──────────────────────
-                      float cv_v;
-                      if (id(can_switch_auto_voltage).state) {
-                        // AUTO: taper_start = OVP - gap
-                        // Inverter targets this voltage, CCL taper
-                        // handles the CV zone above this point
-                        float ovp_mv = id(can_over_voltage_protection).state;
+                      // Fallback nếu controller chưa chạy lần nào
+                      if (cvl_v <= 0.0f) {
+                        float cells  = (!isnan(id(battery_strings).state) &&
+                                         id(battery_strings).state > 0)
+                                       ? id(battery_strings).state : 16.0f;
+                        float mcv_mv = id(max_charge_voltage).state;
+                        float uvp_mv = id(can_under_voltage_protection).state;
                         float gap_mv = id(${name}_voltage_recovery_gap).state;
-                        cv_v = ((ovp_mv - gap_mv) / 1000.0f) * cells;
-                        ESP_LOGD("LUX_CAN", "0x351 CVL AUTO: OVP=%.0fmV gap=%.0fmV → %.2fV",
-                                 ovp_mv, gap_mv, cv_v);
-                      } else {
-                        // MANUAL: max_charge_voltage slider
-                        // existing behavior — unchanged
-                        cv_v = (id(max_charge_voltage).state / 1000.0f) * cells;
+                        cvl_v = (!isnan(mcv_mv) && mcv_mv > 0)
+                                ? (mcv_mv / 1000.0f) * cells : 55.2f;
+                        dvl_v = (!isnan(uvp_mv) && uvp_mv > 0 && !isnan(gap_mv))
+                                ? ((uvp_mv + gap_mv * 0.5f) / 1000.0f) * cells : 48.5f;
+                        ESP_LOGW("LUX_CAN", "0x351 CVL fallback → %.1fV DVL → %.1fV",
+                                 cvl_v, dvl_v);
                       }
-                      uint16_t CVL = uint16_t(cv_v * 10.0f);
 
-                      // ── DVL: UVP + 30mV floor ────────────────────
-                      // Inverter stops discharge 30mV above your UVP
-                      // Your DCL taper is the fine control below this
-                      // Your UVP hard stop in lambda is the safety net
-                      float uvp_mv = id(can_under_voltage_protection).state;
-                      float dv_v   = ((uvp_mv + 30.0f) / 1000.0f) * cells;
-                      uint16_t DVL = uint16_t(dv_v * 10.0f);
+                      uint16_t CVL = uint16_t(cvl_v * 10.0f);
+                      uint16_t DVL = uint16_t(dvl_v * 10.0f);
 
-                      // ── CCL/DCL: Ramp-limited values ─────────────
-                      // Prevents sudden large current steps to inverter
-                      // Max 15A/s ramp down, 25A/s ramp up (1s cycle)
+                      // ── CCL / DCL: ramp-limited ──────────────────
                       static int last_ccl = 5;
                       static int last_dcl = 5;
 
                       int target_ccl = (id(charging_a)    > 0) ? id(charging_a)    : 5;
                       int target_dcl = (id(discharging_a) > 0) ? id(discharging_a) : 5;
 
-                      // Ramp down: max 15A per cycle
-                      // Ramp up:   max 25A per cycle
-                      if (target_ccl < last_ccl)
-                        target_ccl = std::max(target_ccl, last_ccl - 15);
-                      else
-                        target_ccl = std::min(target_ccl, last_ccl + 25);
-
-                      if (target_dcl < last_dcl)
-                        target_dcl = std::max(target_dcl, last_dcl - 15);
-                      else
-                        target_dcl = std::min(target_dcl, last_dcl + 25);
+                      if (target_ccl < last_ccl) target_ccl = std::max(target_ccl, last_ccl - 15);
+                      else                        target_ccl = std::min(target_ccl, last_ccl + 25);
+                      if (target_dcl < last_dcl)  target_dcl = std::max(target_dcl, last_dcl - 15);
+                      else                        target_dcl = std::min(target_dcl, last_dcl + 25);
 
                       last_ccl = target_ccl;
                       last_dcl = target_dcl;
@@ -203,8 +189,9 @@ interval:
                       m[4]=DCL&0xFF; m[5]=DCL>>8;
                       m[6]=DVL&0xFF; m[7]=DVL>>8;
 
-                      ESP_LOGI("LUX_CAN", "0x351 CVL=%.1fV CCL=%dA DCL=%dA DVL=%.1fV cells=%.0f",
-                        cv_v, target_ccl, target_dcl, dv_v, cells);
+                      ESP_LOGI("LUX_CAN",
+                               "0x351 CVL=%.1fV CCL=%dA DCL=%dA DVL=%.1fV",
+                               cvl_v, target_ccl, target_dcl, dvl_v);
                       return {m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]};
 
             # ======================================================
