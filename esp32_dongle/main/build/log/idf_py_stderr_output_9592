@@ -1,0 +1,72 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe -DESP_PLATFORM=1 -DCCACHE_ENABLE=1 C:\Android\luxpower_sna\esp32_dongle\main
+CMake Warning (dev) in CMakeLists.txt:
+  No project() command is present.  The top-level CMakeLists.txt file must
+  contain a literal, direct call to the project() command.  Add a line of
+  code such as
+
+    project(ProjectName)
+
+  near the top of the file, but after cmake_minimum_required().
+
+  CMake is pretending there is a "project(Project)" command on the first
+  line.
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) in CMakeLists.txt:
+  cmake_minimum_required() should be called prior to this top-level project()
+  call.  Please see the cmake-commands(7) manual for usage documentation of
+  both commands.
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Error at C:/Espressif/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:67 (message):
+  The C compiler
+
+    "C:/Espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/bin/clang.exe"
+
+  is not able to compile a simple test program.
+
+  It fails with the following output:
+
+    Change Dir: 'C:/Android/luxpower_sna/esp32_dongle/main/build/CMakeFiles/CMakeScratch/TryCompile-8k20pb'
+    
+    Run Build Command(s): C:/Espressif/tools/ninja/1.12.1/ninja.exe -v cmTC_25fde
+    [1/2] C:\Espressif\tools\esp-clang\esp-19.1.2_20250312\esp-clang\bin\clang.exe    -MD -MT CMakeFiles/cmTC_25fde.dir/testCCompiler.c.obj -MF CMakeFiles\cmTC_25fde.dir\testCCompiler.c.obj.d -o CMakeFiles/cmTC_25fde.dir/testCCompiler.c.obj -c C:/Android/luxpower_sna/esp32_dongle/main/build/CMakeFiles/CMakeScratch/TryCompile-8k20pb/testCCompiler.c
+    [2/2] C:\WINDOWS\system32\cmd.exe /C "cd . && C:\Espressif\tools\esp-clang\esp-19.1.2_20250312\esp-clang\bin\clang.exe   CMakeFiles/cmTC_25fde.dir/testCCompiler.c.obj -o cmTC_25fde.exe -Wl,--out-implib,libcmTC_25fde.dll.a -Wl,--major-image-version,0,--minor-image-version,0  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 && cd ."
+    FAILED: cmTC_25fde.exe 
+    C:\WINDOWS\system32\cmd.exe /C "cd . && C:\Espressif\tools\esp-clang\esp-19.1.2_20250312\esp-clang\bin\clang.exe   CMakeFiles/cmTC_25fde.dir/testCCompiler.c.obj -o cmTC_25fde.exe -Wl,--out-implib,libcmTC_25fde.dll.a -Wl,--major-image-version,0,--minor-image-version,0  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 && cd ."
+    ld.lld: error: unknown argument '--major-image-version'
+    ld.lld: error: unknown argument '--minor-image-version'
+    ld.lld: error: cannot open 0: No such file or directory
+    ld.lld: error: cannot open 0: No such file or directory
+    ld.lld: error: unable to find library -lkernel32
+    ld.lld: error: unable to find library -luser32
+    ld.lld: error: unable to find library -lgdi32
+    ld.lld: error: unable to find library -lwinspool
+    ld.lld: error: unable to find library -lshell32
+    ld.lld: error: unable to find library -lole32
+    ld.lld: error: unable to find library -loleaut32
+    ld.lld: error: unable to find library -luuid
+    ld.lld: error: unable to find library -lcomdlg32
+    ld.lld: error: unable to find library -ladvapi32
+    clang: error: ld command failed with exit code 1 (use -v to see invocation)
+    ninja: build stopped: subcommand failed.
+    
+    
+
+  
+
+  CMake will not be able to correctly generate this project.
+Call Stack (most recent call first):
+  CMakeLists.txt
+
+
+CMake Warning (dev) in CMakeLists.txt:
+  No cmake_minimum_required command is present.  A line of code such as
+
+    cmake_minimum_required(VERSION 3.30)
+
+  should be added at the top of the file.  The version specified may be lower
+  if you wish to support older CMake versions for this project.  For more
+  information run "cmake --help-policy CMP0000".
+This warning is for project developers.  Use -Wno-dev to suppress it.
+

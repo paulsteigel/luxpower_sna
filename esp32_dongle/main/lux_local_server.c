@@ -120,12 +120,61 @@ static bool push_hold(int sock, uint8_t seq) {
 static void handle_app_frame(const uint8_t *buf, size_t len, int sock) {
     lux_parsed_t p = lux_parse(buf, len);
 
+    // ── Heartbeat: echo back ──────────────────────────────────
     if (p.type == LUX_PKT_HEARTBEAT) {
-        // Echo heartbeat back
         send(sock, buf, len, 0);
         return;
     }
 
+    // ── READ request: respond from shared_state ───────────────
+    // ESPHome sends fn=0x04 (INPUT) or fn=0x03 (HOLD) requests
+    // and waits for a response — must reply or it times out.
+    if (p.type == LUX_PKT_READ_REQ) {
+        uint16_t start = p.reg;
+        uint16_t count = p.value;   // count is in p.value for READ_REQ
+
+        // Clamp to safe range
+        bool is_input = (p.dev_fn == LUX_FN_READ_INPUT);
+        uint16_t max  = is_input ? INPUT_REG_COUNT : HOLD_REG_COUNT;
+        if (start >= max) count = 0;
+        if (start + count > max) count = max - start;
+        if (count > 125) count = 125;
+
+        uint8_t  byte_count = count * 2;
+        uint16_t df_len     = 1 + 1 + 10 + 2 + 1 + byte_count + 2;
+        uint16_t total      = 20 + df_len;
+        uint8_t  resp[512]  = {};
+
+        // Use same seq as request so ESPHome can match it
+        uint8_t seq = (len >= 7) ? buf[6] : 1;
+        lux_build_hdr(resp, DIR_DONGLE_RESP, df_len, seq);
+
+        uint8_t *df = resp + 20;
+        df[0] = 0x01;
+        df[1] = p.dev_fn;           // echo same fn (0x03 or 0x04)
+        memcpy(df + 2, INVERTER_SN, 10);
+        df[12] = start & 0xFF;
+        df[13] = (start >> 8) & 0xFF;
+        df[14] = byte_count;
+
+        // Fill register data from shared_state (LE, same as wire format)
+        uint8_t *data = df + 15;
+        for (uint16_t i = 0; i < count; i++) {
+            uint16_t v = is_input ? reg_get_input(start + i)
+                                  : reg_get_hold(start + i);
+            data[i*2]   = v & 0xFF;
+            data[i*2+1] = (v >> 8) & 0xFF;
+        }
+
+        uint16_t crc = lux_crc16(df, df_len - 2);
+        df[df_len - 2] = crc & 0xFF;
+        df[df_len - 1] = (crc >> 8) & 0xFF;
+
+        send(sock, resp, total, 0);
+        return;
+    }
+
+    // ── WRITE single ──────────────────────────────────────────
     if (p.type == LUX_PKT_WRITE_SINGLE_REQ) {
         if (!lux_cloud_write_allowed(p.reg)) {
             ESP_LOGW(TAG, "Local WRITE blocked reg=%u", p.reg);
@@ -133,13 +182,15 @@ static void handle_app_frame(const uint8_t *buf, size_t len, int sock) {
         }
         ESP_LOGI(TAG, "Local WRITE reg=%u val=%u", p.reg, p.value);
         cmd_queue_write(p.reg, p.value, "local");
-    } else if (p.type == LUX_PKT_WRITE_MULTI_REQ) {
+    }
+
+    // ── WRITE multi ───────────────────────────────────────────
+    else if (p.type == LUX_PKT_WRITE_MULTI_REQ) {
         ESP_LOGI(TAG, "Local WRITE_MULTI reg0=0x%04X reg1=0x%04X",
                  p.reg0, p.reg1);
         cmd_queue_write_multi(p.reg0, p.reg1, "local");
     }
 }
-
 // ── Per-connection task ───────────────────────────────────────
 typedef struct { int sock; } local_conn_arg_t;
 

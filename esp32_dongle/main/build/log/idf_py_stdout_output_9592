@@ -1,0 +1,8 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe -DESP_PLATFORM=1 -DCCACHE_ENABLE=1 C:\Android\luxpower_sna\esp32_dongle\main
+-- The C compiler identification is Clang 19.1.2
+-- The CXX compiler identification is Clang 19.1.2
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - failed
+-- Check for working C compiler: C:/Espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/bin/clang.exe
+-- Check for working C compiler: C:/Espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/bin/clang.exe - broken
+-- Configuring incomplete, errors occurred!
