@@ -1,9 +1,5 @@
 # esphome/common/ota_http.yaml
 ota:
-  - platform: esphome
-    password: !secret ota_password
-    port: 8266
-
   - platform: http_request
 
 button:
