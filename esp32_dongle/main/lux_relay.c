@@ -46,7 +46,10 @@ static void relay_process_dongle_frame(const uint8_t *buf, size_t total) {
     lux_parsed_t p = lux_parse(buf, total);
 
     if (p.type == LUX_PKT_HEARTBEAT) return;
-
+    if (!p.crc_ok) {
+        ESP_LOGW(TAG, "Bad CRC — dropping frame");
+        return;
+    }
     const uint8_t *df = p.df;
     size_t df_len     = p.df_len;
     if (!df || df_len < 16) return;

@@ -35,9 +35,6 @@ extern "C" {
 
 static const char *TAG = "main";
 
-extern void lux_cloud_task(void *arg);
-extern void lux_mqtt_task(void *arg);
-
 static EventGroupHandle_t s_wifi_evt;
 #define WIFI_STA_OK_BIT   BIT0
 #define WIFI_STA_FAIL_BIT BIT1

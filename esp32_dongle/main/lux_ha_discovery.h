@@ -214,15 +214,12 @@ static void lux_ha_discovery_publish(esp_mqtt_client_handle_t c) {
               "mdi:battery-heart");
 
     // ── BUTTONS ───────────────────────────────────────────────
-    ha_button(c, "btn_restart",   "Restart Inverter",
-              MQTT_CMD_PREFIX "/set/charge_rate",   // placeholder
-              "__restart__",                         // handled in mqtt_handle_cmd
-              "mdi:restart");
-
+    ha_button(c, "btn_restart", "Restart Inverter",
+          MQTT_CMD_PREFIX "/control",           // matches strstr(topic, "control")
+          "__restart__", "mdi:restart");
     ha_button(c, "btn_reset_all", "Reset All Settings",
-              MQTT_CMD_PREFIX "/set/charge_rate",   // placeholder
-              "__reset_all__",
-              "mdi:restore");
+          MQTT_CMD_PREFIX "/control",
+          "__reset_all__", "mdi:restore");
 
     ESP_LOGI(HA_TAG, "Discovery published — check HA Devices for 'LuxPower SNA'");
 }
