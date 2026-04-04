@@ -26,8 +26,8 @@
 #define LUX_CLOUD_PORT       4346
 
 // ── Dongle / Inverter identity ────────────────────────────────
-#define DONGLE_SN            "BA12150911" //"BA32500699"   // 10 chars
-#define INVERTER_SN          "2193038031" //"3253631886"   // 10 chars
+#define DONGLE_SN            "BA32500699"   // "BA12150911"
+#define INVERTER_SN           "3253631886"  // "2193038031"
 
 // ── fn=0x10 WRITE_MULTI unknown field (constant, observed) ───
 #define WRITE_MULTI_UNK_LEN  10
