@@ -215,17 +215,34 @@ static void relay_server_task(void *arg) {
         ESP_LOGE(TAG, "bind/listen: %d", errno);
         close(ls); vTaskDelete(NULL); return;
     }
-    ESP_LOGI(TAG, "Relay server listening on :%d → %s:%d",
+    ESP_LOGI(TAG, "Relay listening :%d → %s:%d",
              RELAY_LISTEN_PORT, CLOUD_HOST, CLOUD_PORT);
 
+    // Set accept timeout so we can log "still waiting" periodically
+    struct timeval tv = { .tv_sec = 15 };
+    setsockopt(ls, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint32_t wait_count = 0;
     while (1) {
         struct sockaddr_in ca; socklen_t cl = sizeof(ca);
         int cs = accept(ls, (struct sockaddr *)&ca, &cl);
-        if (cs < 0) { ESP_LOGE(TAG, "accept: %d", errno); continue; }
+
+        if (cs < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Timeout — log heartbeat every 15s
+                ESP_LOGI(TAG, "Waiting for dongle... (%lus)  point dongle → 192.168.100.21:4346",
+                         (unsigned long)(++wait_count * 15));
+            } else {
+                ESP_LOGE(TAG, "accept err %d", errno);
+            }
+            continue;
+        }
 
         char ip[16];
         inet_ntop(AF_INET, &ca.sin_addr, ip, sizeof(ip));
-        ESP_LOGI(TAG, "Dongle connected from %s:%d", ip, ntohs(ca.sin_port));
+        ESP_LOGI(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        ESP_LOGI(TAG, "Dongle connected from %s:%d  fd=%d",
+                 ip, ntohs(ca.sin_port), cs);
 
         relay_conn_arg_t *a = malloc(sizeof(relay_conn_arg_t));
         if (!a) { close(cs); continue; }

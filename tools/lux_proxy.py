@@ -2,13 +2,14 @@
 LuxPower Transparent Proxy + Command Interface
 ==============================================
 Chạy: python lux_proxy.py
-Đổi Server Address dongle → IP máy này (192.168.100.30)
+Đổi Server Address dongle → IP máy này (192.168.100.36)
 """
 
 import socket, threading, struct, time, sys, os
 
 LOCAL_PORT    = 4346
-LUX_SERVER_IP = "192.168.1.6" # "120.79.53.27" # "47.81.11.236"
+#LUX_SERVER_IP = "47.81.11.236"
+LUX_SERVER_IP = "120.79.53.27"
 LUX_PORT      = 4346
 DONGLE_SN     = "BA32500699"
 INVERTER_SN   = "3253631886"
@@ -470,7 +471,7 @@ def main():
     print(f"║  Forward : {LUX_SERVER_IP}:{LUX_PORT}            ║")
     print(f"║  Log     : {LOG_PATH}")
     print("╚════════════════════════════════════════════════════╝")
-    print(f"\n>>> Đổi Server Address dongle → 192.168.100.30\n")
+    print(f"\n>>> Đổi Server Address dongle → 192.168.100.36\n")
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", LOCAL_PORT))
