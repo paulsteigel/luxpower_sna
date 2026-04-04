@@ -21,6 +21,7 @@ packages:
       - esphome/common/dyndns.yaml
       - esphome/common/luxpower.yaml
       - esphome/common/logger.yaml
+      - esphome/common/ota_http.yaml
       - esphome/common/bms/dev_info.yaml
       - esphome/common/bms/globals.yaml
       - esphome/common/bms/text_sensors.yaml
