@@ -2,11 +2,9 @@ idf_component_register(
     SRCS
         "main.cpp"
         "shared_state.c"
-        "lux_cloud.c"
-        "lux_mqtt.c"
         "lux_relay.c"
-        "lux_rs485.c"
-        "lux_local_server.c" 
+        "lux_mqtt.c"
+        "lux_local_server.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi

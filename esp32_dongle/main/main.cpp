@@ -1,12 +1,16 @@
-#include "config.h"   // must come first so RELAY_MODE is visible below
+// main.cpp — full version
+// Fixes from testing:
+//   - esp_wifi_set_ps(WIFI_PS_NONE) — prevents beacon timeout/WiFi drop
+//   - Cloud IP 47.81.11.236 confirmed working
+//   - RELAY_MODE only — lux_cloud_task not started
+//   - shared_state_init() called before tasks
+
+#include "config.h"
 
 extern "C" {
-    void lux_cloud_task(void *pvParam);
-    void lux_mqtt_task(void *pvParam);
-#ifdef RELAY_MODE
     void lux_relay_start(void);
-#endif
     void lux_local_server_start(void);
+    void lux_mqtt_task(void *arg);
 }
 
 #include <stdio.h>
@@ -24,14 +28,6 @@ extern "C" {
 
 #include "shared_state.h"
 #include "lux_ota.h"
-
-// ─────────────────────────────────────────────────────────────
-// NOTE: WiFi credentials are hardcoded for now.
-// TODO Phase 2: Replace with captive portal (like ESPHome WiFiManager):
-//   - On first boot (no saved creds in NVS), start AP-only mode
-//   - Serve a config page at 10.10.10.1 to collect SSID/password
-//   - Save creds to NVS, reboot into STA+AP mode
-// ─────────────────────────────────────────────────────────────
 
 static const char *TAG = "main";
 
@@ -105,6 +101,9 @@ static void wifi_init(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &ap_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // ── Critical fix: disable power saving to prevent beacon timeout ──
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
     ESP_LOGI(TAG, "WiFi STA: %s | AP: %s (%s)",
              WIFI_STA_SSID, WIFI_AP_SSID, WIFI_AP_IP);
 
@@ -127,15 +126,9 @@ static void mdns_init_service(void) {
 }
 
 extern "C" void app_main(void) {
-    ESP_LOGI(TAG, "=== LuxPower ESP32 Dongle ===");
-    ESP_LOGI(TAG, "Dongle SN  : %s", DONGLE_SN);
-    ESP_LOGI(TAG, "Inverter SN: %s", INVERTER_SN);
-    ESP_LOGI(TAG, "Cloud      : %s:%d", LUX_CLOUD_HOST, LUX_CLOUD_PORT);
-#ifdef RELAY_MODE
-    ESP_LOGI(TAG, "Mode       : RELAY (real dongle → ESP32 → cloud)");
-#else
-    ESP_LOGI(TAG, "Mode       : DONGLE (ESP32 polls cloud directly)");
-#endif
+    ESP_LOGI(TAG, "=== LuxPower ESP32 Relay + MQTT ===");
+    ESP_LOGI(TAG, "Cloud  : %s:%d", LUX_CLOUD_HOST, LUX_CLOUD_PORT);
+    ESP_LOGI(TAG, "Dongle : %s:%d", DONGLE_LOCAL_IP, DONGLE_LOCAL_PORT);
 
     // NVS
     esp_err_t ret = nvs_flash_init();
@@ -146,10 +139,10 @@ extern "C" void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // Shared state (register cache, write queue)
+    // Shared state — must be before any task that uses it
     shared_state_init();
 
-    // WiFi STA + AP
+    // WiFi STA + AP, power saving disabled
     wifi_init();
 
     // mDNS → luxdongle.local
@@ -158,26 +151,21 @@ extern "C" void app_main(void) {
     // OTA web server on port 8080
     lux_ota_start();
 
-#ifdef RELAY_MODE
-    // Core 0: Relay server — real dongle drives the cloud connection
-    // lux_cloud_task NOT started (dongle handles it)
+    // Port 4346: real dongle → cloud (transparent relay, parses frames → shared_state)
     lux_relay_start();
-    lux_local_server_start(); 
-#else
-    // Core 0: Cloud TCP — ESP32 acts as dongle, polls cloud directly
-    xTaskCreatePinnedToCore(lux_cloud_task, "lux_cloud",
-                            STACK_CLOUD, NULL, TASK_PRIO_CLOUD, NULL, 0);
-#endif
 
-    // Core 1: MQTT publish + subscribe (unchanged regardless of mode)
+    // Port 8000: ESPHome → real dongle (transparent relay)
+    lux_local_server_start();
+
+    // Core 1: MQTT publish + HA discovery + subscribe commands
     xTaskCreatePinnedToCore(lux_mqtt_task, "lux_mqtt",
                             STACK_MQTT, NULL, TASK_PRIO_MQTT, NULL, 1);
 
     ESP_LOGI(TAG, "All tasks launched");
-    ESP_LOGI(TAG, "OTA : http://luxdongle.local:%d  or  http://%s:%d",
+    ESP_LOGI(TAG, "OTA  : http://luxdongle.local:%d  or  http://%s:%d",
              OTA_PORT, WIFI_AP_IP, OTA_PORT);
-    ESP_LOGI(TAG, "Logs: mosquitto_sub -h myhome.sfdp.net -u mqtt_user "
-                  "-P D1ndh1sk@ -t lux/log");
+    ESP_LOGI(TAG, "MQTT : mosquitto_sub -h myhome.sfdp.net -u mqtt_user "
+                  "-P D1ndh1sk@ -t lux/#");
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(30000));

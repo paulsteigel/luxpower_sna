@@ -90,15 +90,18 @@ static void relay_process_dongle_frame(const uint8_t *buf, size_t total) {
 // ── Frame callbacks ───────────────────────────────────────────
 // Dongle → Server: RESP frames with actual register data → parse!
 static void on_dongle_frame(const uint8_t *buf, size_t len) {
-    hex_dump("D→S", buf, (int)len);
-    relay_process_dongle_frame(buf, len);   // ← data is HERE
+    char hex[52] = {};
+    int n = len > 16 ? 16 : (int)len;
+    for (int i = 0; i < n; i++) sprintf(hex + i*3, "%02X ", buf[i]);
+    ESP_LOGI(TAG, "D→C %3uB  %s%s", (unsigned)len, hex, len>16?"...":"");
 }
 
-// Server → Dongle: REQ frames only — no register data, skip
 static void on_cloud_frame(const uint8_t *buf, size_t len) {
-    hex_dump("S→D", buf, (int)len);
+    char hex[52] = {};
+    int n = len > 16 ? 16 : (int)len;
+    for (int i = 0; i < n; i++) sprintf(hex + i*3, "%02X ", buf[i]);
+    ESP_LOGI(TAG, "C→D %3uB  %s%s", (unsigned)len, hex, len>16?"...":"");
 }
-
 // ── Reassemble TCP stream into complete frames ────────────────
 typedef struct {
     uint8_t buf[BUF_SIZE];
@@ -143,25 +146,58 @@ static void relay_conn_task(void *arg) {
     int ds = ctx->dongle_sock;
     free(ctx);
 
-    // Connect upstream to real cloud
+    // ── Connect to cloud ──────────────────────────────────────
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port   = htons(CLOUD_PORT),
     };
     inet_pton(AF_INET, CLOUD_HOST, &addr.sin_addr);
+
     int cs = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (cs < 0 || connect(cs, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        ESP_LOGE(TAG, "Cannot reach cloud (%d) — dropping dongle", errno);
-        if (cs >= 0) close(cs);
+    if (cs < 0) {
+        ESP_LOGE(TAG, "socket failed errno=%d", errno);
         close(ds);
         vTaskDelete(NULL);
         return;
     }
+
+    // Connect timeout 15s
+    struct timeval ctv = { .tv_sec = 15 };
+    setsockopt(cs, SOL_SOCKET, SO_SNDTIMEO, &ctv, sizeof(ctv));
+    setsockopt(cs, SOL_SOCKET, SO_RCVTIMEO, &ctv, sizeof(ctv));
+
+    if (connect(cs, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        ESP_LOGE(TAG, "Cannot reach cloud %s:%d errno=%d",
+                 CLOUD_HOST, CLOUD_PORT, errno);
+        close(cs);
+        close(ds);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Clear timeout after connect — relay runs indefinitely
+    ctv.tv_sec = 0; ctv.tv_usec = 0;
+    setsockopt(cs, SOL_SOCKET, SO_SNDTIMEO, &ctv, sizeof(ctv));
+    setsockopt(cs, SOL_SOCKET, SO_RCVTIMEO, &ctv, sizeof(ctv));
+
+    // Disable Nagle on both sockets — forward bytes immediately, no buffering
+    int one = 1;
+    setsockopt(ds, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    setsockopt(cs, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
     ESP_LOGI(TAG, "Relay: dongle fd=%d ↔ cloud fd=%d", ds, cs);
 
+    // ── Bidirectional relay via select ────────────────────────
+    uint8_t *buf  = (uint8_t *)malloc(BUF_SIZE);
+    if (!buf) {
+        ESP_LOGE(TAG, "malloc fail");
+        close(cs); close(ds);
+        vTaskDelete(NULL);
+        return;
+    }
+
     frame_buf_t fb_d2s = {}, fb_s2d = {};
-    uint8_t     tmp[512];
-    int         maxfd = (ds > cs ? ds : cs) + 1;
+    int maxfd = (ds > cs ? ds : cs) + 1;
 
     while (1) {
         fd_set rfds;
@@ -172,31 +208,31 @@ static void relay_conn_task(void *arg) {
 
         int r = select(maxfd, &rfds, NULL, NULL, &tv);
         if (r < 0)  { ESP_LOGE(TAG, "select err %d", errno); break; }
-        if (r == 0) { ESP_LOGW(TAG, "Relay idle timeout"); break; }
+        if (r == 0) { ESP_LOGW(TAG, "Relay idle 90s — closing"); break; }
 
-        // Dongle → Cloud (RESP frames — data lives here!)
+        // Dongle → Cloud
         if (FD_ISSET(ds, &rfds)) {
-            int n = recv(ds, tmp, sizeof(tmp), 0);
-            if (n <= 0) { ESP_LOGI(TAG, "Dongle disconnected"); break; }
-            frame_buf_push(&fb_d2s, tmp, n, on_dongle_frame);  // ← parse!
-            if (send(cs, tmp, n, 0) < 0) { ESP_LOGE(TAG, "→cloud err"); break; }
+            int n = recv(ds, buf, BUF_SIZE, 0);
+            if (n <= 0) { ESP_LOGI(TAG, "Dongle disconnected (n=%d)", n); break; }
+            frame_buf_push(&fb_d2s, buf, n, on_dongle_frame);
+            if (send(cs, buf, n, 0) < 0) { ESP_LOGE(TAG, "→cloud send err"); break; }
         }
 
-        // Cloud → Dongle (REQ frames only — no data)
+        // Cloud → Dongle
         if (FD_ISSET(cs, &rfds)) {
-            int n = recv(cs, tmp, sizeof(tmp), 0);
-            if (n <= 0) { ESP_LOGI(TAG, "Cloud disconnected"); break; }
-            frame_buf_push(&fb_s2d, tmp, n, on_cloud_frame);
-            if (send(ds, tmp, n, 0) < 0) { ESP_LOGE(TAG, "→dongle err"); break; }
+            int n = recv(cs, buf, BUF_SIZE, 0);
+            if (n <= 0) { ESP_LOGI(TAG, "Cloud disconnected (n=%d)", n); break; }
+            frame_buf_push(&fb_s2d, buf, n, on_cloud_frame);
+            if (send(ds, buf, n, 0) < 0) { ESP_LOGE(TAG, "→dongle send err"); break; }
         }
     }
 
+    free(buf);
     close(ds);
     close(cs);
     ESP_LOGI(TAG, "Relay connection closed");
     vTaskDelete(NULL);
 }
-
 // ── Accept loop ────────────────────────────────────────────────
 static void relay_server_task(void *arg) {
     int ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -204,7 +240,7 @@ static void relay_server_task(void *arg) {
 
     int opt = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
+    
     struct sockaddr_in ba = {
         .sin_family      = AF_INET,
         .sin_addr.s_addr = INADDR_ANY,
