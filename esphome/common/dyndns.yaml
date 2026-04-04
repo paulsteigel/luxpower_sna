@@ -4,6 +4,7 @@
 
 http_request:
   verify_ssl: false
+  timeout: 60s
 
 time:
   - platform: sntp

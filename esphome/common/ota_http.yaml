@@ -5,11 +5,6 @@ ota:
     port: 8266
 
   - platform: http_request
-    verify_ssl: false
-
-http_request:
-  verify_ssl: false
-  timeout: 60s
 
 button:
   - platform: template
