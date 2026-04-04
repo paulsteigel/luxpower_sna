@@ -1,5 +1,11 @@
 # esphome/common/ota_http.yaml
 ota:
+  - platform: esphome
+    port: 8266
+    password: !secret ota_password
+    on_state_change:
+      - logger.log: esphome.on_state_change
+
   - platform: http_request
 
 button:
