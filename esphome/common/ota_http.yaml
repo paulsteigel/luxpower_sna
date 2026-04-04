@@ -15,6 +15,6 @@ button:
     on_press:
       then:
         - logger.log: "OTA update starting..."
-        - ota_http_request.flash:
+        - ota.http_request.flash:
             md5_url: http://ota.sfdp.net/homehna/firmware.md5
             url: http://ota.sfdp.net/homehna/firmware.bin
