@@ -31,7 +31,7 @@ esp32:
 
 esphome:
   name: homehna
-  name_add_mac_suffix: true   # ← homehna_a4cf12, unique theo MAC
+  name_add_mac_suffix: true
 
 logger:
   level: WARN
@@ -39,13 +39,13 @@ logger:
 # ── Connectivity ─────────────────────────────────────────────
 mqtt:
   keepalive: 60s
-  reboot_timeout: 15min       # ← sửa từ 0s
+  reboot_timeout: 15min
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
-  #client_id: !lambda |-       # ← unique theo MAC, không cần compile
+  #client_id: !lambda |-
   #  return "esp_" + get_mac_address();
-  clean_session: true         # ← fix OOM broker
+  clean_session: true         
 
 wifi:
   ap:
@@ -77,3 +77,8 @@ light:
     id: blue_led
     name: "Blue LED"
     internal: true
+switch:
+  - platform: restart
+    name: Restart ESP    
+    id: ${name}_restart_esp
+    entity_category: config
