@@ -71,8 +71,8 @@ light:
     name: "Blue LED"
     internal: true
 
-#switch:
-#  - platform: restart
-#    name: "Restart"    
-#    id: ${name}_restart_esp
-#    entity_category: config
+switch:
+  - platform: restart
+    name: "Restart"    
+    id: ${name}_restart_esp
+    entity_category: config

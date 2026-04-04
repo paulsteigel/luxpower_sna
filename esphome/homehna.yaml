@@ -25,7 +25,6 @@ packages:
       - esphome/common/bms/dev_info.yaml
       - esphome/common/bms/globals.yaml
       - esphome/common/bms/text_sensors.yaml
-      - esphome/common/bms/switchs.yaml
       - esphome/common/bms/canbus_luxpower.yaml
       - esphome/common/bms/charge_discharge_controller.yaml
       - esphome/common/bms/jk_bms_base.yaml
