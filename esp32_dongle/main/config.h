@@ -27,7 +27,7 @@
 
 // ── Dongle / Inverter identity ────────────────────────────────
 #define DONGLE_SN            "BA32500699"   // "BA12150911"
-#define INVERTER_SN           "3253631886"  // "2193038031"
+#define INVERTER_SN          "3253631886"   // "2193038031"
 
 // ── fn=0x10 WRITE_MULTI unknown field (constant, observed) ───
 #define WRITE_MULTI_UNK_LEN  10
