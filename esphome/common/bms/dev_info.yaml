@@ -1,10 +1,3 @@
-switch:
-  - platform: restart
-    icon: "mdi:restart"
-    id: ${name}_btn_restart
-    name: "_Restart"
-    entity_category: config
-
 text_sensor:
 # Ip address and other
   - platform: wifi_info
@@ -36,7 +29,7 @@ sensor:
   # +--------------------------------------+
   - platform: uptime
     entity_category: diagnostic
-    name: ${name} Uptime Sensor
+    name: "Uptime Sensor"
     id: uptime_sensor
     update_interval: 60s
     on_raw_value:

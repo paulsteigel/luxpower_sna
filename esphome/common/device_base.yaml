@@ -77,6 +77,7 @@ light:
     id: blue_led
     name: "Blue LED"
     internal: true
+
 switch:
   - platform: restart
     name: Restart ESP    
