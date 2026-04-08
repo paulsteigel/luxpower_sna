@@ -28,10 +28,10 @@ substitutions:
 # ── Board ────────────────────────────────────────────────────
 esp32:
   board: lolin_s2_mini
-  framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+  #framework:
+  #  type: esp-idf
+  #  sdkconfig_options:
+  #    CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 esphome:
   name: ${name}
