@@ -300,7 +300,7 @@ sensor:
   - platform: copy
     source_id: capacity_remaining
     name: "capacity_remaining"
-    id: "${name}_capacity_remaining"
+    id: capacity_remaining
     unit_of_measurement: "%"
     device_class: battery
     internal: true
