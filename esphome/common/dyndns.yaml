@@ -17,44 +17,13 @@ time:
       - seconds: 0
         minutes: /10
         then:
-          - if:
-              condition:
-                lambda: |-
-                  return !id(cfg_dyndns_token).state.empty() &&
-                         !id(cfg_dyndns_domain).state.empty();
-              then:
-                - http_request.get:
-                    url: !lambda |-
-                      return "https://freemyip.com/update?token=" +
-                             id(cfg_dyndns_token).state +
-                             "&domain=" +
-                             id(cfg_dyndns_domain).state +
-                             ".freemyip.com";
-                    on_response:
-                      then:
-                        - lambda: |-
-                            ESP_LOGI("DynDNS", "Status: %d domain: %s",
-                              response->status_code,
-                              id(cfg_dyndns_domain).state.c_str());
-              else:
-                - lambda: |-
-                    ESP_LOGW("DynDNS", "Skipped — token/domain chưa config");
-
-text:
-  - platform: template
-    id: cfg_dyndns_token
-    name: "DynDNS Token"
-    optimistic: true
-    restore_value: true
-    initial_value: ""
-    mode: password          # ← ẩn token trong HA UI
-    entity_category: config
-
-  - platform: template
-    id: cfg_dyndns_domain
-    name: "DynDNS Domain"   # ← nhập "homehnm" thôi, không cần .freemyip.com
-    optimistic: true
-    restore_value: true
-    initial_value: ""
-    mode: text
-    entity_category: config
+          
+          - http_request.get:
+              url: !lambda |-
+                return "https://freemyip.com/update?token=${token}&domain=${name}.freemyip.com";
+              on_response:
+                then:
+                  - lambda: |-
+                      ESP_LOGI("DynDNS", "Status: %d domain: %s",
+                        response->status_code,
+                        "domain=${name}.freemyip.com");

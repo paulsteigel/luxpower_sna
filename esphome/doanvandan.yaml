@@ -1,10 +1,10 @@
-# base.yaml — chỉ còn thế này!
+# doanvandan.yaml — chỉ còn thế này!
 substitutions:
   luxid: lux
-  #09b0a2807898a8d32ac01a4f -homehna
-  #b5185c9f91ef989fdf23e89c -doanvandan
+  name: doanvandan
+  token: b5185c9f91ef989fdf23e89c
 esphome:
-  name: base
+  name: ${name}
   on_boot:
     then:
       - switch.turn_on: switch_charging

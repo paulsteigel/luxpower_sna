@@ -1,35 +1,27 @@
+# ============================================================
+# dev_info.yaml
+# ============================================================
 text_sensor:
-# Ip address and other
   - platform: wifi_info
     ip_address:
-      name: " ESP IP Address"
-      #address_0:
-      #  name: "${id_prefix} ESP IP Address 0"
-# wifi strength
-
-# +--------------------------------------+
-  # | Template text sensors                |
-  # +--------------------------------------+
+      name: "${name} ESP IP Address"
   - platform: template
-    name: Uptime Human Readable
+    name: "${name} Uptime Human Readable"
     id: ${name}_uptime_human
     icon: mdi:clock-start
 
 sensor:
   - platform: wifi_signal
     entity_category: diagnostic
-    name: " WiFi Signal Strength"
+    name: "${name} WiFi Signal Strength"
     id: ${name}_esp_wifi_signal_strength
     unit_of_measurement: dBm
     device_class: signal_strength
     state_class: measurement
     icon: mdi:wifi
-  # +--------------------------------------+
-  # | Uptime sensor                        |
-  # +--------------------------------------+
   - platform: uptime
     entity_category: diagnostic
-    name: "Uptime Sensor"
+    name: "${name} Uptime Sensor"
     id: uptime_sensor
     update_interval: 60s
     on_raw_value:
@@ -42,7 +34,7 @@ sensor:
               seconds = seconds % (24 * 3600);
               int hours = seconds / 3600;
               seconds = seconds % 3600;
-              int minutes = seconds /  60;
+              int minutes = seconds / 60;
               seconds = seconds % 60;
               return (
                 (days ? to_string(days) + "d " : "") +

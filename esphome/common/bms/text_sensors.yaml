@@ -1,24 +1,27 @@
+# ============================================================
+# text_sensors.yaml
+# ============================================================
 text_sensor:
   - platform: jk_bms
     errors:
-      name: " errors"
+      name: "${name} errors"
     operation_mode:
-      name: " operation mode"
+      name: "${name} operation mode"
     battery_type:
-      name: " battery type"
+      name: "${name} battery type"
     password:
-      name: " password"
+      name: "${name} password"
     device_type:
-      name: " device type"
+      name: "${name} device type"
     software_version:
-      name: " software version"
+      name: "${name} software version"
     manufacturer:
-      name: " manufacturer"
+      name: "${name} manufacturer"
     total_runtime_formatted:
-      name: " total runtime formatted"
+      name: "${name} total runtime formatted"
   - platform: template
-    name: " Charging Status"
+    name: "${name} Charging Status"
     id: ${name}_charging_status
   - platform: template
-    name: " CANBUS Status"
+    name: "${name} CANBUS Status"
     id: ${name}_canbus_status

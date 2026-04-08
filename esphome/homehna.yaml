@@ -1,10 +1,11 @@
 # homehnm.yaml — chỉ còn thế này!
 substitutions:
   luxid: lux
+  name: homehna
   #09b0a2807898a8d32ac01a4f -homehna
   #b5185c9f91ef989fdf23e89c -doanvandan
 esphome:
-  name: base_dev
+  name: ${name}
   on_boot:
     then:
       - switch.turn_on: switch_charging

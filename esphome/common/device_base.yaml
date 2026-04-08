@@ -3,8 +3,7 @@
 # Tất cả dùng cùng PCB lolin_s2_mini + cùng MQTT server
 # ============================================================
 
-substitutions:
-  name: base 
+substitutions: 
   # ── GPIO pins (cố định trên PCB) ─────────────────────────
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
@@ -34,10 +33,8 @@ esp32:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 esphome:
-  name: base
-  name_add_mac_suffix: true
-  friendly_name: base
-
+  name: ${name}
+ 
 logger:
   level: WARN
 
@@ -48,8 +45,7 @@ mqtt:
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
-  client_id: !lambda |-
-    return "base_" + get_mac_address();
+  client_id: ${name}
   clean_session: true         
 
 wifi:
