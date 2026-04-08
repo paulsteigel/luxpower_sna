@@ -36,6 +36,7 @@ esp32:
 esphome:
   name: base_dev
   name_add_mac_suffix: true
+  friendly_name: base_dev
 
 logger:
   level: WARN
@@ -47,8 +48,8 @@ mqtt:
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
-  #client_id: !lambda |-
-  #  return "esp_" + get_mac_address();
+  client_id: !lambda |-
+    return "esp_" + get_mac_address();
   clean_session: true         
 
 wifi:
