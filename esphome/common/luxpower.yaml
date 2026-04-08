@@ -60,7 +60,7 @@ text:
 
   - platform: template
     id: lux_config_dongle
-    name: "lux_Dongle Serial"
+    name: "${name} Dongle Serial"
     icon: "mdi:identifier"
     entity_category: config
     mode: text
@@ -79,7 +79,7 @@ text:
 
   - platform: template
     id: lux_config_inverter
-    name: "lux_Inverter Serial"
+    name: "${name} Inverter Serial"
     icon: "mdi:identifier"
     entity_category: config
     mode: text
@@ -100,7 +100,7 @@ text:
 number:
   - platform: template
     id: lux_config_port
-    name: "lux_Inverter Port"
+    name: "${name} Inverter Port"
     icon: "mdi:ethernet"
     entity_category: config
     optimistic: true

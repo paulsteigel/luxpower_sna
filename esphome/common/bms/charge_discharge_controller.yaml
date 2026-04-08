@@ -119,35 +119,35 @@ globals:
 
 switch:
   - platform: template
-    name: "CAN Charge enabled"
+    name: "${name} CAN Charge enabled"
     id: switch_charging
     optimistic: true
   - platform: template
-    name: "CAN Discharge enabled"
+    name: "${name} CAN Discharge enabled"
     id: switch_discharging
     optimistic: true
 #  - platform: template
-#    name: "CAN Force bulk (top bal)"
+#    name: "${name} CAN Force bulk (top bal)"
 #    id: switch_chg_bulk
 #    optimistic: true
 #  - platform: template
-#    name: "CAN Float charge enabled"
+#    name: "${name} CAN Float charge enabled"
 #    id: switch_chg_float
 #    optimistic: true
   - platform: template
-    name: "CAN Automatic Charge Current"
+    name: "${name} CAN Automatic Charge Current"
     id: can_switch_auto_charge_current
     optimistic: true
  #   restore_value: true
     entity_category: config  
   - platform: template
-    name: "CAN Automatic Discharge Current"
+    name: "${name} CAN Automatic Discharge Current"
     id: can_switch_auto_discharge_current
     optimistic: true
     entity_category: config
 #    restore_value: true
   - platform: template
-    name: "CAN Auto Voltage Regulation"
+    name: "${name} CAN Auto Voltage Regulation"
     id: can_switch_auto_voltage
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF  # safe default — manual on first flash
@@ -161,7 +161,7 @@ switch:
 number:
 
   - platform: template
-    name: "Max charge voltage"
+    name: "${name} Max charge voltage"
     id: max_charge_voltage
     # CVL target gửi cho inverter.
     # Tăng khi solar yếu để lấy thêm dòng (vd 3650mV → ~48A).
@@ -179,7 +179,7 @@ number:
     entity_category: config
 
   - platform: template
-    name: "Over voltage protection"
+    name: "${name} Over voltage protection"
     id: can_over_voltage_protection
     # BMS hard stop — lớp bảo vệ pin thực sự.
     # CCL adaptive bắt đầu taper khi max_cell vào (OVP - gap).
@@ -196,7 +196,7 @@ number:
     entity_category: config
 
   - platform: template
-    name: "Under voltage protection"
+    name: "${name} Under voltage protection"
     id: can_under_voltage_protection
     # BMS stop discharge.
     # DVL = (UVP + gap/2) × cells — inverter dừng trước UVP taper.
@@ -212,7 +212,7 @@ number:
     entity_category: config
 
   - platform: template
-    name: "Charging current max"
+    name: "${name} Charging current max"
     id: charging_current
     # CCL ceiling — adaptive controller không vượt giá trị này.
     step: 1
@@ -230,7 +230,7 @@ number:
             float slider_value = id(charging_current).state;
 
   - platform: template
-    name: "Discharging current max"
+    name: "${name} Discharging current max"
     id: discharging_current
     # DCL ceiling — adaptive controller không vượt giá trị này.
     step: 1
@@ -248,7 +248,7 @@ number:
             float slider_value = id(discharging_current).state;
 
   - platform: template
-    name: "Voltage recovery gap"
+    name: "${name} Voltage recovery gap"
     id: ${name}_voltage_recovery_gap
     # Khoảng cách (mV) từ UVP/OVP mà adaptive bắt đầu taper.
     # Nhỏ → taper muộn hơn, dùng được nhiều pin hơn.
@@ -264,7 +264,7 @@ number:
     entity_category: config
 
   - platform: template
-    name: "Stop discharging SOC"
+    name: "${name} Stop discharging SOC"
     id: can_soc_stop_discharging
     step: 1
     min_value: 10
@@ -277,7 +277,7 @@ number:
     entity_category: config
 
   - platform: template
-    name: "Parallel packs capacity (Ah)"
+    name: "${name} Parallel packs capacity (Ah)"
     id: parrallel_packs_capacity_ah
     # Để 0 nếu chỉ 1 pack (capacity đọc trực tiếp từ BMS).
     step: 1
