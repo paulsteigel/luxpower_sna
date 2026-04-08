@@ -4,7 +4,7 @@
 # ============================================================
 
 substitutions:
-  name: homehna 
+  name: base_dev 
   # ── GPIO pins (cố định trên PCB) ─────────────────────────
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
@@ -30,7 +30,7 @@ esp32:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 esphome:
-  name: homehna
+  name: base_dev
   name_add_mac_suffix: true
 
 logger:

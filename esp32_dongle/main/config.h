@@ -23,7 +23,7 @@
 
 // ── LuxPower Cloud ────────────────────────────────────────────
 #define LUX_CLOUD_HOST       "47.81.11.236"
-//#define LUX_CLOUD_HOST       "120.79.53.27"
+//#define LUX_CLOUD_HOST       "120.79.53.27" //120.79.53.27
 
 // ── Real dongle local server (for lux_local_server relay) ────
 #define DONGLE_LOCAL_IP      "192.168.100.22"
