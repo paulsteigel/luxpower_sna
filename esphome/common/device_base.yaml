@@ -25,7 +25,7 @@ substitutions:
   #external_components_source:  github://syssi/esphome-jk-bms@2.3.0
   #external_components_source:  github://syssi/esphome-jk-bms@2.2.0
   #external_components_source:  github://syssi/esphome-jk-bms@main
-  external_components_source: https://github.com/paulsteigel/esphome-jk-bms@main
+  external_components_source: github://paulsteigel/esphome-jk-bms@main
 # ── Board ────────────────────────────────────────────────────
 esp32:
   board: lolin_s2_mini
