@@ -9,12 +9,12 @@ substitutions:
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
   # for others
-  tx_pin: GPIO9
-  rx_pin: GPIO10
+  #tx_pin: GPIO9
+  #rx_pin: GPIO10
   led_pin: GPIO15
   # for doanvandan
-  #tx_pin: GPIO10
-  #rx_pin: GPIO9
+  tx_pin: GPIO10
+  rx_pin: GPIO9
   
   # ── Battery defaults (chung) ─────────────────────────────
   batt_modules: "1"
