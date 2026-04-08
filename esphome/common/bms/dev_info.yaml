@@ -7,14 +7,14 @@ text_sensor:
       name: "${name} ESP IP Address"
   - platform: template
     name: "${name} Uptime Human Readable"
-    id: ${name}_uptime_human
+    id: uptime_human
     icon: mdi:clock-start
 
 sensor:
   - platform: wifi_signal
     entity_category: diagnostic
     name: "${name} WiFi Signal Strength"
-    id: ${name}_esp_wifi_signal_strength
+    id: esp_wifi_signal_strength
     unit_of_measurement: dBm
     device_class: signal_strength
     state_class: measurement
@@ -27,7 +27,7 @@ sensor:
     on_raw_value:
       then:
         - text_sensor.template.publish:
-            id: ${name}_uptime_human
+            id: uptime_human
             state: !lambda |-
               int seconds = round(id(uptime_sensor).raw_state);
               int days = seconds / (24 * 3600);

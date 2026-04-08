@@ -11,7 +11,7 @@ ota:
 button:
   - platform: template
     name: "${name} Firmware Update"
-    id: ${name}_firmware_update
+    id: firmware_update
     entity_category: config
     icon: mdi:cloud-download
     on_press:

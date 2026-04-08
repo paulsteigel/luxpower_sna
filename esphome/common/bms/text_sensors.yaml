@@ -21,7 +21,7 @@ text_sensor:
       name: "${name} total runtime formatted"
   - platform: template
     name: "${name} Charging Status"
-    id: ${name}_charging_status
+    id: charging_status
   - platform: template
     name: "${name} CANBUS Status"
-    id: ${name}_canbus_status
+    id: canbus_status

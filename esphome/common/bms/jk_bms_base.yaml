@@ -55,7 +55,7 @@ sensor:
       name: "${name} delta cell voltage"
     average_cell_voltage:
       name: "${name} average cell voltage"
-      id: ${name}_average_cell_voltage
+      id: average_cell_voltage
     power_tube_temperature:
       id: power_tube_temperature
       name: "${name} power tube temperature"
