@@ -1,6 +1,5 @@
 # doanvandan.yaml — chỉ còn thế này!
 substitutions:
-  luxid: lux
   name: doanvandan
   token: b5185c9f91ef989fdf23e89c
 esphome:

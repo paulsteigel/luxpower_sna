@@ -1,6 +1,5 @@
 substitutions:
   name: homehnm
-  luxid: lux_3173633222
   dyndnsurl: https://freemyip.com/update?token=411e5a7319eaffcb96fe7aed&domain=homehnm.freemyip.com
   mqtt_pass: !secret mqtt_password
   ota_pass: !secret ota_password
