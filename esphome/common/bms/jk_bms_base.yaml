@@ -24,6 +24,7 @@ jk_bms:
   id: bms0
   jk_modbus_id: modbus0
   update_interval: 15s
+  protocol_version: JK04
 
 binary_sensor:
   - platform: jk_bms
