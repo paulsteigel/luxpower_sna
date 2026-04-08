@@ -16,7 +16,7 @@ canbus:
         - lambda: |-
             id(can_ack_counter) = 0;                              // Reset ACK counter
             id(can_status) = "ON";                                // Set CANBUS Status to ON
-            id(${name}_canbus_status).publish_state(id(can_status));      // Publish text sensor
+            id(canbus_status).publish_state(id(can_status));      // Publish text sensor
             ESP_LOGI("main", "received can id: 0x305 ACK");
 
 interval:
@@ -50,7 +50,7 @@ interval:
               else {
               
                 id(can_status) = "OFF";                           // Set CANBUS Status to OFF
-                id(${name}_canbus_status).publish_state(id(can_status));  // Publish text sensor
+                id(canbus_status).publish_state(id(can_status));  // Publish text sensor
                 ESP_LOGI("main", "No rx can 0x305 reply, Inverter not connected/responding...");
                 return false;                                     // Condition NOK
                 
@@ -210,7 +210,7 @@ interval:
                       float cv_v;
                       if (id(can_switch_auto_voltage).state) {
                         float ovp_mv = id(can_over_voltage_protection).state;
-                        float gap_mv = id(${name}_voltage_recovery_gap).state;
+                        float gap_mv = id(voltage_recovery_gap).state;
                         cv_v = ((ovp_mv - gap_mv) / 1000.0f) * cells;
                       } else {
                         cv_v = (id(max_charge_voltage).state / 1000.0f) * cells;
@@ -252,7 +252,7 @@ interval:
                       int16_t CCL = int16_t(target_ccl * 10);
                       int16_t DCL = int16_t(target_dcl * 10);
                     
-                      id(${name}_charging_status).publish_state(id(charge_status));
+                      id(charging_status).publish_state(id(charge_status));
                     
                       uint8_t m[8];
                       m[0]=CVL&0xFF; m[1]=CVL>>8;

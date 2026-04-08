@@ -56,7 +56,7 @@ canbus:
           - lambda: |-
               id(can_ack_counter) = 0;
               id(can_status) = "ON";
-              id(${name}_canbus_status).publish_state(id(can_status));
+              id(canbus_status).publish_state(id(can_status));
               ESP_LOGI("LUX_CAN", "0x305 ACK ✅");
 
       # ── 0x300 Remote command from Luxpower inverter ─────────────
@@ -99,7 +99,7 @@ interval:
               }
               else {
                 id(can_status) = "OFF";
-                id(${name}_canbus_status).publish_state(id(can_status));
+                id(canbus_status).publish_state(id(can_status));
                 ESP_LOGI("LUX_CAN", "0x305 timeout → Inverter offline");
                 return false;
               }
@@ -149,7 +149,7 @@ interval:
                                        ? id(battery_strings).state : 16.0f;
                         float mcv_mv = id(max_charge_voltage).state;
                         float uvp_mv = id(can_under_voltage_protection).state;
-                        float gap_mv = id(${name}_voltage_recovery_gap).state;
+                        float gap_mv = id(voltage_recovery_gap).state;
                         cvl_v = (!isnan(mcv_mv) && mcv_mv > 0)
                                 ? (mcv_mv / 1000.0f) * cells : 55.2f;
                         dvl_v = (!isnan(uvp_mv) && uvp_mv > 0 && !isnan(gap_mv))
@@ -181,7 +181,7 @@ interval:
 
                       if (id(errors_bitmask).state > 1)
                         id(charge_status) = "Alarm";
-                      id(${name}_charging_status).publish_state(id(charge_status));
+                      id(charging_status).publish_state(id(charge_status));
 
                       uint8_t m[8];
                       m[0]=CVL&0xFF; m[1]=CVL>>8;
