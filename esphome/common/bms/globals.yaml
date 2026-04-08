@@ -65,8 +65,3 @@ globals:
     type: float
     restore_value: no
     initial_value: '0.0'
-
-  # ── Device identity ────────────────────────────────────────────
-  - id: ${name}_canbus_name
-    type: std::string
-    restore_value: no
