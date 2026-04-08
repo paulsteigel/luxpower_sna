@@ -1,8 +1,7 @@
 # homehnm.yaml — chỉ còn thế này!
 substitutions:
   name: homehna
-  #09b0a2807898a8d32ac01a4f -homehna
-  #b5185c9f91ef989fdf23e89c -doanvandan
+  token: #09b0a2807898a8d32ac01a4f -homehna
 esphome:
   name: ${name}
   on_boot:
