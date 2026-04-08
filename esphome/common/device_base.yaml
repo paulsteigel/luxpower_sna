@@ -75,6 +75,6 @@ light:
 
 switch:
   - platform: restart
-    name: "Restart"    
-    id: ${name}_restart_esp
+    name: "${name} Restart"    
+    id: restart_esp
     entity_category: config
