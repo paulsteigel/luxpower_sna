@@ -8,6 +8,13 @@ uart:
   rx_buffer_size: 512
   tx_pin: ${tx_pin}
   rx_pin: ${rx_pin}
+  debug:
+    direction: BOTH
+    dummy_receiver: false
+    after:
+      delimiter: "\n"
+    sequence:
+      - lambda: UARTDebug::log_hex(direction, bytes, ':');
 
 jk_modbus:
   id: modbus0
