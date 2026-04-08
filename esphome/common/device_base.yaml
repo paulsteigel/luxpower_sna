@@ -38,8 +38,8 @@ esp32:
 esphome:
   name: ${name}
  
-logger:
-  level: WARN
+#logger:
+#  level: WARN
 
 # ── Connectivity ─────────────────────────────────────────────
 mqtt:
