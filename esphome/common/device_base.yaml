@@ -4,7 +4,7 @@
 # ============================================================
 
 substitutions:
-  name: base_dev 
+  name: base-dev 
   # ── GPIO pins (cố định trên PCB) ─────────────────────────
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
@@ -34,9 +34,9 @@ esp32:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 esphome:
-  name: base_dev
+  name: base-dev
   name_add_mac_suffix: true
-  friendly_name: base_dev
+  friendly_name: base-dev
 
 logger:
   level: WARN
@@ -48,8 +48,8 @@ mqtt:
   broker: myhome.sfdp.net
   username: mqtt_user
   password: !secret mqtt_password
-  client_id: !lambda |-
-    return "esp_" + get_mac_address();
+  #client_id: !lambda |-
+  #  return "esp_" + get_mac_address();
   clean_session: true         
 
 wifi:
