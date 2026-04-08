@@ -44,7 +44,7 @@ luxpower_sna:
 text:
   - platform: template
     id: lux_config_host
-    name: "lux_Inverter Host"
+    name: "lux_$(name}_Inverter Host"
     entity_category: config
     mode: text
     optimistic: true
