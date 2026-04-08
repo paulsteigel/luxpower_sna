@@ -149,18 +149,18 @@ number:
     # ── Uncomment if needed ──
     # offgrid_discharge_cutoff_soc:
     #   name: "lux_Off-grid Discharge Cut-off SOC"
-    # charge_voltage:
-    #   name: "lux_Charge Voltage"
+     charge_voltage:
+       name: "lux_Charge Voltage"
     # discharge_cutoff_voltage:
     #   name: "lux_Discharge Cut-off Voltage"
     # ac_charge_start_soc:
     #   name: "lux_AC Charge Start SOC"
     # ac_charge_end_soc:
     #   name: "lux_AC Charge End SOC"
-    # charge_current_limit:
-    #   name: "lux_Charge Current Limit"
-    # discharge_current_limit:
-    #   name: "lux_Discharge Current Limit"
+     charge_current_limit:
+       name: "lux_Charge Current Limit"
+     discharge_current_limit:
+       name: "lux_Discharge Current Limit"
     # grid_peak_shaving_power:
     #   name: "lux_Grid Peak Shaving Power"
 
@@ -205,9 +205,10 @@ switch:
     charge_last:
       name: "lux_${name} Charge Last"
       icon: "mdi:battery-clock"
+    
     # ── Uncomment if needed ──
-    # forced_discharge_enable:
-    #   name: "lux_${name} Force Discharge Enable"
+     forced_discharge_enable:
+       name: "lux_${name} Force Discharge Enable"
     # enable_peak_shaving:
     #   name: "lux_${name} Grid Peak Shaving"
     # seamless_eps_switching:
