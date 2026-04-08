@@ -44,7 +44,7 @@ luxpower_sna:
 text:
   - platform: template
     id: lux_config_host
-    name: "lux_$(name}_Inverter Host"
+    name: "lux_${name}_Inverter Host"
     entity_category: config
     mode: text
     optimistic: true
@@ -120,28 +120,28 @@ number:
     luxpower_sna_id: lux_hub
     # ── Essential charge/discharge controls ──
     charge_power_percent:
-      name: "lux_System Charge Power Rate"
+      name: "lux_${name}System Charge Power Rate"
       icon: "mdi:battery-arrow-up"
     discharge_power_percent:
-      name: "lux_System Discharge Power Rate"
+      name: "lux_${name}System Discharge Power Rate"
       icon: "mdi:battery-arrow-down"
     ac_charge_power_percent:
-      name: "lux_AC Charge Power Rate"
+      name: "lux_${name}AC Charge Power Rate"
       icon: "mdi:transmission-tower-import"
     ac_charge_soc_limit:
-      name: "lux_AC Charge Battery Level"
+      name: "lux_${name}AC Charge Battery Level"
       icon: "mdi:battery-charging-100"
     discharge_cutoff_soc:
-      name: "lux_On-grid Discharge Cut-off SOC"
+      name: "lux_${name}On-grid Discharge Cut-off SOC"
       icon: "mdi:battery-low"
     forced_discharge_power_percent:
-      name: "lux_Forced Discharge Power Rate"
+      name: "lux_${name}Forced Discharge Power Rate"
       icon: "mdi:battery-arrow-down"
     priority_charge_rate:
-      name: "lux_Priority Charge Rate"
+      name: "lux_${name}Priority Charge Rate"
       icon: "mdi:battery-arrow-up"
     priority_charge_soc:
-      name: "lux_Priority Charge Level"
+      name: "lux_${name}Priority Charge Level"
       icon: "mdi:battery-charging-80"
     ct_clamp_offset:
       name: "lux_${name} CT Clamp Offset"
