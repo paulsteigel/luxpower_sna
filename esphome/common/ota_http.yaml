@@ -12,11 +12,12 @@ button:
   - platform: template
     name: "Firmware Update"
     id: ${name}_firmware_update
+    unique_id: "${name}_firmware_update"
     entity_category: config
     icon: mdi:cloud-download
     on_press:
       then:
         - logger.log: "OTA update starting..."
         - ota.http_request.flash:
-            md5_url: http://ota.sfdp.net/base_dev/firmware.md5
-            url: http://ota.sfdp.net/base_dev/firmware.bin.gz
+            md5_url: http://ota.sfdp.net/base/firmware.md5
+            url: http://ota.sfdp.net/base/firmware.bin.gz

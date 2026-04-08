@@ -1,0 +1,32 @@
+# base.yaml — chỉ còn thế này!
+substitutions:
+  luxid: lux
+  #09b0a2807898a8d32ac01a4f -homehna
+  #b5185c9f91ef989fdf23e89c -doanvandan
+esphome:
+  name: base
+  on_boot:
+    then:
+      - switch.turn_on: switch_charging
+      - switch.turn_on: switch_discharging
+      - switch.turn_on: can_switch_auto_discharge_current
+      - switch.turn_on: can_switch_auto_charge_current
+
+packages:
+  remote_packages:
+    url: https://github.com/paulsteigel/luxpower_sna
+    ref: main
+    refresh: 0s
+    files:
+      - esphome/common/device_base.yaml
+      - esphome/common/dyndns.yaml
+      - esphome/common/luxpower.yaml
+      - esphome/common/logger.yaml
+      - esphome/common/ota_http.yaml
+      - esphome/common/bms/dev_info.yaml
+      - esphome/common/bms/globals.yaml
+      - esphome/common/bms/text_sensors.yaml
+      - esphome/common/bms/canbus_luxpower.yaml
+      - esphome/common/bms/charge_discharge_controller.yaml
+      - esphome/common/bms/jk_bms_base.yaml
+      - esphome/common/bms/jk_bms_cells_16.yaml
