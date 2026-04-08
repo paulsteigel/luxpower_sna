@@ -19,4 +19,4 @@ button:
         - logger.log: "OTA update starting..."
         - ota.http_request.flash:
             md5_url: http://ota.sfdp.net/${name}/${name}.ota.md5
-            url: http://ota.sfdp.net/${name}/${name}ota.bin
+            url: http://ota.sfdp.net/${name}/${name}.ota.bin
