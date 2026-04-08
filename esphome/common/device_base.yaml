@@ -8,13 +8,9 @@ substitutions:
   can_tx_pin: GPIO16
   can_rx_pin: GPIO17
   
-  # for others
+  # GPIO for UART (JK BMS) - mặc định là 9/10, nhưng doanvandan dùng ngược lại nên đổi cho linh hoạt
   tx_pin: GPIO9
   rx_pin: GPIO10
-  
-  # for doanvandan
-  #tx_pin: GPIO10
-  #rx_pin: GPIO9
   
   led_pin: GPIO15
   
@@ -29,6 +25,7 @@ substitutions:
   #external_components_source:  github://syssi/esphome-jk-bms@2.2.0
   #external_components_source:  github://syssi/esphome-jk-bms@main
   external_components_source: github://paulsteigel/esphome-jk-bms@main
+
 # ── Board ────────────────────────────────────────────────────
 esp32:
   board: lolin_s2_mini
@@ -42,8 +39,8 @@ esp32:
 esphome:
   name: ${name}
  
-#logger:
-#  level: WARN
+logger:
+  level: WARN
 
 # ── Connectivity ─────────────────────────────────────────────
 mqtt:
