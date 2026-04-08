@@ -144,7 +144,7 @@ number:
       name: "lux_Priority Charge Level"
       icon: "mdi:battery-charging-80"
     ct_clamp_offset:
-      name: "lux_CT Clamp Offset"
+      name: "lux_${name} CT Clamp Offset"
       icon: "mdi:current-ac"
     # ── Uncomment if needed ──
     # offgrid_discharge_cutoff_soc:
