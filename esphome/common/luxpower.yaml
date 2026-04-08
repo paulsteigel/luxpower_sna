@@ -173,7 +173,7 @@ button:
       icon: "mdi:restart"
       entity_category: config
     scan_luxpower_dongle:
-      name: "lux_Scan Dongle IP"
+      name: "${name} Scan Dongle IP"
       icon: "mdi:search"
       entity_category: config
     # reset_all is commented – dangerous, uncomment only when needed

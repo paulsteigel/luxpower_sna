@@ -22,7 +22,7 @@ substitutions:
   max_cycles: "6000.0"
   can_bms_name: "1"
   can_protocol: "1"
-  external_components_source:  github://syssi/esphome-jk-bms@2.4.0 #github://syssi/esphome-jk-bms@main
+  external_components_source:  github://syssi/esphome-jk-bms@2.3.0 #github://syssi/esphome-jk-bms@main
 
 # ── Board ────────────────────────────────────────────────────
 esp32:
