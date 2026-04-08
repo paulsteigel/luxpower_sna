@@ -82,35 +82,20 @@ globals:
     restore_value: yes
     initial_value: '0'
 
-  - id: ${name}_eoc
+  - id: eoc
     type: bool
     restore_value: no
     initial_value: 'false'
 
-  - id: ${name}_eoc_timestamp
+  - id: eoc_timestamp
     type: time_t
     restore_value: yes
     initial_value: '0'
 
-  - id: ${name}_cc_memory_valid
+  - id: cc_memory_valid
     type: bool
     restore_value: no
     initial_value: 'false'
-
-  - id: ${name}_last_safe_cc_a
-    type: float
-    restore_value: no
-    initial_value: '5.0'
-
-  - id: ${name}_last_charge_end_ms
-    type: uint32_t
-    restore_value: no
-    initial_value: '0'
-
-  - id: ${name}_charge_phase
-    type: int
-    restore_value: no
-    initial_value: '0'
 
   - id: g_force_dis_stop
     type: bool
@@ -249,7 +234,7 @@ number:
 
   - platform: template
     name: "${name} Voltage recovery gap"
-    id: ${name}_voltage_recovery_gap
+    id: voltage_recovery_gap
     # Khoảng cách (mV) từ UVP/OVP mà adaptive bắt đầu taper.
     # Nhỏ → taper muộn hơn, dùng được nhiều pin hơn.
     # Lớn → taper sớm hơn, an toàn hơn với pin yếu.
@@ -297,7 +282,7 @@ number:
 sensor:
   - platform: template
     name: "Adaptive Charging Current"
-    id: ${name}_adaptive_charging_current
+    id: adaptive_charging_current
     unit_of_measurement: "A"
     accuracy_decimals: 1
     device_class: current
@@ -305,7 +290,7 @@ sensor:
 
   - platform: template
     name: "Adaptive Discharging Current"
-    id: ${name}_adaptive_discharging_current
+    id: adaptive_discharging_current
     unit_of_measurement: "A"
     accuracy_decimals: 1
     device_class: current
@@ -336,7 +321,7 @@ sensor:
           } else if (id(capacity_remaining).state <= id(can_soc_stop_discharging).state) {
             float margin = id(min_cell_voltage).state * 1000.0f
                            - id(can_under_voltage_protection).state;
-            float gap    = id(${name}_voltage_recovery_gap).state;
+            float gap    = id(voltage_recovery_gap).state;
             soc = (margin > gap * 2.0f) ? soc_stop_v + 1 : soc_stop_v;
           } else {
             soc = uint16_t(id(capacity_remaining).state);
@@ -352,7 +337,7 @@ sensor:
   - platform: copy
     source_id: min_cell_voltage
     name: "Adaptive Discharge Control"
-    id: ${name}_adaptive_discharge_control
+    id: adaptive_discharge_control
     internal: true
     on_value:
       then:
@@ -397,7 +382,7 @@ sensor:
             smv /= n;
 
             float uvp            = id(can_under_voltage_protection).state;
-            float gap            = id(${name}_voltage_recovery_gap).state;
+            float gap            = id(voltage_recovery_gap).state;
             float max_i          = id(discharging_current).state;
             bool  auto_mode      = id(can_switch_auto_discharge_current).state;
             bool  dis_enabled    = id(switch_discharging).state;
@@ -432,7 +417,7 @@ sensor:
                 id(g_startup_done) = false;
               }
               id(discharging_a) = 0;
-              id(${name}_adaptive_discharging_current).publish_state(0.0f);
+              id(adaptive_discharging_current).publish_state(0.0f);
               last_published = 0.0f;
               ESP_LOGI("DIS", "BOOT V=%.0fmV k=%.2f", smv, k_est);
               return;
@@ -608,7 +593,7 @@ sensor:
             publish_dis:
             current_out_a = std::max(0.0f, std::min(current_out_a, max_i));
             if (std::abs(current_out_a - last_published) >= 0.3f) {
-              id(${name}_adaptive_discharging_current).publish_state(current_out_a);
+              id(adaptive_discharging_current).publish_state(current_out_a);
               last_published = current_out_a;
               static const char* sn[] = {"SOFT","ADAP","STOP"};
               int s = id(g_dis_state);
@@ -623,7 +608,7 @@ sensor:
   - platform: copy
     source_id: max_cell_voltage
     name: "Adaptive Charge Control"
-    id: ${name}_adaptive_charge_control
+    id: adaptive_charge_control
     internal: true
     on_value:
       then:
@@ -666,7 +651,7 @@ sensor:
             smv /= n;
 
             float ovp            = id(can_over_voltage_protection).state;
-            float gap            = id(${name}_voltage_recovery_gap).state;
+            float gap            = id(voltage_recovery_gap).state;
             float max_i          = id(charging_current).state;
             bool  auto_mode      = id(can_switch_auto_charge_current).state;
             bool  chg_enabled    = id(switch_charging).state;
@@ -696,7 +681,7 @@ sensor:
                 id(g_startup_done) = false;
               }
               id(charging_a) = 0;
-              id(${name}_adaptive_charging_current).publish_state(0.0f);
+              id(adaptive_charging_current).publish_state(0.0f);
               last_published = 0.0f;
               ESP_LOGI("CHG", "BOOT V=%.0fmV", smv);
               return;
@@ -844,12 +829,12 @@ sensor:
                   if (below_cterm_ms >= 60000UL) {
                     current_out_a = 0.0f; state = 2; ceiling = 0.0f;
                     id(g_chg_state) = 2; id(g_chg_ceiling) = 0.0f; id(charging_a) = 0;
-                    id(${name}_eoc) = true;
+                    id(eoc) = true;
                     id(report_soc) = 100;
                     id(charge_status) = "FULL";
-                    id(${name}_cc_memory_valid) = false;
+                    id(cc_memory_valid) = false;
                     auto t = id(my_time).now();
-                    if (t.is_valid()) id(${name}_eoc_timestamp) = t.timestamp;
+                    if (t.is_valid()) id(eoc_timestamp) = t.timestamp;
                     id(cv_counter) = id(cv_counter) + 1;
                     ESP_LOGI("CHG", "EOC C/20: V=%.0fmV I=%.1fA < %.1fA",
                              smv, current_val, c_term_a);
@@ -886,7 +871,7 @@ sensor:
             publish_chg:
             current_out_a = std::max(0.0f, std::min(current_out_a, max_i));
             if (std::abs(current_out_a - last_published) >= 0.3f) {
-              id(${name}_adaptive_charging_current).publish_state(current_out_a);
+              id(adaptive_charging_current).publish_state(current_out_a);
               last_published = current_out_a;
               static const char* sn[] = {"SOFT","ADAP","STOP"};
               int s = id(g_chg_state);
@@ -909,7 +894,7 @@ sensor:
   - platform: copy
     source_id: max_cell_voltage
     name: "CVL Calculator"
-    id: ${name}_cvl_calculator
+    id: cvl_calculator
     internal: true
     on_value:
       then:
@@ -926,7 +911,7 @@ sensor:
 
             float max_chg_mv = id(max_charge_voltage).state;
             float uvp_mv     = id(can_under_voltage_protection).state;
-            float gap_mv     = id(${name}_voltage_recovery_gap).state;
+            float gap_mv     = id(voltage_recovery_gap).state;
 
             if (isnan(max_chg_mv) || isnan(uvp_mv) || isnan(gap_mv) ||
                 max_chg_mv <= 0  || uvp_mv <= 0    || gap_mv <= 0)
@@ -961,7 +946,7 @@ sensor:
 
   - platform: template
     name: "CVL Pack Voltage"
-    id: ${name}_cvl_pack_voltage
+    id: cvl_pack_voltage
     unit_of_measurement: "V"
     accuracy_decimals: 2
     device_class: voltage
@@ -973,7 +958,7 @@ sensor:
 
   - platform: template
     name: "DVL Pack Voltage"
-    id: ${name}_dvl_pack_voltage
+    id: dvl_pack_voltage
     unit_of_measurement: "V"
     accuracy_decimals: 2
     device_class: voltage
@@ -989,7 +974,7 @@ sensor:
 text_sensor:
   - platform: template
     name: "CCCV Phase"
-    id: ${name}_adaptive_status
+    id: adaptive_status
     update_interval: 2s
     lambda: |-
       if (!id(g_startup_done)) {
@@ -1002,24 +987,24 @@ text_sensor:
       float min_mv = id(min_cell_voltage).state * 1000.0f;
       float ovp    = id(can_over_voltage_protection).state;
       float uvp    = id(can_under_voltage_protection).state;
-      float gap    = id(${name}_voltage_recovery_gap).state;
+      float gap    = id(voltage_recovery_gap).state;
       float cap_ah = id(total_battery_capacity_setting).state;
       float c_term = (!isnan(cap_ah) && cap_ah > 0) ? cap_ah / 20.0f : 14.0f;
       static const char* sn[] = {"SOFT","ADAP","STOP"};
       std::string s;
       if (cur > 0.5f) {
         int   st   = id(g_chg_state);
-        float ci   = id(${name}_adaptive_charging_current).state;
+        float ci   = id(adaptive_charging_current).state;
         float ceil = id(g_chg_ceiling);
         float vhc  = ovp - max_mv;
-        if (st == 2 && id(${name}_eoc))
+        if (st == 2 && id(eoc))
           return {"FULL EOC C/20=" + to_string((int)c_term) + "A"};
         s = "CHG " + std::string(st < 3 ? sn[st] : "?");
         s += " " + to_string((int)ci) + "A";
         if (st == 1) s += " [Cx=" + to_string((int)ceil) + "A h=" + to_string((int)vhc) + "mV]";
       } else if (cur < -0.5f) {
         int   st   = id(g_dis_state);
-        float di   = id(${name}_adaptive_discharging_current).state;
+        float di   = id(adaptive_discharging_current).state;
         float ceil = id(g_dis_ceiling);
         float vhd  = min_mv - uvp;
         float k    = id(g_dis_k_est);
@@ -1036,7 +1021,7 @@ text_sensor:
 
   - platform: template
     name: "Battery Health"
-    id: ${name}_battery_health
+    id: battery_health
     update_interval: 30s
     lambda: |-
       float dv = (id(max_cell_voltage).state - id(min_cell_voltage).state) * 1000.0f;
@@ -1049,12 +1034,12 @@ text_sensor:
 
   - platform: template
     name: "LFP Settings Check"
-    id: ${name}_chemistry_check
+    id: chemistry_check
     update_interval: 30s
     lambda: |-
       float ovp  = id(can_over_voltage_protection).state;
       float uvp  = id(can_under_voltage_protection).state;
-      float gap  = id(${name}_voltage_recovery_gap).state;
+      float gap  = id(voltage_recovery_gap).state;
       float mcv  = id(max_charge_voltage).state;
       std::vector<std::string> w;
       if (ovp > 3650.0f) w.push_back("OVP>3650 HUY HOAI!");
