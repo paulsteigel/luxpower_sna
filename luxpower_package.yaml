@@ -2,7 +2,7 @@
 # LuxPower SNA – Package file (trimmed for Lovelace + key controls)
 # Usage:
 #   substitutions:
-#     luxid: "lux_3253631886"
+#     luxid: "...."
 #   packages:
 #     luxpower: !include commons/luxpower_sensors.yaml
 # ============================================================
