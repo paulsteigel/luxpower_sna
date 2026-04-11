@@ -207,8 +207,8 @@ switch:
       icon: "mdi:battery-clock"
     
     # ── Uncomment if needed ──
-     forced_discharge_enable:
-       name: "lux_${name} Force Discharge Enable"
+    forced_discharge_enable:
+      name: "lux_${name} Force Discharge Enable"
     # enable_peak_shaving:
     #   name: "lux_${name} Grid Peak Shaving"
     # seamless_eps_switching:
