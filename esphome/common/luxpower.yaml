@@ -149,8 +149,8 @@ number:
     # ── Uncomment if needed ──
     # offgrid_discharge_cutoff_soc:
     #   name: "lux_Off-grid Discharge Cut-off SOC"
-     charge_voltage:
-       name: "lux_Charge Voltage"
+    charge_voltage:
+      name: "lux_Charge Voltage"
     # discharge_cutoff_voltage:
     #   name: "lux_Discharge Cut-off Voltage"
     # ac_charge_start_soc:
