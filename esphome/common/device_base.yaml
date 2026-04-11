@@ -34,7 +34,7 @@ esp32:
     sdkconfig_options:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
    
-    type: arduino
+    #type: arduino
 
 esphome:
   name: ${name}
