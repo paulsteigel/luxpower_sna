@@ -157,10 +157,10 @@ number:
     #   name: "lux_AC Charge Start SOC"
     # ac_charge_end_soc:
     #   name: "lux_AC Charge End SOC"
-     charge_current_limit:
-       name: "lux_Charge Current Limit"
-     discharge_current_limit:
-       name: "lux_Discharge Current Limit"
+    charge_current_limit:
+      name: "lux_Charge Current Limit"
+    discharge_current_limit:
+      name: "lux_Discharge Current Limit"
     # grid_peak_shaving_power:
     #   name: "lux_Grid Peak Shaving Power"
 
