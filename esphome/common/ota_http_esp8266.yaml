@@ -12,10 +12,10 @@ external_components:
     refresh: 0s
 
 # ─── HTTP Request (required by ota http_request) ──────────
-http_request:
-  verify_ssl: false
-  useragent: "esphome/ota"
-  timeout: 10s
+#http_request:
+#  verify_ssl: false
+#  useragent: "esphome/ota"
+#  timeout: 10s
 
 # ─── Buttons ──────────────────────────────────────────────
 button:
