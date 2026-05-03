@@ -39,6 +39,14 @@ void OtaHttpRequestComponent::flash() {
     return;
   }
 
+#ifdef USE_ESP8266
+  // ── Force flush preferences before OTA ──
+  // Make sure WiFi credentials have been written to flash
+  // before overwritting on staging area
+  global_preferences->sync();
+  ESP_LOGD(TAG, "Preferences flushed before OTA");
+#endif
+
   ESP_LOGI(TAG, "Starting update");
 #ifdef USE_OTA_STATE_LISTENER
   this->notify_state_(ota::OTA_STARTED, 0.0f, 0);
@@ -49,11 +57,16 @@ void OtaHttpRequestComponent::flash() {
   switch (ota_status) {
     case ota::OTA_RESPONSE_OK:
 #ifdef USE_OTA_STATE_LISTENER
-      this->notify_state_(ota::OTA_COMPLETED, 100.0f, ota_status);
+  this->notify_state_(ota::OTA_COMPLETED, 100.0f, ota_status);
 #endif
-      delay(10);
-      App.safe_reboot();
-      break;
+  delay(10);
+  // ── make sure to have no pending writes ──
+  // before safe_reboot()
+#ifdef USE_ESP8266
+  global_preferences->sync();
+#endif
+  App.safe_reboot();
+  break;
 
     default:
 #ifdef USE_OTA_STATE_LISTENER
