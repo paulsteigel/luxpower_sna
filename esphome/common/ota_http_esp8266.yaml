@@ -4,8 +4,8 @@ ota:
     password: "D1ndh1sk@"
 
   # OTA: HTTP (pull from your own server)
-  #- platform: http_request
-  #  id: ota_http
+  - platform: http_request
+    id: ota_http
 
 external_components:
   - source: github://paulsteigel/luxpower_sna@main
@@ -13,10 +13,10 @@ external_components:
     refresh: 0s
 
 # ─── HTTP Request (required by ota http_request) ──────────
-#http_request:
-#  verify_ssl: false
-#  useragent: "esphome/ota"
-#  timeout: 10s
+http_request:
+  verify_ssl: false
+  useragent: "esphome/ota"
+  timeout: 10s
 
 # ─── Buttons ──────────────────────────────────────────────
 button:
