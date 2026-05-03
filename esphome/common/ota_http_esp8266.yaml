@@ -1,0 +1,26 @@
+# ─── OTA: ESPHome dashboard (local) ───────────────────────
+ota:
+  - platform: esphome
+    password: "D1ndh1sk@"
+
+  # OTA: HTTP (pull from your own server)
+  - platform: http_request
+    id: ota_http
+
+# ─── HTTP Request (required by ota http_request) ──────────
+http_request:
+  verify_ssl: false
+  useragent: "esphome/ota"
+  timeout: 10s
+
+# ─── Buttons ──────────────────────────────────────────────
+button:
+  # OTA trigger
+  - platform: template
+    name: "Check Firmware Update"
+    icon: "mdi:cloud-download"
+    entity_category: config
+    on_press:
+      - ota.http_request.flash:
+          md5_url: http://ota.sfdp.net/irrigation/${name}/${name}.md5
+          url: http://ota.sfdp.net/irrigation/${name}/${name}.bin.gz
