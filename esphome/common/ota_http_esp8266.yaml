@@ -7,6 +7,10 @@ ota:
   - platform: http_request
     id: ota_http
 
+external_components:
+  - source: github://paulsteigel/ota_http@main
+    refresh: 0s
+
 # ─── HTTP Request (required by ota http_request) ──────────
 http_request:
   verify_ssl: false
