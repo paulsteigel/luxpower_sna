@@ -8,7 +8,8 @@ ota:
   #  id: ota_http
 
 external_components:
-  - source: github://paulsteigel/ota_http@main
+  - source: github://paulsteigel/luxpower_sna@main
+    components: [ota_http]
     refresh: 0s
 
 # ─── HTTP Request (required by ota http_request) ──────────

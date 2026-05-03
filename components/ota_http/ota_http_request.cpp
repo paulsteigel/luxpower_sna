@@ -5,14 +5,121 @@
 #include "esphome/core/application.h"
 #include "esphome/core/defines.h"
 #include "esphome/core/log.h"
+#include "esphome/core/preferences.h"   // ← needed for global_preferences->sync()
 
 #include "esphome/components/md5/md5.h"
 #include "esphome/components/watchdog/watchdog.h"
+
+// ── ESP8266: access live WiFi credentials from the SDK ──────────────────────
+// WiFi.SSID() / WiFi.psk() read directly from the SDK's station config, which
+// lives in RAM and is NOT affected by spi_flash_erase_sector(). This is the
+// only reliable source of captive-portal credentials at OTA time.
+// ────────────────────────────────────────────────────────────────────────────
+#ifdef USE_ESP8266
+#include <ESP8266WiFi.h>
+#endif
 
 namespace esphome {
 namespace http_request {
 
 static const char *const TAG = "http_request.ota";
+
+// ── Why WiFi credentials are lost after HTTP OTA on ESP8266 ─────────────────
+//
+// Sequence of events during HTTP OTA:
+//
+//   1. backend->begin(content_length)
+//        └─ esp8266::preferences_prevent_write(true)   [blocks ESPHome pref writes]
+//        └─ start_address  =  FS_start - rounded_firmware_size
+//           For esp01_1m (no SPIFFS):
+//             FS_start         = 0x40300000 (top of 1 MB flash)
+//             firmware gz ~280KB → rounded = 0x47000
+//             start_address    = 0xB9000
+//
+//   2. write loop → spi_flash_erase_sector() called for EVERY sector
+//        from start_address (0xB9000) up to 0x100000.
+//        ESPHome preference sector for 1 MB flash  = sector 255 = 0xFF000
+//        0xFF000 lies inside [0xB9000, 0x100000) → ERASED here.
+//        preferences_prevent_write=true only stops ESPHome from WRITING;
+//        it does NOT protect the sector from physical erasure.
+//
+//   3. backend->end()
+//        └─ writes eboot command to RTC (copy staging → 0x00000)
+//        └─ esp8266::preferences_prevent_write(false)
+//
+//   4. App.safe_reboot()  [note: does NOT force a global_preferences->sync()]
+//
+//   5. eboot copies firmware → does NOT touch the preferences sector
+//
+//   6. New firmware boots → reads preferences sector (now blank) → no WiFi creds
+//      → captive portal starts.
+//
+// Fix (two-part):
+//   A. BEFORE OTA  : save live SDK credentials (WiFi.SSID / WiFi.psk) to RTC
+//                    user-memory (not affected by sector erasure).
+//   B. BEFORE REBOOT: call global_preferences->sync() so that any in-memory
+//                    preference data (including WiFi creds if still valid) is
+//                    flushed back to the freshly erased sector.
+//   C. ON NEXT BOOT : a high-priority on_boot lambda (see YAML snippet below)
+//                    reads the RTC backup and feeds credentials back to
+//                    global_wifi_component BEFORE WiFi component's own setup()
+//                    runs, so connection proceeds without captive portal.
+//
+// YAML snippet to add to your device config (fires at priority 700, which is
+// BEFORE WiFi component setup at setup_priority 300):
+//
+// esphome:
+//   on_boot:
+//     - priority: 700
+//       then:
+//         - lambda: |-
+//             #ifdef USE_ESP8266
+//             OtaWifiRtcStore s;
+//             ESP.rtcUserMemoryRead(OTA_WIFI_RTC_SLOT,
+//                                   reinterpret_cast<uint32_t *>(&s),
+//                                   OTA_WIFI_RTC_WORDS);
+//             if (s.magic == OTA_WIFI_RTC_MAGIC && strlen(s.ssid) > 0) {
+//               ESP_LOGI("wifi_rtc", "Restoring WiFi '%s' from RTC backup", s.ssid);
+//               esphome::wifi::WiFiAP ap;
+//               ap.set_ssid(s.ssid);
+//               ap.set_password(s.psk);
+//               global_wifi_component->add_sta(ap);
+//               // clear magic so normal boots are unaffected
+//               s.magic = 0;
+//               ESP.rtcUserMemoryWrite(OTA_WIFI_RTC_SLOT,
+//                                      reinterpret_cast<uint32_t *>(&s),
+//                                      OTA_WIFI_RTC_WORDS);
+//             }
+//             #endif
+// ────────────────────────────────────────────────────────────────────────────
+
+// ── Part A: save live WiFi credentials to RTC memory ────────────────────────
+#ifdef USE_ESP8266
+void OtaHttpRequestComponent::save_wifi_to_rtc_() {
+  OtaWifiRtcStore store;
+  memset(&store, 0, sizeof(store));
+
+  String ssid = WiFi.SSID();
+  String psk  = WiFi.psk();
+
+  if (ssid.length() == 0) {
+    ESP_LOGW(TAG, "No active WiFi SSID to backup – captive portal may restart after OTA");
+    return;
+  }
+
+  store.magic = OTA_WIFI_RTC_MAGIC;
+  strncpy(store.ssid, ssid.c_str(), sizeof(store.ssid) - 1);
+  strncpy(store.psk,  psk.c_str(),  sizeof(store.psk)  - 1);
+
+  ESP.rtcUserMemoryWrite(OTA_WIFI_RTC_SLOT,
+                         reinterpret_cast<uint32_t *>(&store),
+                         OTA_WIFI_RTC_WORDS);
+
+  ESP_LOGI(TAG, "WiFi '%s' backed up to RTC slot %d (%d words)",
+           store.ssid, OTA_WIFI_RTC_SLOT, OTA_WIFI_RTC_WORDS);
+}
+#endif  // USE_ESP8266
+// ────────────────────────────────────────────────────────────────────────────
 
 void OtaHttpRequestComponent::dump_config() { ESP_LOGCONFIG(TAG, "Over-The-Air updates via HTTP request"); };
 
@@ -40,11 +147,9 @@ void OtaHttpRequestComponent::flash() {
   }
 
 #ifdef USE_ESP8266
-  // ── Force flush preferences before OTA ──
-  // Make sure WiFi credentials have been written to flash
-  // before overwritting on staging area
-  global_preferences->sync();
-  ESP_LOGD(TAG, "Preferences flushed before OTA");
+  // ── Part A: backup WiFi credentials BEFORE staging erases preference sector.
+  // WiFi.SSID()/WiFi.psk() read from SDK RAM – unaffected by flash ops.
+  this->save_wifi_to_rtc_();
 #endif
 
   ESP_LOGI(TAG, "Starting update");
@@ -57,16 +162,19 @@ void OtaHttpRequestComponent::flash() {
   switch (ota_status) {
     case ota::OTA_RESPONSE_OK:
 #ifdef USE_OTA_STATE_LISTENER
-  this->notify_state_(ota::OTA_COMPLETED, 100.0f, ota_status);
+      this->notify_state_(ota::OTA_COMPLETED, 100.0f, ota_status);
 #endif
-  delay(10);
-  // ── make sure to have no pending writes ──
-  // before safe_reboot()
-#ifdef USE_ESP8266
-  global_preferences->sync();
-#endif
-  App.safe_reboot();
-  break;
+      // ── Part B: flush any in-memory preference state back to flash.
+      // backend->end() already called preferences_prevent_write(false), so
+      // sync() is now permitted. This restores whatever ESPHome data (WiFi
+      // prefs, schedules, etc.) is still held in RAM into the sector that
+      // OTA staging may have erased.
+      global_preferences->sync();
+      ESP_LOGD(TAG, "Preferences synced before reboot");
+
+      delay(10);
+      App.safe_reboot();
+      break;
 
     default:
 #ifdef USE_OTA_STATE_LISTENER

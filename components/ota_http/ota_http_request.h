@@ -11,6 +11,32 @@
 
 #include "../http_request.h"
 
+// ── ESP8266 WiFi credential backup via RTC memory ──────────────────────────
+// RTC user memory (512 bytes / 128 x 4-byte slots) survives software reboot
+// but is NOT affected by spi_flash_erase_sector() during OTA staging.
+// We use this to preserve captive-portal WiFi credentials across HTTP OTA.
+//
+// Slot map:
+//   64–89  OtaWifiRtcStore (102 bytes → 26 uint32_t words)
+//
+// On the YAML side add an on_boot trigger (priority > WiFi setup priority 300)
+// that reads this struct and feeds credentials back to global_wifi_component
+// before the WiFi component runs its own setup(). See README / YAML snippet.
+// ───────────────────────────────────────────────────────────────────────────
+#ifdef USE_ESP8266
+struct OtaWifiRtcStore {
+  uint32_t magic;  // must equal OTA_WIFI_RTC_MAGIC to be considered valid
+  char     ssid[33];
+  char     psk[65];
+};
+// "OWIF" – arbitrary tag, must match the YAML lambda
+static constexpr uint32_t OTA_WIFI_RTC_MAGIC = 0x4F574946;
+// First RTC user-memory slot we occupy (slots 0-63 reserved by SDK internally)
+static constexpr uint8_t  OTA_WIFI_RTC_SLOT  = 64;
+// Number of uint32_t words needed (rounded up)
+static constexpr uint8_t  OTA_WIFI_RTC_WORDS = (sizeof(OtaWifiRtcStore) + 3) / 4;
+#endif  // USE_ESP8266
+
 namespace esphome {
 namespace http_request {
 
@@ -44,6 +70,12 @@ class OtaHttpRequestComponent final : public ota::OTAComponent, public Parented<
   std::string get_url_with_auth_(const std::string &url);
   bool http_get_md5_();
   bool validate_url_(const std::string &url);
+
+#ifdef USE_ESP8266
+  // Save current WiFi SSID/PSK (from the live SDK connection) into RTC memory
+  // so they survive the flash-sector erasure that OTA staging causes.
+  void save_wifi_to_rtc_();
+#endif
 
   std::string md5_computed_{};
   std::string md5_expected_{};
