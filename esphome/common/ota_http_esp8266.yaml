@@ -4,8 +4,8 @@ ota:
     password: "D1ndh1sk@"
 
   # OTA: HTTP (pull from your own server)
-  - platform: http_request
-    id: ota_http
+  #- platform: http_request
+  #  id: ota_http
 
 external_components:
   - source: github://paulsteigel/ota_http@main
