@@ -2,7 +2,7 @@
 ota:
   - platform: esphome
     port: ${port}
-    password: !secret ota_password
+    #password: !secret ota_password
     on_state_change:
       - logger.log: esphome.on_state_change
 
