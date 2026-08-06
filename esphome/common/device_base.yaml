@@ -50,16 +50,6 @@ mqtt:
   client_id: ${name}
   clean_session: true         
 
-wifi:
-  ap:
-    ssid: "ESPHome Setup"
-
-safe_mode:
-  num_attempts: 10
-  reboot_timeout: 10min
-
-captive_portal:
-
 # ── LED (pin cố định trên PCB) ───────────────────────────────
 output:
   - platform: gpio
