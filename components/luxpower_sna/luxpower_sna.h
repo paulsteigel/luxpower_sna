@@ -3,6 +3,13 @@
 // ---------------------------------------------------------------------------
 // LuxPower SNA ESPHome Component – IDF-compatible (lwip sockets, no WiFiClient)
 // Supports: sensors (READ_INPUT), switches (READ_HOLD / WRITE_SINGLE), numbers
+//
+// SCAN REWRITE (v2):
+//   - Batched parallel connect (LUX_SCAN_BATCH sockets at a time)
+//   - Protocol-level verification (READ_INPUT + dongle serial match)
+//   - Settle delay so the dongle releases its previous TCP session
+//   - Fast path: re-verify the currently known host before sweeping the subnet
+//   - Heartbeat watchdog instead of a fixed total-time watchdog
 // ---------------------------------------------------------------------------
 
 #include "esphome/core/component.h"
@@ -30,6 +37,7 @@
 #include <queue>
 #include <vector>
 #include <cstring>
+#include <atomic>
 
 namespace esphome {
 namespace luxpower_sna {
@@ -48,6 +56,22 @@ static const uint8_t  LUX_ACTION_WRITE        = 0x00;  // used for ALL requests 
 
 // Write queue max depth — prevents unbounded growth when inverter is offline
 static const size_t   LUX_WRITE_QUEUE_MAX     = 20;
+
+// ---------------------------------------------------------------------------
+// Scan tuning
+// ---------------------------------------------------------------------------
+// Concurrent connect attempts per batch. Keep well below CONFIG_LWIP_MAX_SOCKETS
+// (default 10 in ESP-IDF) so the main polling socket and MQTT still have room.
+static const uint8_t  LUX_SCAN_BATCH           = 6;
+// Per-batch connect timeout. 150ms was too short: a cold ARP cache means the
+// stack must resolve MAC before it can even send SYN, which regularly blew past
+// 150ms on a noisy WiFi link and produced random "not found" results.
+static const uint32_t LUX_SCAN_CONNECT_TIMEOUT = 400;   // ms, must stay < 1000
+// How long to wait for a protocol reply when verifying a candidate host.
+static const uint32_t LUX_SCAN_VERIFY_TIMEOUT  = 1500;  // ms
+// The dongle accepts only ONE TCP client. We close our socket right before
+// scanning; give it time to actually drop the session or it will refuse us.
+static const uint32_t LUX_SCAN_SETTLE_MS       = 1500;  // ms
 
 // ---------------------------------------------------------------------------
 // Packed structs for INPUT data banks
@@ -431,11 +455,11 @@ class LuxpowerSNAComponent : public Component {
     void set_e_load_all_l_sensor(sensor::Sensor *s)   { e_load_all_ = s; }
 
  private:
-    // ---- Socket ----
     // ---- NVS host persistence (survives MQTT overwrite) ----
     void save_host_prefs_();
     void load_host_prefs_();
 
+    // ---- Socket ----
     bool  start_connect_();
     bool  check_connect_();
     void  close_socket_();
@@ -444,6 +468,11 @@ class LuxpowerSNAComponent : public Component {
     bool  try_process_packet_();
 
     // ---- Packet builders ----
+    // Shared by the poller and the scanner so both speak exactly the same dialect.
+    static void build_read_input_packet_(uint8_t *pkt, const char *dongle,
+                                         const char *inverter,
+                                         uint16_t start_reg, uint16_t count);
+
     void  send_read_input_(uint16_t start_reg, uint16_t count = 40);
     void  send_read_hold_(uint16_t start_reg, uint16_t count = 40);
     void  send_write_single_(uint16_t reg, uint16_t value);
@@ -473,7 +502,7 @@ class LuxpowerSNAComponent : public Component {
     // ---- Apply scan result (called from loop() on main thread) ----
     void apply_scanned_host_(const std::string &ip);
 
-    // ---- Scan internals (FreeRTOS task, sequential connect) ----
+    // ---- Scan internals (FreeRTOS task, batched parallel connect) ----
     // ScanParams is defined here in the header — do NOT redefine in .cpp.
     struct ScanParams {
         uint8_t  a, b, c, self_octet;
@@ -483,17 +512,29 @@ class LuxpowerSNAComponent : public Component {
     static void scan_task_fn_(void *param);
     void do_scan_(uint8_t a, uint8_t b, uint8_t c, uint8_t self_octet, uint16_t port);
 
+    // Protocol-level verification: is the host at `ip` really OUR dongle?
+    // An open port 8000 alone is NOT proof — cameras, NAS boxes and other ESPs
+    // also listen there. We require a valid A1 1A frame with a matching serial.
+    bool probe_lux_(const char *ip, uint16_t port);
+
     // ---- Scan state (written by task, read by loop()) ----
-    // ESP32-S2 is single-core so volatile is sufficient; no mutex needed.
-    volatile bool scanning_{false};
-    volatile bool scan_result_pending_{false};
-    volatile bool scan_found_{false};
+    // std::atomic rather than volatile: correct on dual-core ESP32 too.
+    std::atomic<bool>     scanning_{false};
+    std::atomic<bool>     scan_result_pending_{false};
+    std::atomic<bool>     scan_found_{false};
+    std::atomic<bool>     scan_abort_{false};
+    std::atomic<uint32_t> scan_heartbeat_ms_{0};   // task pulses this every batch
+    std::atomic<uint16_t> scan_progress_{0};       // last octet probed, for the UI
     char     found_ip_buf_[20]{};
-    uint32_t scan_start_ms_{0};                    // watchdog: time scan started
-    static const uint32_t SCAN_TIMEOUT_MS = 30000; // 30s; reset if task dies silently
-    // Deferred apply: set in loop(), applied on NEXT loop() tick
-    // so apply_scanned_host_ runs outside the scan_result_pending_ block,
-    // avoiding on_value lambda → reconnect() re-entrant loop.
+    uint32_t last_scan_ui_ms_{0};
+    // Watchdog is now heartbeat-based, not total-time-based. The old 30s total
+    // budget was shorter than a worst-case sweep, so it fired mid-scan and left
+    // the task running while loop() thought the scan had ended.
+    static const uint32_t SCAN_STALL_MS = 12000;
+
+    // Deferred apply: set in loop(), applied on NEXT loop() tick so
+    // apply_scanned_host_ runs outside the scan_result_pending_ block,
+    // avoiding an on_value lambda → reconnect() re-entrant loop.
     bool        deferred_apply_{false};
     std::string deferred_ip_{};
 

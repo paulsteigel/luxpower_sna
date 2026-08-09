@@ -76,6 +76,9 @@ void LuxpowerSNAComponent::dump_config() {
                   update_interval_ms_, hold_interval_ms_);
     ESP_LOGCONFIG(TAG, "  Switches: %d, Numbers: %d",
                   (int)switches_.size(), (int)numbers_.size());
+    ESP_LOGCONFIG(TAG, "  Scan: batch=%u, connect_timeout=%ums, verify_timeout=%ums",
+                  (unsigned)LUX_SCAN_BATCH, LUX_SCAN_CONNECT_TIMEOUT,
+                  LUX_SCAN_VERIFY_TIMEOUT);
 }
 
 // ---------------------------------------------------------------------------
@@ -84,18 +87,31 @@ void LuxpowerSNAComponent::dump_config() {
 void LuxpowerSNAComponent::loop() {
     uint32_t now = esphome::millis();
 
-    // ── Watchdog: unstick scanning_ if task died without setting scan_result_pending_ ──
-    if (scanning_ && !scan_result_pending_ && (now - scan_start_ms_ > SCAN_TIMEOUT_MS)) {
-        ESP_LOGW(TAG, "Scan watchdog: task silent >30s, resetting scanning_");
-        scanning_ = false;
-        pub(scan_status_text_, "Error: scan timeout");
+    // ── Watchdog + progress UI while the scan task is running ─────────────
+    // Heartbeat-based: the task pulses scan_heartbeat_ms_ after every batch and
+    // every verification attempt. We only complain if it goes truly silent.
+    if (scanning_.load() && !scan_result_pending_.load()) {
+        uint32_t hb = scan_heartbeat_ms_.load();
+        if (hb != 0 && now - hb > SCAN_STALL_MS) {
+            ESP_LOGW(TAG, "Scan watchdog: no heartbeat for %ums, aborting",
+                     (unsigned)(now - hb));
+            scan_abort_ = true;    // ask the task to exit cleanly
+            scanning_   = false;
+            pub(scan_status_text_, "Error: scan stalled");
+        } else if (now - last_scan_ui_ms_ >= 3000) {
+            last_scan_ui_ms_ = now;
+            char b[40];
+            snprintf(b, sizeof(b), "Scanning... %u/254",
+                     (unsigned) scan_progress_.load());
+            pub(scan_status_text_, std::string(b));
+        }
     }
 
-    // ── Step 1: pick up raw result flag set by FreeRTOS scan task ────────────────
-    if (scan_result_pending_) {
+    // ── Step 1: pick up raw result flag set by FreeRTOS scan task ─────────
+    if (scan_result_pending_.load()) {
         scan_result_pending_ = false;
         scanning_            = false;
-        if (scan_found_) {
+        if (scan_found_.load()) {
             deferred_ip_    = std::string(found_ip_buf_);
             deferred_apply_ = true;
             pub(scan_status_text_, "Found: " + deferred_ip_);
@@ -107,7 +123,7 @@ void LuxpowerSNAComponent::loop() {
         return;
     }
 
-    // ── Step 2: deferred apply – one tick after scan_result_pending_ fired ───────
+    // ── Step 2: deferred apply – one tick after scan_result_pending_ fired ─
     if (deferred_apply_) {
         deferred_apply_ = false;
         ESP_LOGI(TAG, "Deferred apply: host = %s", deferred_ip_.c_str());
@@ -116,10 +132,10 @@ void LuxpowerSNAComponent::loop() {
         return;
     }
 
-    // ── Guard: skip normal polling while scan task is running ──────────────
-    if (scanning_) return;
+    // ── Guard: skip normal polling while scan task is running ─────────────
+    if (scanning_.load()) return;
 
-    // ── Guard: do nothing until config is complete ───────────────────────
+    // ── Guard: do nothing until config is complete ────────────────────────
     if (!is_config_ready()) {
         if (now - last_connect_ms_ >= 10000) {
             last_connect_ms_ = now;
@@ -152,7 +168,7 @@ void LuxpowerSNAComponent::loop() {
         return;
     }
 
-    // ── Connected – receive data first (always) ──────────────────────────────
+    // ── Connected – receive data first (always) ───────────────────────────
     try_recv_();
     while (try_process_packet_()) {}
 
@@ -173,7 +189,7 @@ void LuxpowerSNAComponent::loop() {
 
     if (awaiting_) return;
 
-    // ── State transitions ────────────────────────────────────────────────────
+    // ── State transitions ─────────────────────────────────────────────────
     switch (state_) {
         case State::IDLE: {
             if (!write_queue_.empty()) {
@@ -472,17 +488,27 @@ static void build_header_(uint8_t *buf, const char *dongle, uint16_t data_length
     buf[19] = data_length >> 8;
 }
 
-void LuxpowerSNAComponent::send_read_input_(uint16_t start_reg, uint16_t count) {
-    uint8_t pkt[38];
-    build_header_(pkt, dongle_serial_.c_str(), 18);
+// Shared builder — used both by the poller (send_read_input_) and by the
+// scanner (probe_lux_), so the probe is guaranteed to speak the exact same
+// dialect the inverter already answers.
+void LuxpowerSNAComponent::build_read_input_packet_(uint8_t *pkt, const char *dongle,
+                                                    const char *inverter,
+                                                    uint16_t start_reg, uint16_t count) {
+    build_header_(pkt, dongle, 18);
     uint8_t *df = pkt + 20;
     df[0] = LUX_ACTION_WRITE;
     df[1] = LUX_FN_READ_INPUT;
-    memcpy(df + 2, inverter_serial_.c_str(), 10);
+    memcpy(df + 2, inverter, 10);
     df[12] = start_reg & 0xFF; df[13] = start_reg >> 8;
     df[14] = count & 0xFF;     df[15] = count >> 8;
     uint16_t crc = crc16_(df, 16);
     pkt[36] = crc & 0xFF; pkt[37] = crc >> 8;
+}
+
+void LuxpowerSNAComponent::send_read_input_(uint16_t start_reg, uint16_t count) {
+    uint8_t pkt[38];
+    build_read_input_packet_(pkt, dongle_serial_.c_str(),
+                             inverter_serial_.c_str(), start_reg, count);
     ESP_LOGD(TAG, "READ_INPUT reg=%u count=%u", start_reg, count);
     send_bytes_(pkt, 38);
 }
@@ -517,7 +543,7 @@ void LuxpowerSNAComponent::send_write_single_(uint16_t reg, uint16_t value) {
     send_bytes_(pkt, 38);
 }
 
-// [FIX #3] Write queue bounded — drop with warning when full
+// Write queue bounded — drop with warning when full
 void LuxpowerSNAComponent::queue_write(uint16_t reg, uint16_t value) {
     if (write_queue_.size() >= LUX_WRITE_QUEUE_MAX) {
         ESP_LOGW(TAG, "queue_write: queue full (%u), dropping reg=%u value=%u",
@@ -538,8 +564,8 @@ void LuxpowerSNAComponent::process_read_input_(uint16_t start_reg,
         ESP_LOGW(TAG, "READ_INPUT start=%u too small (%u)", start_reg, (unsigned)data_len);
         return;
     }
-    // [FIX #2] Use memcpy instead of reinterpret_cast to avoid unaligned access
-    // on Xtensa when raw packet buffer offset is not naturally aligned.
+    // Use memcpy instead of reinterpret_cast to avoid unaligned access on
+    // Xtensa when the raw packet buffer offset is not naturally aligned.
     switch (start_reg) {
         case 0: {
             Bank0 bank;
@@ -779,8 +805,8 @@ void LuxpowerSNANumber::control(float value) {
     publish_state(value);
 }
 
-// [FIX #5] Clamp displayed value to number traits range before publishing.
-// Prevents HA log errors when inverter reports out-of-range values (e.g. 101
+// Clamp displayed value to number traits range before publishing. Prevents HA
+// log errors when the inverter reports out-of-range sentinel values (e.g. 101
 // meaning "disabled/unlimited" on some Luxpower firmware versions).
 void LuxpowerSNANumber::on_hold_update(const uint16_t *hold_regs) {
     if (register_addr_ >= 240) return;
@@ -792,8 +818,6 @@ void LuxpowerSNANumber::on_hold_update(const uint16_t *hold_regs) {
     } else {
         displayed = (float)((raw & bitmask_) >> bitshift_) / divisor_;
     }
-    // Clamp to configured min/max — inverter may send sentinel values (e.g. 101)
-    // that mean "no limit / disabled". Silently clamp rather than spam HA logs.
     float min_v = this->traits.get_min_value();
     float max_v = this->traits.get_max_value();
     if (displayed < min_v) displayed = min_v;
@@ -861,18 +885,17 @@ void LuxpowerSNATime::set_time(const std::string &hhmm) {
     current_hhmm_ = buf;
 }
 
-// ---------------------------------------------------------------------------
-// Scan LAN for Lux dongle – FreeRTOS task, sequential connect
-// ESP32-S2 single-core: sequential is safer than parallel for lwip pool.
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// SCAN – batched parallel connect + protocol verification
+// ===========================================================================
 
 void LuxpowerSNAComponent::action_scan_dongle() {
     ESP_LOGI(TAG, "Scan button pressed (scanning_=%d dongle_len=%u inv_len=%u)",
-             (int)scanning_,
+             (int)scanning_.load(),
              (unsigned)dongle_serial_.size(),
              (unsigned)inverter_serial_.size());
 
-    if (scanning_) {
+    if (scanning_.load()) {
         ESP_LOGW(TAG, "Scan already in progress, ignoring");
         return;
     }
@@ -905,25 +928,30 @@ void LuxpowerSNAComponent::action_scan_dongle() {
     close_socket_();
 
     scanning_            = true;
-    scan_start_ms_       = millis();
+    scan_abort_          = false;
     scan_result_pending_ = false;
     scan_found_          = false;
+    scan_progress_       = 0;
+    scan_heartbeat_ms_   = millis();
     deferred_apply_      = false;
     found_ip_buf_[0]     = '\0';
+    last_scan_ui_ms_     = millis();
 
     pub(scan_status_text_, "Scanning...");
     ESP_LOGI(TAG, "Starting dongle scan on %u.%u.%u.0/24 port %u", a, b, c, port_);
 
     ScanParams *params = new ScanParams{a, b, c, self_octet, port_, this};
 
+    // 8 KB stack: fd_set + batch array + probe buffers, with margin.
+    // On dual-core parts, pin to core 1 so the scan never starves the ESPHome
+    // main loop running on core 0.
+#if defined(portNUM_PROCESSORS) && portNUM_PROCESSORS > 1
+    BaseType_t ret = xTaskCreatePinnedToCore(
+        scan_task_fn_, "lux_scan", 8192, params, 2, nullptr, 1);
+#else
     BaseType_t ret = xTaskCreate(
-        scan_task_fn_,
-        "lux_scan",
-        6144,
-        params,
-        1,
-        nullptr
-    );
+        scan_task_fn_, "lux_scan", 8192, params, 2, nullptr);
+#endif
 
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "xTaskCreate failed for lux_scan");
@@ -947,69 +975,245 @@ void LuxpowerSNAComponent::scan_task_fn_(void *param) {
     vTaskDelete(nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// probe_lux_ — the actual identity check.
+//
+// Connecting successfully to port 8000 proves nothing: routers, cameras, NAS
+// boxes and other ESP devices happily accept connections there. We therefore
+// send a real READ_INPUT request and require:
+//   1. a reply that starts with the LuxPower frame prefix A1 1A, and
+//   2. a dongle serial in the header that matches ours.
+// Only then do we call it a match.
+// ---------------------------------------------------------------------------
+bool LuxpowerSNAComponent::probe_lux_(const char *ip, uint16_t port) {
+    int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd < 0) {
+        ESP_LOGD(TAG, "[lux_scan] probe: socket() failed (errno=%d)", errno);
+        return false;
+    }
+
+    int nb = 1;
+    ioctl(fd, FIONBIO, &nb);
+
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(port);
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) {
+        close(fd);
+        return false;
+    }
+    connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
+
+    // Generous connect window here — we already know the port is open, and a
+    // false negative at this stage is expensive.
+    fd_set wfds, efds;
+    FD_ZERO(&wfds); FD_ZERO(&efds);
+    FD_SET(fd, &wfds); FD_SET(fd, &efds);
+    struct timeval tv{0, 800000};
+    if (select(fd + 1, nullptr, &wfds, &efds, &tv) <= 0 || !FD_ISSET(fd, &wfds)) {
+        close(fd);
+        return false;
+    }
+    int err = 0;
+    socklen_t el = sizeof(err);
+    getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
+    if (err != 0) {
+        close(fd);
+        return false;
+    }
+
+    uint8_t pkt[38];
+    build_read_input_packet_(pkt, dongle_serial_.c_str(),
+                             inverter_serial_.c_str(), 0, 40);
+    if (send(fd, pkt, sizeof(pkt), 0) != (int) sizeof(pkt)) {
+        close(fd);
+        return false;
+    }
+
+    uint8_t  buf[64];
+    size_t   have  = 0;
+    bool     ok    = false;
+    uint32_t start = millis();
+
+    while (millis() - start < LUX_SCAN_VERIFY_TIMEOUT && have < sizeof(buf)) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        struct timeval rt{0, 100000};
+        int s = select(fd + 1, &rfds, nullptr, nullptr, &rt);
+        if (s < 0) break;
+        if (s == 0) continue;
+
+        int n = recv(fd, buf + have, sizeof(buf) - have, 0);
+        if (n <= 0) {
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+            break;   // peer closed or hard error
+        }
+        have += (size_t) n;
+
+        // Header is 20 bytes; the dongle serial sits at offset 8..17.
+        if (have >= 18) {
+            if (buf[0] == 0xA1 && buf[1] == 0x1A) {
+                if (memcmp(buf + 8, dongle_serial_.c_str(), 10) == 0) {
+                    ok = true;
+                } else {
+                    char other[11] = {};
+                    memcpy(other, buf + 8, 10);
+                    ESP_LOGW(TAG, "[lux_scan] %s is a Lux dongle but serial is '%s', "
+                                  "expected '%s'", ip, other, dongle_serial_.c_str());
+                }
+            } else {
+                ESP_LOGD(TAG, "[lux_scan] %s replied but is not a Lux dongle", ip);
+            }
+            break;
+        }
+    }
+
+    close(fd);
+    return ok;
+}
+
+// ---------------------------------------------------------------------------
+// do_scan_ — runs on the FreeRTOS scan task. Never touches ESPHome entities.
+// ---------------------------------------------------------------------------
 void LuxpowerSNAComponent::do_scan_(uint8_t a, uint8_t b, uint8_t c,
                                     uint8_t self_octet, uint16_t port) {
-    for (uint16_t i = 1; i <= 254; i++) {
-        if ((uint8_t)i == self_octet) continue;
+    char ipbuf[20];
+    scan_found_        = false;
+    found_ip_buf_[0]   = '\0';
+    scan_progress_     = 0;
+    scan_heartbeat_ms_ = millis();
 
-        char ipbuf[20];
-        snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, (uint8_t)i);
+    auto finish = [&](bool found) {
+        scan_found_ = found;
+        __sync_synchronize();   // publish found_ip_buf_ before the flag
+        scan_result_pending_ = true;
+    };
 
-        int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (fd < 0) {
-            ESP_LOGD(TAG, "[lux_scan] socket() failed for %s (errno=%d), retrying", ipbuf, errno);
-            vTaskDelay(pdMS_TO_TICKS(20));
-            i--;
-            continue;
+    // The dongle accepts ONE TCP client at a time. action_scan_dongle() just
+    // closed our socket, but the dongle needs a moment to actually tear the
+    // session down — probing too early makes it refuse US, which is exactly the
+    // "sometimes not found" symptom.
+    vTaskDelay(pdMS_TO_TICKS(LUX_SCAN_SETTLE_MS));
+    scan_heartbeat_ms_ = millis();
+
+    // Fast path: the host we already know is usually still correct. Verifying it
+    // first turns the common case into a ~2 second operation.
+    if (!host_.empty()) {
+        ESP_LOGI(TAG, "[lux_scan] Verifying current host %s first", host_.c_str());
+        if (probe_lux_(host_.c_str(), port)) {
+            snprintf(found_ip_buf_, sizeof(found_ip_buf_), "%s", host_.c_str());
+            ESP_LOGI(TAG, "[lux_scan] Current host confirmed, no sweep needed");
+            finish(true);
+            return;
         }
+        ESP_LOGI(TAG, "[lux_scan] Current host did not answer, sweeping subnet");
+        scan_heartbeat_ms_ = millis();
+    }
 
-        int nb = 1;
-        ioctl(fd, FIONBIO, &nb);
+    struct Probe { int fd; uint8_t octet; };
+    Probe    batch[LUX_SCAN_BATCH];
+    uint16_t next           = 1;
+    uint16_t socket_starved = 0;
 
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port   = htons(port);
-        if (inet_pton(AF_INET, ipbuf, &addr.sin_addr) != 1) {
-            close(fd);
-            continue;
-        }
-        connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
-
-        fd_set wfds, efds;
-        FD_ZERO(&wfds); FD_ZERO(&efds);
-        FD_SET(fd, &wfds); FD_SET(fd, &efds);
-        struct timeval tv{0, 150000};
-        int sel = select(fd + 1, nullptr, &wfds, &efds, &tv);
-
-        bool connected = false;
-        if (sel > 0 && FD_ISSET(fd, &wfds)) {
-            int err = 0;
-            socklen_t el = sizeof(err);
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
-            connected = (err == 0);
-        }
-        close(fd);
-
-        if (connected) {
-            ESP_LOGI(TAG, "[lux_scan] Dongle candidate found at %s:%u", ipbuf, port);
-            memcpy(found_ip_buf_, ipbuf, sizeof(found_ip_buf_));
-            scan_found_ = true;
-            // [FIX #1] Memory barrier ensures found_ip_buf_ is fully written
-            // before scan_result_pending_ is set — prevents race condition on
-            // Xtensa where compiler/CPU may reorder stores.
-            __sync_synchronize();
-            scan_result_pending_ = true;
+    while (next <= 254) {
+        if (scan_abort_.load()) {
+            ESP_LOGW(TAG, "[lux_scan] Abort requested, exiting");
+            finish(false);
             return;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(2));
+        // ---- Open a batch of non-blocking connects ------------------------
+        uint8_t n     = 0;
+        int     maxfd = -1;
+        fd_set  wfds, efds;
+        FD_ZERO(&wfds); FD_ZERO(&efds);
+
+        while (n < LUX_SCAN_BATCH && next <= 254) {
+            uint8_t oct = (uint8_t) next;
+            if (oct == self_octet) { next++; continue; }
+
+            int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (fd < 0) break;   // lwip pool exhausted — fire what we have
+
+            int nb = 1;
+            ioctl(fd, FIONBIO, &nb);
+
+            struct sockaddr_in addr{};
+            addr.sin_family      = AF_INET;
+            addr.sin_port        = htons(port);
+            addr.sin_addr.s_addr = htonl(((uint32_t) a << 24) | ((uint32_t) b << 16) |
+                                         ((uint32_t) c << 8)  | (uint32_t) oct);
+            connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
+
+            FD_SET(fd, &wfds);
+            FD_SET(fd, &efds);
+            if (fd > maxfd) maxfd = fd;
+            batch[n++] = Probe{fd, oct};
+            next++;
+        }
+
+        if (n == 0) {
+            // Could not obtain a single socket. Back off and retry rather than
+            // spinning (the old code did `i--` and hammered socket() forever).
+            if (++socket_starved > 100) {   // ~5 s with no socket at all
+                ESP_LOGE(TAG, "[lux_scan] No sockets available, aborting scan. "
+                              "Consider raising CONFIG_LWIP_MAX_SOCKETS or "
+                              "lowering LUX_SCAN_BATCH.");
+                finish(false);
+                return;
+            }
+            scan_heartbeat_ms_ = millis();
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        socket_starved = 0;
+
+        // ---- Wait once for the whole batch --------------------------------
+        struct timeval tv{0, (long)(LUX_SCAN_CONNECT_TIMEOUT * 1000)};
+        select(maxfd + 1, nullptr, &wfds, &efds, &tv);
+
+        uint8_t candidates[LUX_SCAN_BATCH];
+        uint8_t nc = 0;
+        for (uint8_t i = 0; i < n; i++) {
+            bool open_ = false;
+            if (FD_ISSET(batch[i].fd, &wfds)) {
+                int err = 0;
+                socklen_t el = sizeof(err);
+                getsockopt(batch[i].fd, SOL_SOCKET, SO_ERROR, &err, &el);
+                open_ = (err == 0);
+            }
+            close(batch[i].fd);   // free the fd before we start verifying
+            if (open_) candidates[nc++] = batch[i].octet;
+        }
+
+        scan_progress_     = (next > 254) ? 254 : next;
+        scan_heartbeat_ms_ = millis();
+
+        // ---- Verify candidates one at a time -------------------------------
+        for (uint8_t i = 0; i < nc; i++) {
+            snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", a, b, c, candidates[i]);
+            ESP_LOGI(TAG, "[lux_scan] Port %u open at %s — verifying protocol",
+                     port, ipbuf);
+            if (probe_lux_(ipbuf, port)) {
+                ESP_LOGI(TAG, "[lux_scan] Dongle CONFIRMED at %s", ipbuf);
+                snprintf(found_ip_buf_, sizeof(found_ip_buf_), "%s", ipbuf);
+                finish(true);
+                return;
+            }
+            scan_heartbeat_ms_ = millis();
+            if (scan_abort_.load()) {
+                finish(false);
+                return;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(5));   // yield to WiFi / lwip
     }
 
     ESP_LOGW(TAG, "[lux_scan] Scan complete: no dongle found on %u.%u.%u.0/24 port %u",
              a, b, c, port);
-    scan_found_          = false;
-    __sync_synchronize();
-    scan_result_pending_ = true;
+    finish(false);
 }
 
 // ---------------------------------------------------------------------------
