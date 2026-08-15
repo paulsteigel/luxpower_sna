@@ -5,7 +5,7 @@
 http_request:
   id: http_data
   verify_ssl: false
-  timeout: 5s          # was 60s — must stay well under the 5s TWDT window
+  timeout: 3s          # was 60s — must stay well under the 5s TWDT window
 
 script:
   - id: ddns_update
