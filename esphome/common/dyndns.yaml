@@ -20,7 +20,7 @@ time:
           
           - http_request.get:
               url: !lambda |-
-                return "https://freemyip.com/update?token=${token}&domain=${name}.freemyip.com";
+                return "http://freemyip.com/update?token=${token}&domain=${name}.freemyip.com";
               on_response:
                 then:
                   - lambda: |-
