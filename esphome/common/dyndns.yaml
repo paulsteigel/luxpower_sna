@@ -1,10 +1,23 @@
 # ============================================================
-# dyndns.yaml — Dynamic DNS + SNTP, config at runtime
+# dyndns.yaml — DynDNS + SNTP (watchdog-safe)
 # ============================================================
 
 http_request:
+  id: http_data
   verify_ssl: false
-  timeout: 60s
+  timeout: 5s          # was 60s — must stay well under the 5s TWDT window
+
+script:
+  - id: ddns_update
+    mode: single       # never let two requests overlap
+    then:
+      - http_request.get:
+          url: !lambda |-
+            return "http://freemyip.com/update?token=${token}&domain=${name}.freemyip.com";
+          on_response:
+            then:
+              - lambda: |-
+                  ESP_LOGI("DynDNS", "status=%d", response->status_code);
 
 time:
   - platform: sntp
@@ -15,15 +28,6 @@ time:
       - time.cloudflare.com
     on_time:
       - seconds: 0
-        minutes: /10
+        minutes: /30       # was /10 — safety net only
         then:
-          
-          - http_request.get:
-              url: !lambda |-
-                return "http://freemyip.com/update?token=${token}&domain=${name}.freemyip.com";
-              on_response:
-                then:
-                  - lambda: |-
-                      ESP_LOGI("DynDNS", "Status: %d domain: %s",
-                        response->status_code,
-                        "domain=${name}.freemyip.com");
+          - script.execute: ddns_update
