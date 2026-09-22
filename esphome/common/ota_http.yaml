@@ -25,7 +25,7 @@ button:
       then:
         - logger.log: "OTA update starting..."
         - http_request.get:
-            url: "http://ota.sfdp.net/${name}/${name}.ota.bin.gz"
+            url: "http://ota.sfdp.net/${name}/${name}-firmware.gz"
             on_response:
               then:
                 - if:
@@ -34,8 +34,8 @@ button:
                     then:
                       - logger.log: "Found .gz firmware, flashing compressed"
                       - ota.http_request.flash:
-                          md5_url: http://ota.sfdp.net/${name}/${name}.ota.md5
-                          url: http://ota.sfdp.net/${name}/${name}.ota.bin.gz
+                          md5_url: http://ota.sfdp.net/${name}/${name}-firmware.md5
+                          url: http://ota.sfdp.net/${name}/${name}-firmware.gz
                     else:
                       - logger.log: "No .gz found (404), falling back to .bin"
                       - ota.http_request.flash:
