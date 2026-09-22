@@ -1,4 +1,11 @@
 # esphome/common/ota_http.yaml
+
+# Cần khai báo component http_request ở top-level (nếu file khác trong config
+# chưa có) để dùng được action http_request.get
+http_request:
+  useragent: esphome/${name}
+  timeout: 10s
+
 ota:
   - platform: esphome
     port: ${port}
@@ -17,6 +24,26 @@ button:
     on_press:
       then:
         - logger.log: "OTA update starting..."
-        - ota.http_request.flash:
-            md5_url: http://ota.sfdp.net/${name}/${name}.ota.md5
-            url: http://ota.sfdp.net/${name}/${name}.ota.bin
+        - http_request.get:
+            url: "http://ota.sfdp.net/${name}/${name}.ota.bin.gz"
+            on_response:
+              then:
+                - if:
+                    condition:
+                      lambda: 'return response->status_code == 200;'
+                    then:
+                      - logger.log: "Found .gz firmware, flashing compressed"
+                      - ota.http_request.flash:
+                          md5_url: http://ota.sfdp.net/${name}/${name}.ota.md5
+                          url: http://ota.sfdp.net/${name}/${name}.ota.bin.gz
+                    else:
+                      - logger.log: "No .gz found (404), falling back to .bin"
+                      - ota.http_request.flash:
+                          md5_url: http://ota.sfdp.net/${name}/${name}.ota.md5
+                          url: http://ota.sfdp.net/${name}/${name}.ota.bin
+            on_error:
+              then:
+                - logger.log: "Error checking .gz, falling back to .bin"
+                - ota.http_request.flash:
+                    md5_url: http://ota.sfdp.net/${name}/${name}.ota.md5
+                    url: http://ota.sfdp.net/${name}/${name}.ota.bin
