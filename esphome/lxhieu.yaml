@@ -165,9 +165,17 @@ script:
       zone: int
       duration: int
     then:
-      - switch.turn_off: pump_relay
-      - switch.turn_off: relay1
-      - switch.turn_off: relay2
+      # Only send OFF to relays that are actually ON: relay1/relay2/pump_relay don't
+      # check current state before writing, so unconditionally sending OFF here would
+      # fire an OFF immediately followed by an ON to the SAME relay on every normal
+      # zone start (this relay board's onboard MCU can't keep up with that and drops
+      # the ON — that's why the valve stayed off and only the pump, 3s later with a
+      # real gap, came on). This still safely closes whichever OTHER zone was left
+      # open if you switch zones mid-run.
+      - lambda: |-
+          if (id(pump_relay).state) id(pump_relay).turn_off();
+          if (id(relay1).state) id(relay1).turn_off();
+          if (id(relay2).state) id(relay2).turn_off();
       - lambda: |-
           id(active_zone) = zone;
           id(phase_start_ms) = millis();

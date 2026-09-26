@@ -1372,7 +1372,11 @@ void Sprinkler::fsm_transition_() {
 
     case STARTING: {
       // follows valve open delay interval
-      uint32_t timer_duration = this->active_req_.run_duration();
+      // NOTE: add start_delay_ here so this timer agrees with the SprinklerValveOperator's own
+      //  (start_delay_ + run_duration_) completion check -- otherwise the controller can decide
+      //  a valve is "done" up to start_delay_ seconds before the operator agrees, racing the
+      //  operator's own stop()/kill_() and leaving the valve's physical close unhandled.
+      uint32_t timer_duration = this->active_req_.run_duration() + this->start_delay_;
       if (timer_duration > this->switching_delay_.value_or(0)) {
         timer_duration -= this->switching_delay_.value_or(0);
       }
@@ -1416,7 +1420,8 @@ void Sprinkler::fsm_transition_from_shutdown_() {
     this->active_req_.set_run_duration(this->next_req_.run_duration());
     this->next_req_.reset();
 
-    uint32_t timer_duration = this->active_req_.run_duration();
+    // See the STARTING case in fsm_transition_() for why start_delay_ is added here.
+    uint32_t timer_duration = this->active_req_.run_duration() + this->start_delay_;
     if (timer_duration > this->switching_delay_.value_or(0)) {
       timer_duration -= this->switching_delay_.value_or(0);
     }
@@ -1439,9 +1444,13 @@ void Sprinkler::fsm_transition_from_valve_run_() {
     }
   } else {
     ESP_LOGD(TAG, "Valve cycle interrupted - NOT flagging valve as complete and stopping current valve");
-    for (auto &vo : this->valve_op_) {
-      vo.stop();
-    }
+  }
+  // Always tell the operator(s) to stop here instead of only doing so in the "interrupted" branch above:
+  //  stop() is a no-op once a valve is already IDLE/STOPPING, so this is safe on natural completion too,
+  //  and it removes the need for this timer and the operator's own (start_delay_ + run_duration_) timeout
+  //  to expire at exactly the same instant to close the valve.
+  for (auto &vo : this->valve_op_) {
+    vo.stop();
   }
 
   this->load_next_valve_run_request_(this->active_req_.valve());
@@ -1458,7 +1467,8 @@ void Sprinkler::fsm_transition_from_valve_run_() {
 
     // this->state_ = ACTIVE;  // state isn't changing
     if (this->valve_overlap_ || !this->switching_delay_.has_value()) {
-      uint32_t timer_duration = this->active_req_.run_duration();
+      // See the STARTING case in fsm_transition_() for why start_delay_ is added here.
+      uint32_t timer_duration = this->active_req_.run_duration() + this->start_delay_;
       if (timer_duration > this->switching_delay_.value_or(0)) {
         timer_duration -= this->switching_delay_.value_or(0);
       }
