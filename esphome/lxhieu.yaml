@@ -176,6 +176,13 @@ script:
           if (id(pump_relay).state) id(pump_relay).turn_off();
           if (id(relay1).state) id(relay1).turn_off();
           if (id(relay2).state) id(relay2).turn_off();
+      # Real gap before the next UART frame goes out. This matters most when run_cycle
+      # chains zone1 -> zone2: zone1's closing "relay1 off" is the very last thing its
+      # run_zone instance does, and without this delay, zone2's "relay2 on" would go out
+      # in the same tick right behind it -- back-to-back with no gap, which is exactly
+      # the pattern this relay board's MCU seems to mis-handle (the earlier command's
+      # physical effect gets lost even though the software considers it done).
+      - delay: 300ms
       - lambda: |-
           id(active_zone) = zone;
           id(phase_start_ms) = millis();
