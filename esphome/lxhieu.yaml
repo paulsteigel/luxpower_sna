@@ -166,23 +166,30 @@ script:
       duration: int
     then:
       # If switching directly from one zone to the other (e.g. Zone 2 turned on by
-      # hand while Zone 1 is still running), close everything down and give it the
-      # same 10s settle time as a normal cycle end before opening the new valve --
-      # never overlap two valves, and never open the next one before the previous
-      # one has actually finished closing (both physically and on the relay board's
-      # side; 3s wasn't always enough). A fresh start with nothing running skips
-      # straight through with no wait.
+      # hand while Zone 1 is still running), close everything down first -- never
+      # overlap two valves. Each relay that actually needs to change gets its own
+      # turn_off + real delay as a separate step: cramming multiple turn_off() calls
+      # into one lambda sends their UART frames back to back with no gap at all,
+      # and this board silently drops/mishandles whichever command doesn't get a
+      # real gap after it (that's what caused "valve off but pump stays on" here).
+      # A fresh start with nothing running skips straight through with no wait.
       - if:
           condition:
-            or:
-              - switch.is_on: pump_relay
-              - switch.is_on: relay1
-              - switch.is_on: relay2
+            switch.is_on: pump_relay
           then:
-            - lambda: |-
-                if (id(pump_relay).state) id(pump_relay).turn_off();
-                if (id(relay1).state) id(relay1).turn_off();
-                if (id(relay2).state) id(relay2).turn_off();
+            - switch.turn_off: pump_relay
+            - delay: 500ms
+      - if:
+          condition:
+            switch.is_on: relay1
+          then:
+            - switch.turn_off: relay1
+            - delay: 10s
+      - if:
+          condition:
+            switch.is_on: relay2
+          then:
+            - switch.turn_off: relay2
             - delay: 10s
       - lambda: |-
           id(active_zone) = zone;
