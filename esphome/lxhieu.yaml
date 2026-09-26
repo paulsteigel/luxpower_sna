@@ -230,8 +230,14 @@ script:
       - script.stop: run_zone
       - switch.turn_off: pump_relay
       - delay: 3s
-      - switch.turn_off: relay1
-      - switch.turn_off: relay2
+      # Same reasoning as run_zone's leading cleanup: only send OFF to whichever
+      # valve is actually open. Sending both unconditionally, back to back, fires
+      # a real OFF (physical relay click) immediately followed by a redundant OFF
+      # on the other relay with no gap -- the same kind of back-to-back UART
+      # timing this board's MCU doesn't handle reliably.
+      - lambda: |-
+          if (id(relay1).state) id(relay1).turn_off();
+          if (id(relay2).state) id(relay2).turn_off();
       - lambda: 'id(active_zone) = -1;'
 
   # Runs every 15s (see interval:). Starts a full cycle when:
