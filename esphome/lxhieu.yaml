@@ -71,11 +71,11 @@ wifi:
     password: ""
 
 # Physical serial logging disabled: TX0/RX0 are dedicated to the relay
-# board's UART link. Logs flow through `api:` instead.
+# board's UART link. `mqtt:` below already publishes logs to a topic by
+# default (no separate `api:` needed -- that component is too heavy for
+# OTA to fit on this board's 1MB flash).
 logger:
   baud_rate: 0
-
-api:
 
 mqtt:
   broker: myhome.sfdp.net
