@@ -154,25 +154,16 @@ globals:
 # Irrigation sequencing (plain ESPHome scripts — no custom component)
 # ---------------------------------------------------------------------------
 script:
-  # Runs a single zone: open its valve, wait, start the pump, run for
-  # `duration` seconds, stop the pump, wait, close the valve.
-  # mode: restart so starting a different zone always cancels this one first;
-  # the leading turn_off block below is what actually closes whatever was
-  # still physically open when that happens.
-  - id: run_zone
-    mode: restart
-    parameters:
-      zone: int
-      duration: int
+  # Turns off whatever is actually on (pump, then whichever valve), each with a
+  # real delay after it, then marks the controller idle. Safe to call any time --
+  # every step is a no-op (no delay either) if that relay's already off. This is
+  # the ONE place that ever writes a shutdown sequence over UART: run_zone and
+  # stop_watering both just call this instead of repeating it. Never combine
+  # multiple turn_off() calls into a single lambda/step -- back-to-back UART
+  # frames with no gap between them get dropped or mishandled by this board.
+  - id: close_all
+    mode: single
     then:
-      # If switching directly from one zone to the other (e.g. Zone 2 turned on by
-      # hand while Zone 1 is still running), close everything down first -- never
-      # overlap two valves. Each relay that actually needs to change gets its own
-      # turn_off + real delay as a separate step: cramming multiple turn_off() calls
-      # into one lambda sends their UART frames back to back with no gap at all,
-      # and this board silently drops/mishandles whichever command doesn't get a
-      # real gap after it (that's what caused "valve off but pump stays on" here).
-      # A fresh start with nothing running skips straight through with no wait.
       - if:
           condition:
             switch.is_on: pump_relay
@@ -184,13 +175,27 @@ script:
             switch.is_on: relay1
           then:
             - switch.turn_off: relay1
-            - delay: 10s
+            - delay: 10s   # valve needs real time to physically finish closing
       - if:
           condition:
             switch.is_on: relay2
           then:
             - switch.turn_off: relay2
             - delay: 10s
+      - lambda: 'id(active_zone) = -1;'
+
+  # Runs a single zone: close_all first (never overlap two valves), open its
+  # valve, wait, start the pump, run for `duration` seconds, then close_all
+  # again. mode: restart so starting a different zone always cancels this one
+  # and closes down cleanly via close_all before opening the new valve.
+  - id: run_zone
+    mode: restart
+    parameters:
+      zone: int
+      duration: int
+    then:
+      - script.execute: close_all
+      - script.wait: close_all
       - lambda: |-
           id(active_zone) = zone;
           id(phase_start_ms) = millis();
@@ -202,20 +207,8 @@ script:
           id(phase_start_ms) = millis();
           id(phase_duration_s) = duration;
       - delay: !lambda 'return duration * 1000;'
-      - switch.turn_off: pump_relay
-      - lambda: |-
-          id(phase_start_ms) = millis();
-          id(phase_duration_s) = 3;
-      - delay: 3s
-      - lambda: |-
-          if (zone == 0) { id(relay1).turn_off(); } else { id(relay2).turn_off(); }
-          id(active_zone) = -1;
-      # Extra settle time after sending valve-off, before this script (and run_cycle's
-      # script.wait, which is what lets it advance to the next zone) is considered done.
-      # Testing showed the valve can take several more seconds to actually finish closing
-      # after the OFF command goes out -- opening the next zone's valve before that
-      # finishes left valve 1 stuck open. This gives it real margin.
-      - delay: 10s
+      - script.execute: close_all
+      - script.wait: close_all
 
   # Runs zone 1, then (if Auto Advance is on and zone 2 is enabled) zone 2.
   - id: run_cycle
@@ -242,27 +235,14 @@ script:
                 duration: !lambda 'return (int) id(zone2_runtime).state;'
             - script.wait: run_zone
 
-  # Immediately stops any running cycle/zone and closes everything down,
-  # observing the same pump-then-valve delay as a normal cycle end.
+  # Immediately stops any running cycle/zone and closes everything down.
   - id: stop_watering
     mode: restart
     then:
       - script.stop: run_cycle
       - script.stop: run_zone
-      - switch.turn_off: pump_relay
-      - delay: 3s
-      # Same reasoning as run_zone's leading cleanup: only send OFF to whichever
-      # valve is actually open. Sending both unconditionally, back to back, fires
-      # a real OFF (physical relay click) immediately followed by a redundant OFF
-      # on the other relay with no gap -- the same kind of back-to-back UART
-      # timing this board's MCU doesn't handle reliably.
-      - lambda: |-
-          if (id(relay1).state) id(relay1).turn_off();
-          if (id(relay2).state) id(relay2).turn_off();
-      - lambda: 'id(active_zone) = -1;'
-      # Same settle margin as run_zone's own closing delay -- in case a different
-      # zone gets started right after this manual stop.
-      - delay: 10s
+      - script.execute: close_all
+      - script.wait: close_all
 
   # Runs every 15s (see interval:). Starts a full cycle when:
   #   Auto Mode is ON, no rain delay, today is enabled, and the current HH:MM
