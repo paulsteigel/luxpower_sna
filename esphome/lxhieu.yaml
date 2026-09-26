@@ -1,0 +1,633 @@
+# lxhieu.yaml — Sprinkler controller — ESP8266-01S + on-board UART relay board
+# (LC Technology, STC15L101EW-driven)
+#
+# HARDWARE NOTE
+# This relay board's 4 relays are not wired to ESP8266 GPIOs. An onboard
+# STC15L101EW MCU drives the relays, and the ESP talks to it over its ONE
+# hardware UART using 4-byte commands:
+#
+#     [0xA0, relay_no, state, checksum]        state: 0x01=on, 0x00=off
+#     checksum = (0xA0 + relay_no + state) & 0xFF
+#
+# Baud rate: 115200 (confirmed working on real hardware).
+#
+# Because the ESP-01S only breaks out GPIO0, GPIO2, GPIO1(TX0) and GPIO3(RX0),
+# the hardware UART (TX0/RX0) is fully dedicated to this relay link — so
+# console logging over UART is turned off below (logger: baud_rate: 0). Logs
+# flow wirelessly via `api:` instead — connect with the ESPHome dashboard or
+# Home Assistant to view them.
+#
+# RELAY MAPPING
+#   Relay 1 = Valve 1 (irrigation zone 1)
+#   Relay 2 = Valve 2 (irrigation zone 2)
+#   Relay 3 = Pump   — started 3s after a valve opens and stopped 3s before
+#             the valve closes (see the run_zone script below), so the pump
+#             never runs with a fully-closed valve. This is what avoids
+#             water hammer.
+#   Relay 4 = Extension relay, wired here as a plain manual light switch,
+#             completely independent of the irrigation logic.
+#
+# WHY THIS ISN'T USING THE `sprinkler:` COMPONENT
+# The repo's custom `sprinkler:` component (components/sprinkler) reliably
+# turns valves ON, but valve 1/2 would get stuck open on shutdown (pump
+# turns off, valve never does) — reproduced both on manual "Zone" off and on
+# natural cycle completion, plus zone2 relay chatter when starting a second
+# zone while the first was still stuck. Rather than debug the custom C++
+# state machine blind (no serial log available, and `api:` wasn't wired up
+# either), irrigation sequencing is implemented directly in ESPHome YAML
+# below using plain scripts/delays — the whole cycle is just:
+#   open valve -> wait 3s -> pump on -> wait run duration -> pump off
+#   -> wait 3s -> close valve
+# which is simple enough to read top-to-bottom and debug from logs alone.
+#
+# ZONE ON/OFF: "Zone 1"/"Zone 2" switches below start/stop a single zone by
+# hand. "Run All Zones Now" (or a schedule) runs zone 1 then, if "Auto
+# Advance" is on and zone 2 is enabled, zone 2 right after.
+#
+# MODES
+#   Auto Mode ON  -> schedules run automatically (days + up to 3 start times)
+#   Auto Mode OFF -> Manual: schedules are ignored, control zones by hand
+#
+# First boot default = Manual (Auto Mode OFF), so nothing waters until you
+# turn Auto on.
+
+substitutions:
+  name: lxhieu
+  token: d9103e90992f10581e245378
+  port: 8266
+
+esphome:
+  name: ${name}
+  friendly_name: Sprinkler Controller
+
+esp8266:
+  board: esp01_1m
+
+wifi:
+  ssid: HOME
+  password: ngoc12345
+  ap:
+    ssid: "${name}_control_board"
+    password: ""
+
+# Physical serial logging disabled: TX0/RX0 are dedicated to the relay
+# board's UART link. Logs flow through `api:` instead.
+logger:
+  baud_rate: 0
+
+api:
+
+mqtt:
+  broker: myhome.sfdp.net
+  username: mqtt_user
+  password: D1ndh1sk@
+  client_id: ${name}_mqtt
+
+# Use the blue LED in the device as a status LED, which will blink if there are warnings (slow) or errors (fast)
+status_led:
+  pin:
+    number: GPIO5
+    inverted: True
+
+captive_portal:
+
+packages:
+  remote_packages:
+    url: https://github.com/paulsteigel/luxpower_sna
+    ref: main
+    refresh: 0s
+    files:
+      - esphome/common/dyndns.yaml
+      - esphome/common/ota_http.yaml
+      - esphome/common/dev_info.yaml
+
+# UART bus to the relay board's onboard MCU (TX0/RX0 = the only UART on ESP-01S)
+uart:
+  id: relay_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 115200
+
+interval:
+  # Poll the schedule every 15s (the script itself makes sure a schedule fires only once per minute)
+  - interval: 15s
+    then:
+      - script.execute: check_schedule
+
+  # Adaptive status refresh:
+  #   - a zone is running -> refresh status text sensors every 1s
+  #   - idle              -> refresh every 5s (only needed to re-sync after MQTT reconnect)
+  - interval: 1s
+    then:
+      - lambda: |-
+          bool active = id(active_zone) >= 0;
+          id(status_tick)++;
+          if (active || active != id(was_active) || id(status_tick) >= 5) {
+            id(status_tick) = 0;
+            id(was_active) = active;
+            id(active_zone_text).update();
+            id(time_remaining).update();
+            id(progress_percent).update();
+          }
+
+globals:
+  - id: last_trigger_key
+    type: int
+    initial_value: '-1'
+  - id: status_tick
+    type: int
+    initial_value: '0'
+  - id: was_active
+    type: bool
+    initial_value: 'true'   # true => the very first tick publishes the initial state right away
+  - id: active_zone
+    type: int
+    initial_value: '-1'      # -1 = idle, 0 = zone 1, 1 = zone 2
+  - id: phase_start_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: phase_duration_s
+    type: uint32_t
+    initial_value: '0'
+
+# ---------------------------------------------------------------------------
+# Irrigation sequencing (plain ESPHome scripts — no custom component)
+# ---------------------------------------------------------------------------
+script:
+  # Runs a single zone: open its valve, wait, start the pump, run for
+  # `duration` seconds, stop the pump, wait, close the valve.
+  # mode: restart so starting a different zone always cancels this one first;
+  # the leading turn_off block below is what actually closes whatever was
+  # still physically open when that happens.
+  - id: run_zone
+    mode: restart
+    parameters:
+      zone: int
+      duration: int
+    then:
+      - switch.turn_off: pump_relay
+      - switch.turn_off: relay1
+      - switch.turn_off: relay2
+      - lambda: |-
+          id(active_zone) = zone;
+          id(phase_start_ms) = millis();
+          id(phase_duration_s) = 3;
+          if (zone == 0) { id(relay1).turn_on(); } else { id(relay2).turn_on(); }
+      - delay: 3s
+      - switch.turn_on: pump_relay
+      - lambda: |-
+          id(phase_start_ms) = millis();
+          id(phase_duration_s) = duration;
+      - delay: !lambda 'return duration * 1000;'
+      - switch.turn_off: pump_relay
+      - lambda: |-
+          id(phase_start_ms) = millis();
+          id(phase_duration_s) = 3;
+      - delay: 3s
+      - lambda: |-
+          if (zone == 0) { id(relay1).turn_off(); } else { id(relay2).turn_off(); }
+          id(active_zone) = -1;
+
+  # Runs zone 1, then (if Auto Advance is on and zone 2 is enabled) zone 2.
+  - id: run_cycle
+    mode: restart
+    then:
+      - if:
+          condition:
+            switch.is_on: enable_zone1
+          then:
+            - script.execute:
+                id: run_zone
+                zone: 0
+                duration: !lambda 'return (int) id(zone1_runtime).state;'
+            - script.wait: run_zone
+      - if:
+          condition:
+            and:
+              - switch.is_on: auto_advance
+              - switch.is_on: enable_zone2
+          then:
+            - script.execute:
+                id: run_zone
+                zone: 1
+                duration: !lambda 'return (int) id(zone2_runtime).state;'
+            - script.wait: run_zone
+
+  # Immediately stops any running cycle/zone and closes everything down,
+  # observing the same pump-then-valve delay as a normal cycle end.
+  - id: stop_watering
+    mode: restart
+    then:
+      - script.stop: run_cycle
+      - script.stop: run_zone
+      - switch.turn_off: pump_relay
+      - delay: 3s
+      - switch.turn_off: relay1
+      - switch.turn_off: relay2
+      - lambda: 'id(active_zone) = -1;'
+
+  # Runs every 15s (see interval:). Starts a full cycle when:
+  #   Auto Mode is ON, no rain delay, today is enabled, and the current HH:MM
+  #   matches an enabled schedule. Skipped if a cycle is already running.
+  - id: check_schedule
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              auto now = id(my_time).now();
+              if (!now.is_valid()) return false;
+              if (!id(auto_mode).state) return false;
+              if (id(rain_delay_24h).state || id(rain_delay_48h).state) return false;
+              if (id(active_zone) >= 0) return false;
+
+              // ESPHome day_of_week: 1 = Sunday ... 7 = Saturday
+              bool day_ok = false;
+              switch (now.day_of_week) {
+                case 1: day_ok = id(day_sun).state; break;
+                case 2: day_ok = id(day_mon).state; break;
+                case 3: day_ok = id(day_tue).state; break;
+                case 4: day_ok = id(day_wed).state; break;
+                case 5: day_ok = id(day_thu).state; break;
+                case 6: day_ok = id(day_fri).state; break;
+                case 7: day_ok = id(day_sat).state; break;
+              }
+              if (!day_ok) return false;
+
+              auto matches = [&](const std::string &hhmm) -> bool {
+                int h = -1, m = -1;
+                if (sscanf(hhmm.c_str(), "%d:%d", &h, &m) != 2) return false;
+                return h == now.hour && m == now.minute;
+              };
+
+              bool due = (id(schedule1_enabled).state && matches(id(s1_time).state)) ||
+                         (id(schedule2_enabled).state && matches(id(s2_time).state)) ||
+                         (id(schedule3_enabled).state && matches(id(s3_time).state));
+              if (!due) return false;
+
+              // Fire only once per minute (the script is polled every 15s)
+              int key = now.day_of_year * 1440 + now.hour * 60 + now.minute;
+              if (key == id(last_trigger_key)) return false;
+              id(last_trigger_key) = key;
+              return true;
+          then:
+            - logger.log: "Schedule due - starting full cycle"
+            - script.execute: run_cycle
+
+  - id: rain_delay_24h_timer
+    mode: restart
+    then:
+      - delay: 24h
+      - switch.turn_off: rain_delay_24h
+
+  - id: rain_delay_48h_timer
+    mode: restart
+    then:
+      - delay: 48h
+      - switch.turn_off: rain_delay_48h
+
+# ---------------------------------------------------------------------------
+# Numbers: per-zone run duration
+# ---------------------------------------------------------------------------
+number:
+  - platform: template
+    id: zone1_runtime
+    name: ${name}_"Zone 1 Runtime"
+    icon: "mdi:timer"
+    unit_of_measurement: s
+    min_value: 10
+    max_value: 900
+    step: 10
+    initial_value: 300
+    restore_value: true
+    optimistic: true
+    entity_category: config
+  - platform: template
+    id: zone2_runtime
+    name: ${name}_"Zone 2 Runtime"
+    icon: "mdi:timer"
+    unit_of_measurement: s
+    min_value: 10
+    max_value: 900
+    step: 10
+    initial_value: 300
+    restore_value: true
+    optimistic: true
+    entity_category: config
+
+# ---------------------------------------------------------------------------
+# Switches
+# ---------------------------------------------------------------------------
+switch:
+  # --- Relays, driven over UART (not GPIO) ---
+  # internal: true (no front-end name) on relay1/relay2/pump_relay: control
+  # zones only through the "Zone N" / "Sprinkler Master" switches below,
+  # never these underlying ones directly, or run_zone's bookkeeping (active_zone,
+  # timings) can get out of sync with what's actually open.
+  - platform: template
+    id: relay1
+    turn_on_action:
+      - uart.write: [0xA0, 0x01, 0x01, 0xA2]
+    turn_off_action:
+      - uart.write: [0xA0, 0x01, 0x00, 0xA1]
+    optimistic: true
+    internal: true
+
+  - platform: template
+    id: relay2
+    turn_on_action:
+      - uart.write: [0xA0, 0x02, 0x01, 0xA3]
+    turn_off_action:
+      - uart.write: [0xA0, 0x02, 0x00, 0xA2]
+    optimistic: true
+    internal: true
+
+  - platform: template
+    id: pump_relay
+    turn_on_action:
+      - uart.write: [0xA0, 0x03, 0x01, 0xA4]
+    turn_off_action:
+      - uart.write: [0xA0, 0x03, 0x00, 0xA3]
+    optimistic: true
+    internal: true
+
+  - platform: template
+    name: ${name}_"Extension Light"
+    id: relay4
+    turn_on_action:
+      - uart.write: [0xA0, 0x04, 0x01, 0xA5]
+    turn_off_action:
+      - uart.write: [0xA0, 0x04, 0x00, 0xA4]
+    optimistic: true
+
+  # --- Zone controls: turning one on/off directly starts/stops that zone ---
+  - platform: template
+    id: zone1_switch
+    name: ${name}_"Zone 1"
+    icon: "mdi:sprinkler-variant"
+    lambda: |-
+      return id(active_zone) == 0;
+    turn_on_action:
+      - script.execute:
+          id: run_zone
+          zone: 0
+          duration: !lambda 'return (int) id(zone1_runtime).state;'
+    turn_off_action:
+      - script.execute: stop_watering
+
+  - platform: template
+    id: zone2_switch
+    name: ${name}_"Zone 2"
+    icon: "mdi:sprinkler-variant"
+    lambda: |-
+      return id(active_zone) == 1;
+    turn_on_action:
+      - script.execute:
+          id: run_zone
+          zone: 1
+          duration: !lambda 'return (int) id(zone2_runtime).state;'
+    turn_off_action:
+      - script.execute: stop_watering
+
+  - platform: template
+    id: enable_zone1
+    name: ${name}_"Enable Zone 1"
+    icon: "mdi:sprinkler-variant"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    id: enable_zone2
+    name: ${name}_"Enable Zone 2"
+    icon: "mdi:sprinkler-variant"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  # --- Master switch: ON = run the full cycle, OFF = stop everything ---
+  - platform: template
+    id: master_switch
+    name: ${name}_"Sprinkler Master"
+    lambda: |-
+      return id(active_zone) >= 0;
+    turn_on_action:
+      - script.execute: run_cycle
+    turn_off_action:
+      - script.execute: stop_watering
+
+  # --- Must be ON for a full cycle to move on from Zone 1 -> Zone 2. ---
+  #     If OFF, the controller stops after zone 1 finishes.
+  - platform: template
+    id: auto_advance
+    name: ${name}_"Auto Advance"
+    icon: "mdi:skip-next"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  # --- Mode: ON = Auto (schedules run), OFF = Manual ---
+  # Changing mode stops anything currently running, to start from a clean state.
+  - platform: template
+    id: auto_mode
+    name: ${name}_"Auto Mode"
+    icon: "mdi:calendar-clock"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: stop_watering
+    on_turn_off:
+      - script.execute: stop_watering
+
+  # --- Day-of-week toggles ---
+  - platform: template
+    id: day_sun
+    name: ${name}_Sunday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_mon
+    name: ${name}_Monday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_tue
+    name: ${name}_Tuesday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_wed
+    name: ${name}_Wednesday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_thu
+    name: ${name}_Thursday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_fri
+    name: ${name}_Friday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_sat
+    name: ${name}_Saturday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+
+  # --- Enable/disable each of the 3 start times ---
+  - platform: template
+    id: schedule1_enabled
+    name: ${name}_Enable Schedule 1
+    icon: "mdi:clock-outline"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: schedule2_enabled
+    name: ${name}_Enable Schedule 2
+    icon: "mdi:clock-outline"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: schedule3_enabled
+    name: ${name}_Enable Schedule 3
+    icon: "mdi:clock-outline"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+
+  # --- Rain delay (auto-resets; turning it off manually cancels the timer) ---
+  # Always starts OFF after a reboot, so a delay can never get stuck ON.
+  - platform: template
+    id: rain_delay_24h
+    name: ${name}_Rain Delay 24h
+    icon: "mdi:weather-cloudy-clock"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - script.execute: rain_delay_24h_timer
+    turn_off_action:
+      - script.stop: rain_delay_24h_timer
+  - platform: template
+    id: rain_delay_48h
+    name: ${name}_Rain Delay 48h
+    icon: "mdi:weather-cloudy-clock"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - script.execute: rain_delay_48h_timer
+    turn_off_action:
+      - script.stop: rain_delay_48h_timer
+
+# ---------------------------------------------------------------------------
+# Schedule start times, entered as "HH:MM" (24h)
+# (Home Assistant has no MQTT "time" entity, so a validated text field is used.)
+# ---------------------------------------------------------------------------
+text:
+  - platform: template
+    id: s1_time
+    name: ${name}_"Schedule 1 Start Time"
+    icon: "mdi:clock-start"
+    mode: text
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "06:00"
+  - platform: template
+    id: s2_time
+    name: ${name}_"Schedule 2 Start Time"
+    icon: "mdi:clock-start"
+    mode: text
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "12:00"
+  - platform: template
+    id: s3_time
+    name: ${name}_"Schedule 3 Start Time"
+    icon: "mdi:clock-start"
+    mode: text
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "17:00"
+
+# ---------------------------------------------------------------------------
+# Status text sensors
+# update_interval: never -> refreshed by the adaptive 1s interval above
+# ---------------------------------------------------------------------------
+text_sensor:
+  - platform: template
+    id: active_zone_text
+    name: ${name}_"Active Zone"
+    icon: "mdi:sprinkler-variant"
+    update_interval: never
+    lambda: |-
+      if (id(active_zone) == 0) return std::string("Zone 1");
+      if (id(active_zone) == 1) return std::string("Zone 2");
+      return std::string("Idle");
+
+  - platform: template
+    id: time_remaining
+    name: ${name}_"Time Remaining"
+    icon: "mdi:timer-sand"
+    update_interval: never
+    lambda: |-
+      if (id(active_zone) < 0) return std::string("0s");
+      uint32_t elapsed = (millis() - id(phase_start_ms)) / 1000;
+      uint32_t remaining = (elapsed < id(phase_duration_s)) ? (id(phase_duration_s) - elapsed) : 0;
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%dm %02ds", (int) (remaining / 60), (int) (remaining % 60));
+      return std::string(buf);
+
+  - platform: template
+    id: progress_percent
+    name: ${name}_"Progress %"
+    icon: "mdi:progress-clock"
+    update_interval: never
+    lambda: |-
+      if (id(active_zone) < 0 || id(phase_duration_s) == 0) return std::string("0%");
+      uint32_t elapsed = (millis() - id(phase_start_ms)) / 1000;
+      uint32_t pct = elapsed * 100 / id(phase_duration_s);
+      if (pct > 100) pct = 100;
+      return std::to_string(pct) + "%";
+
+# ---------------------------------------------------------------------------
+# Buttons (work in both modes)
+# ---------------------------------------------------------------------------
+button:
+  - platform: template
+    name: ${name}_"Run All Zones Now"
+    icon: "mdi:play-circle"
+    on_press:
+      - script.execute: run_cycle
+  - platform: template
+    name: ${name}_"Stop All"
+    icon: "mdi:stop-circle"
+    on_press:
+      - script.execute: stop_watering
