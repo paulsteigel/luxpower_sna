@@ -85,15 +85,32 @@ esphome:
   # reboot could stay on indefinitely while our globals here re-init to
   # "idle" and never think to turn anything off. Force all 3 off on every
   # boot so we always start from a known-safe physical state, regardless of
-  # what they were doing before. Real gaps between frames, same as everywhere
-  # else in this file -- blocking `delay:` is fine here, it's a one-shot boot
-  # sequence, not the ongoing control loop.
+  # what they were doing before. Pump goes off FIRST, same order/timing as
+  # STOPPING_PUMP elsewhere in this file (5s settle before touching a valve)
+  # -- closing a valve first while the pump might still physically be
+  # running is exactly the water-hammer scenario this whole file exists to
+  # avoid. The pump-off command is sent twice: GPIO1/TX0 carries the
+  # ESP8266's own boot-loader garbage for a moment before ESPHome's firmware
+  # takes over, which risks the very first real UART frame getting missed --
+  # and the pump is the one relay that's actually dangerous to leave on.
   on_boot:
     then:
+      - script.execute: {id: send_relay, relay: 3, turn_on: false}
+      - delay: 1s
+      - script.execute: {id: send_relay, relay: 3, turn_on: false}
+      - delay: 5s
       - script.execute: {id: send_relay, relay: 1, turn_on: false}
       - delay: 1s
       - script.execute: {id: send_relay, relay: 2, turn_on: false}
-      - delay: 1s
+
+  # A deliberate restart (button/API, not a crash/power loss) fires this
+  # BEFORE the reboot happens -- so the pump gets its off command out right
+  # away instead of waiting for on_boot on the other side of a reboot that
+  # can take several seconds (WiFi/MQTT). No boot-loader garbage risk here
+  # (this isn't a fresh power-up), so one command is enough; on_boot above
+  # still runs afterwards regardless and closes the valves properly.
+  on_shutdown:
+    then:
       - script.execute: {id: send_relay, relay: 3, turn_on: false}
 
 esp8266:
@@ -356,6 +373,10 @@ script:
       relay: int
       turn_on: bool
     then:
+      - logger.log:
+          format: "relay=%d turn_on=%d"
+          args: [relay, (int) turn_on]
+          tag: send_relay
       - uart.write:
           id: relay_uart
           data: !lambda |-
