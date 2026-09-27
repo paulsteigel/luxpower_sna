@@ -20,28 +20,47 @@
 # RELAY MAPPING
 #   Relay 1 = Valve 1 (irrigation zone 1)
 #   Relay 2 = Valve 2 (irrigation zone 2)
-#   Relay 3 = Pump   — started 3s after a valve opens and stopped 3s before
-#             the valve closes (see the run_zone script below), so the pump
-#             never runs with a fully-closed valve. This is what avoids
-#             water hammer.
+#   Relay 3 = Pump   — turned on ~3s after a valve opens (once it's done
+#             settling) and turned off FIRST, before the valve closes, so the
+#             pump never runs against a closed valve. Avoids water hammer.
 #   Relay 4 = Extension relay, wired here as a plain manual light switch,
 #             completely independent of the irrigation logic.
 #
 # WHY THIS ISN'T USING THE `sprinkler:` COMPONENT
 # The repo's custom `sprinkler:` component (components/sprinkler) reliably
-# turns valves ON, but valve 1/2 would get stuck open on shutdown (pump
-# turns off, valve never does) — reproduced both on manual "Zone" off and on
-# natural cycle completion, plus zone2 relay chatter when starting a second
-# zone while the first was still stuck. Rather than debug the custom C++
-# state machine blind (no serial log available, and `api:` wasn't wired up
-# either), irrigation sequencing is implemented directly in ESPHome YAML
-# below using plain scripts/delays — the whole cycle is just:
-#   open valve -> wait 3s -> pump on -> wait run duration -> pump off
-#   -> wait 3s -> close valve
-# which is simple enough to read top-to-bottom and debug from logs alone.
+# turns valves ON, but valve 1/2 would get stuck open on shutdown. Irrigation
+# sequencing is instead implemented directly in ESPHome YAML below.
 #
-# ZONE ON/OFF: "Zone 1"/"Zone 2" switches below start/stop a single zone by
-# hand. "Run All Zones Now" (or a schedule) runs zone 1 then, if "Auto
+# INTERLOCK DESIGN (v3 — non-blocking state machine, not blocking scripts)
+# The first two YAML-only attempts used `script:` blocks with `delay:` steps
+# and `mode: restart` to re-sequence a zone change. That's fundamentally the
+# wrong tool: a blocking script mid-delay has no way to notice the user
+# changed their mind, so a second button press had to kill-and-restart the
+# whole close/open sequence, which re-toggled relays that were already
+# correctly positioned (valve flickers on/off, needs 2-3 presses to "stick").
+#
+# The fix is a small poll-driven state machine (see the FSM `interval:`
+# below), not scripts. Two globals describe all irrigation state:
+#   requested_zone -- what the user/schedule currently wants (-1/0/1),
+#                     updated instantly, any number of times, at any moment.
+#   fsm_state      -- what's physically happening right now: IDLE(0),
+#                     STOPPING_PUMP(1), CLOSING_VALVE(2), OPENING_VALVE(3),
+#                     RUNNING(4), OVERLAP_CLOSING(5).
+# Every ~1s the FSM compares requested_zone against what it's currently
+# running/transitioning towards and decides the ONE next relay command (if
+# any), spaced out by the same real settle delays as before (5s pump,
+# 10s valve, 3s pre-pump) — timed with millis(), never a blocking `delay:`.
+# This 1s tick stays constant even when idle: the check itself is a couple
+# int comparisons (free next to the ESP8266's WiFi/MQTT work), and slowing it
+# down while idle would add its own multi-second lag to the very first
+# reaction after a button press -- the opposite of what this file is for.
+# Flipping requested_zone back and forth rapidly just changes an int
+# repeatedly; the FSM only ever acts on its CURRENT value when a timer
+# elapses, so no amount of impatient re-pressing can make it re-toggle a
+# relay that's already where it needs to be.
+#
+# ZONE ON/OFF: "Zone 1"/"Zone 2" switches below just set requested_zone.
+# "Run All Zones Now" (or a schedule) starts a cycle: zone 1, then if "Auto
 # Advance" is on and zone 2 is enabled, zone 2 right after.
 #
 # MODES
@@ -115,19 +134,159 @@ interval:
       - script.execute: check_schedule
 
   # Adaptive status refresh:
-  #   - a zone is running -> refresh status text sensors every 1s
-  #   - idle              -> refresh every 5s (only needed to re-sync after MQTT reconnect)
+  #   - something's running/transitioning -> refresh status text sensors every 1s
+  #   - idle                              -> refresh every 10s (only needed to re-sync after MQTT
+  #                                          reconnect; no point spamming MQTT while nothing changes)
   - interval: 1s
     then:
       - lambda: |-
-          bool active = id(active_zone) >= 0;
+          bool active = id(fsm_state) != 0;
           id(status_tick)++;
-          if (active || active != id(was_active) || id(status_tick) >= 5) {
+          if (active || active != id(was_active) || id(status_tick) >= 10) {
             id(status_tick) = 0;
             id(was_active) = active;
             id(active_zone_text).update();
             id(time_remaining).update();
             id(progress_percent).update();
+          }
+
+  # --- Irrigation state machine tick. See the INTERLOCK DESIGN comment up top. ---
+  # States: IDLE=0, STOPPING_PUMP=1, CLOSING_VALVE=2, OPENING_VALVE=3, RUNNING=4,
+  # OVERLAP_CLOSING=5.
+  #
+  # Starting from Idle, or stopping all the way to Idle, still does the slow
+  # careful sequence (pump off -> settle -> valve off / valve on -> settle ->
+  # pump on) since the pump is genuinely stopped/started there. But a LIVE
+  # zone-to-zone handoff (pump already running, switching to a different
+  # zone) never touches the pump at all: it opens the new valve first, keeps
+  # both valves briefly open (this is what actually avoids water hammer --
+  # hammer comes from the pump pushing into a fully-closed system, not from
+  # 2 valves being open at once), then closes the old one. No pump
+  # stop/restart cycling, and no 10s dead time. See OVERLAP_CLOSING (case 5).
+  #
+  # Never issues more than one relay/pump command per tick, so consecutive UART
+  # frames are always at least 1s apart (the board can't handle back-to-back
+  # frames with no gap). Stays 1s always -- see comment up top for why idle
+  # doesn't get a slower interval here.
+  - interval: 1s
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          int rz = id(requested_zone);
+          int az = id(active_zone);
+
+          switch (id(fsm_state)) {
+            case 0: // IDLE
+              if (rz >= 0) {
+                id(active_zone) = rz;
+                id(send_relay).execute(rz == 0 ? 1 : 2, true);
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 3;
+                ESP_LOGI("sprinkler_fsm", "IDLE -> OPENING_VALVE zone=%d", rz);
+              }
+              break;
+
+            case 1: // STOPPING_PUMP: pump-off sent, but the pump/pipe still has momentum for a
+                    // moment after losing power -- closing the valve too soon after cutting the
+                    // pump risks hammer just as much as closing it while the pump is still driven.
+                    // Wait a real 5s for flow to actually settle before closing the valve.
+              if (now - id(fsm_phase_start_ms) >= 5000) {
+                if (az == 0) id(send_relay).execute(1, false);
+                else if (az == 1) id(send_relay).execute(2, false);
+                id(active_zone) = -1;
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 2;
+                ESP_LOGI("sprinkler_fsm", "STOPPING_PUMP -> CLOSING_VALVE (was zone=%d)", az);
+              }
+              break;
+
+            case 2: // CLOSING_VALVE: valve-off sent, wait settle then open whatever's requested (if anything)
+              if (now - id(fsm_phase_start_ms) >= 10000) {
+                if (rz >= 0) {
+                  id(active_zone) = rz;
+                  id(send_relay).execute(rz == 0 ? 1 : 2, true);
+                  id(fsm_phase_start_ms) = now;
+                  id(fsm_state) = 3;
+                  ESP_LOGI("sprinkler_fsm", "CLOSING_VALVE -> OPENING_VALVE zone=%d", rz);
+                } else {
+                  id(fsm_state) = 0;
+                  ESP_LOGI("sprinkler_fsm", "CLOSING_VALVE -> IDLE");
+                }
+              }
+              break;
+
+            case 3: // OPENING_VALVE: valve-on sent for active_zone, wait settle
+              if (now - id(fsm_phase_start_ms) >= 3000) {
+                if (rz == az) {
+                  id(send_relay).execute(3, true);
+                  int dur = (az == 0) ? (int) id(zone1_runtime).state : (int) id(zone2_runtime).state;
+                  id(run_duration_s) = dur;
+                  id(run_end_ms) = now + (uint32_t) dur * 1000;
+                  id(fsm_phase_start_ms) = now;
+                  id(fsm_state) = 4;
+                  ESP_LOGI("sprinkler_fsm", "OPENING_VALVE -> RUNNING zone=%d duration=%ds", az, dur);
+                } else {
+                  // user changed their mind before the pump ever started -- pump
+                  // was never on, so just close what we just opened, no 500ms wait needed
+                  if (az == 0) id(send_relay).execute(1, false); else if (az == 1) id(send_relay).execute(2, false);
+                  id(active_zone) = -1;
+                  id(fsm_phase_start_ms) = now;
+                  id(fsm_state) = 2;
+                  ESP_LOGI("sprinkler_fsm", "OPENING_VALVE -> CLOSING_VALVE (retarget, was zone=%d)", az);
+                }
+              }
+              break;
+
+            case 4: { // RUNNING
+              bool must_transition = (rz != az);
+              if (!must_transition && (int32_t) (now - id(run_end_ms)) >= 0) {
+                if (id(cycle_mode) && az == 0 && id(auto_advance).state && id(enable_zone2).state) {
+                  id(requested_zone) = 1;
+                } else {
+                  id(requested_zone) = -1;
+                  id(cycle_mode) = false;
+                }
+                rz = id(requested_zone);
+                must_transition = true;
+              }
+              if (must_transition && rz < 0) {
+                // genuine stop -- pump really does need to go off here
+                id(send_relay).execute(3, false);
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 1;
+                ESP_LOGI("sprinkler_fsm", "RUNNING -> STOPPING_PUMP (zone=%d -> idle)", az);
+              } else if (must_transition) {
+                // live handoff to a different zone: pump keeps running the whole time --
+                // hammer comes from the pump pushing into a fully-closed system, not from
+                // 2 valves being open at once, so open the new valve first and only close
+                // the old one after a short overlap (see OVERLAP_CLOSING below). This also
+                // avoids cycling the pump on/off for every zone change.
+                id(handoff_old_zone) = az;
+                id(active_zone) = rz;
+                id(send_relay).execute(rz == 0 ? 1 : 2, true);
+                int dur = (rz == 0) ? (int) id(zone1_runtime).state : (int) id(zone2_runtime).state;
+                id(run_duration_s) = dur;
+                id(run_end_ms) = now + (uint32_t) dur * 1000;
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 5;
+                ESP_LOGI("sprinkler_fsm", "RUNNING -> OVERLAP_CLOSING zone=%d -> %d, pump stays on", az, rz);
+              }
+              break;
+            }
+
+            case 5: { // OVERLAP_CLOSING: new valve open + pump still on; close the old valve
+                      // once the overlap window elapses. Longer overlap for the scheduled
+                      // auto-advance (no one's waiting on it), short/snappy for a manual switch.
+              uint32_t overlap_ms = id(cycle_mode) ? 3000 : 1000;
+              if (now - id(fsm_phase_start_ms) >= overlap_ms) {
+                int old_zone = id(handoff_old_zone);
+                if (old_zone == 0) id(send_relay).execute(1, false);
+                else if (old_zone == 1) id(send_relay).execute(2, false);
+                id(fsm_state) = 4;
+                ESP_LOGI("sprinkler_fsm", "OVERLAP_CLOSING -> RUNNING (closed old zone=%d)", old_zone);
+              }
+              break;
+            }
           }
 
 globals:
@@ -142,107 +301,78 @@ globals:
     initial_value: 'true'   # true => the very first tick publishes the initial state right away
   - id: active_zone
     type: int
-    initial_value: '-1'      # -1 = idle, 0 = zone 1, 1 = zone 2
-  - id: phase_start_ms
+    initial_value: '-1'      # -1 = idle, 0/1 = the zone whose valve is physically open right now
+  - id: requested_zone
+    type: int
+    initial_value: '-1'      # -1 = nothing wanted, 0/1 = zone the user/schedule currently wants running
+  - id: cycle_mode
+    type: bool
+    initial_value: 'false'   # true while running an auto "all zones" sequence (see start_cycle)
+  - id: fsm_state
+    type: int
+    initial_value: '0'       # IDLE=0, STOPPING_PUMP=1, CLOSING_VALVE=2, OPENING_VALVE=3, RUNNING=4, OVERLAP_CLOSING=5
+  - id: handoff_old_zone
+    type: int
+    initial_value: '-1'      # zone whose valve OVERLAP_CLOSING still needs to close
+  - id: fsm_phase_start_ms
     type: uint32_t
     initial_value: '0'
-  - id: phase_duration_s
+  - id: run_end_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: run_duration_s
     type: uint32_t
     initial_value: '0'
 
 # ---------------------------------------------------------------------------
-# Irrigation sequencing (plain ESPHome scripts — no custom component)
+# Irrigation control -- these just set globals; the FSM `interval:` above is
+# what actually drives relays. See the INTERLOCK DESIGN comment up top.
 # ---------------------------------------------------------------------------
 script:
-  # Turns off whatever is actually on (pump, then whichever valve), each with a
-  # real delay after it, then marks the controller idle. Safe to call any time --
-  # every step is a no-op (no delay either) if that relay's already off. This is
-  # the ONE place that ever writes a shutdown sequence over UART: run_zone and
-  # stop_watering both just call this instead of repeating it. Never combine
-  # multiple turn_off() calls into a single lambda/step -- back-to-back UART
-  # frames with no gap between them get dropped or mishandled by this board.
-  - id: close_all
+  # Sends one raw UART frame straight to the relay board's MCU -- no `switch:`
+  # entity in between. relay: 1=valve1, 2=valve2, 3=pump (see RELAY MAPPING up
+  # top). Frame format: [0xA0, relay, state, checksum], checksum computed here
+  # so it's never hand-typed/hardcoded per call site.
+  - id: send_relay
+    mode: single
+    parameters:
+      relay: int
+      turn_on: bool
+    then:
+      - uart.write:
+          id: relay_uart
+          data: !lambda |-
+            uint8_t state = turn_on ? 1 : 0;
+            uint8_t checksum = (0xA0 + relay + state) & 0xFF;
+            return {(uint8_t) 0xA0, (uint8_t) relay, state, checksum};
+
+  # Starts the "run every enabled zone" sequence: zone 1, then (if Auto
+  # Advance is on and zone 2 is enabled) zone 2. The FSM's RUNNING case
+  # advances cycle_mode from zone 0 to zone 1 on its own once zone 1's
+  # duration elapses -- this just picks the correct starting zone.
+  - id: start_cycle
     mode: single
     then:
-      - if:
-          condition:
-            switch.is_on: pump_relay
-          then:
-            - switch.turn_off: pump_relay
-            - delay: 500ms
-      - if:
-          condition:
-            switch.is_on: relay1
-          then:
-            - switch.turn_off: relay1
-            - delay: 10s   # valve needs real time to physically finish closing
-      - if:
-          condition:
-            switch.is_on: relay2
-          then:
-            - switch.turn_off: relay2
-            - delay: 10s
-      - lambda: 'id(active_zone) = -1;'
-
-  # Runs a single zone: close_all first (never overlap two valves), open its
-  # valve, wait, start the pump, run for `duration` seconds, then close_all
-  # again. mode: restart so starting a different zone always cancels this one
-  # and closes down cleanly via close_all before opening the new valve.
-  - id: run_zone
-    mode: restart
-    parameters:
-      zone: int
-      duration: int
-    then:
-      - script.execute: close_all
-      - script.wait: close_all
       - lambda: |-
-          id(active_zone) = zone;
-          id(phase_start_ms) = millis();
-          id(phase_duration_s) = 3;
-          if (zone == 0) { id(relay1).turn_on(); } else { id(relay2).turn_on(); }
-      - delay: 3s
-      - switch.turn_on: pump_relay
-      - lambda: |-
-          id(phase_start_ms) = millis();
-          id(phase_duration_s) = duration;
-      - delay: !lambda 'return duration * 1000;'
-      - script.execute: close_all
-      - script.wait: close_all
+          id(cycle_mode) = true;
+          if (id(enable_zone1).state) {
+            id(requested_zone) = 0;
+          } else if (id(auto_advance).state && id(enable_zone2).state) {
+            id(requested_zone) = 1;
+          } else {
+            id(cycle_mode) = false;
+            id(requested_zone) = -1;
+          }
 
-  # Runs zone 1, then (if Auto Advance is on and zone 2 is enabled) zone 2.
-  - id: run_cycle
-    mode: restart
-    then:
-      - if:
-          condition:
-            switch.is_on: enable_zone1
-          then:
-            - script.execute:
-                id: run_zone
-                zone: 0
-                duration: !lambda 'return (int) id(zone1_runtime).state;'
-            - script.wait: run_zone
-      - if:
-          condition:
-            and:
-              - switch.is_on: auto_advance
-              - switch.is_on: enable_zone2
-          then:
-            - script.execute:
-                id: run_zone
-                zone: 1
-                duration: !lambda 'return (int) id(zone2_runtime).state;'
-            - script.wait: run_zone
-
-  # Immediately stops any running cycle/zone and closes everything down.
+  # Immediately requests idle. The FSM tears down whatever's physically open
+  # (from any state -- running, mid-open, mid-close) on its own; this never
+  # touches a relay directly, so it can't race with the FSM.
   - id: stop_watering
-    mode: restart
+    mode: single
     then:
-      - script.stop: run_cycle
-      - script.stop: run_zone
-      - script.execute: close_all
-      - script.wait: close_all
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = -1;
 
   # Runs every 15s (see interval:). Starts a full cycle when:
   #   Auto Mode is ON, no rain delay, today is enabled, and the current HH:MM
@@ -257,7 +387,7 @@ script:
               if (!now.is_valid()) return false;
               if (!id(auto_mode).state) return false;
               if (id(rain_delay_24h).state || id(rain_delay_48h).state) return false;
-              if (id(active_zone) >= 0) return false;
+              if (id(fsm_state) != 0) return false;
 
               // ESPHome day_of_week: 1 = Sunday ... 7 = Saturday
               bool day_ok = false;
@@ -290,7 +420,7 @@ script:
               return true;
           then:
             - logger.log: "Schedule due - starting full cycle"
-            - script.execute: run_cycle
+            - script.execute: start_cycle
 
   - id: rain_delay_24h_timer
     mode: restart
@@ -337,38 +467,9 @@ number:
 # Switches
 # ---------------------------------------------------------------------------
 switch:
-  # --- Relays, driven over UART (not GPIO) ---
-  # internal: true (no front-end name) on relay1/relay2/pump_relay: control
-  # zones only through the "Zone N" / "Sprinkler Master" switches below,
-  # never these underlying ones directly, or run_zone's bookkeeping (active_zone,
-  # timings) can get out of sync with what's actually open.
-  - platform: template
-    id: relay1
-    turn_on_action:
-      - uart.write: [0xA0, 0x01, 0x01, 0xA2]
-    turn_off_action:
-      - uart.write: [0xA0, 0x01, 0x00, 0xA1]
-    optimistic: true
-    internal: true
-
-  - platform: template
-    id: relay2
-    turn_on_action:
-      - uart.write: [0xA0, 0x02, 0x01, 0xA3]
-    turn_off_action:
-      - uart.write: [0xA0, 0x02, 0x00, 0xA2]
-    optimistic: true
-    internal: true
-
-  - platform: template
-    id: pump_relay
-    turn_on_action:
-      - uart.write: [0xA0, 0x03, 0x01, 0xA4]
-    turn_off_action:
-      - uart.write: [0xA0, 0x03, 0x00, 0xA3]
-    optimistic: true
-    internal: true
-
+  # Valve 1/2 and the pump are no longer `switch:` entities -- the FSM
+  # `interval:` above sends their UART frames directly via the `send_relay`
+  # script (relay 1/2/3). Only the unrelated extension relay stays a switch.
   - platform: template
     name: ${name}_"Extension Light"
     id: relay4
@@ -378,18 +479,20 @@ switch:
       - uart.write: [0xA0, 0x04, 0x00, 0xA4]
     optimistic: true
 
-  # --- Zone controls: turning one on/off directly starts/stops that zone ---
+  # --- Zone controls: just tell the FSM (see interval: above) what's wanted.
+  # The switch position reflects the user's INTENT (requested_zone), not
+  # whether the valve has physically caught up yet -- so it flips instantly
+  # and doesn't invite repeat presses while the FSM is still settling.
   - platform: template
     id: zone1_switch
     name: ${name}_"Zone 1"
     icon: "mdi:sprinkler-variant"
     lambda: |-
-      return id(active_zone) == 0;
+      return id(requested_zone) == 0;
     turn_on_action:
-      - script.execute:
-          id: run_zone
-          zone: 0
-          duration: !lambda 'return (int) id(zone1_runtime).state;'
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = 0;
     turn_off_action:
       - script.execute: stop_watering
 
@@ -398,12 +501,11 @@ switch:
     name: ${name}_"Zone 2"
     icon: "mdi:sprinkler-variant"
     lambda: |-
-      return id(active_zone) == 1;
+      return id(requested_zone) == 1;
     turn_on_action:
-      - script.execute:
-          id: run_zone
-          zone: 1
-          duration: !lambda 'return (int) id(zone2_runtime).state;'
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = 1;
     turn_off_action:
       - script.execute: stop_watering
 
@@ -428,9 +530,9 @@ switch:
     id: master_switch
     name: ${name}_"Sprinkler Master"
     lambda: |-
-      return id(active_zone) >= 0;
+      return id(requested_zone) >= 0;
     turn_on_action:
-      - script.execute: run_cycle
+      - script.execute: start_cycle
     turn_off_action:
       - script.execute: stop_watering
 
@@ -605,10 +707,38 @@ text_sensor:
     name: ${name}_"Active Zone"
     icon: "mdi:sprinkler-variant"
     update_interval: never
+    # Every transitional state shows a live countdown to its next action --
+    # so a several-second wait reads as "counting down to X", not "stuck".
     lambda: |-
-      if (id(active_zone) == 0) return std::string("Zone 1");
-      if (id(active_zone) == 1) return std::string("Zone 2");
-      return std::string("Idle");
+      int rz = id(requested_zone);
+      const char *target = (rz == 0) ? "Zone 1" : (rz == 1) ? "Zone 2" : "Idle";
+      uint32_t elapsed = millis() - id(fsm_phase_start_ms);
+      char buf[48];
+      switch (id(fsm_state)) {
+        case 1: {
+          uint32_t left = elapsed < 5000 ? (5000 - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "Stopping pump, %ds to %s...", (int) left, target);
+          return std::string(buf);
+        }
+        case 2: {
+          uint32_t left = elapsed < 10000 ? (10000 - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "Valve settling, %ds to %s...", (int) left, target);
+          return std::string(buf);
+        }
+        case 3: {
+          uint32_t left = elapsed < 3000 ? (3000 - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "Opening %s, %ds to pump on...", target, (int) left);
+          return std::string(buf);
+        }
+        case 5: {
+          uint32_t total = id(cycle_mode) ? 3000 : 1000;
+          uint32_t left = elapsed < total ? (total - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "%s running, closing old valve in %ds...", target, (int) left);
+          return std::string(buf);
+        }
+        case 4: return std::string(target);
+        default: return std::string("Idle");
+      }
 
   - platform: template
     id: time_remaining
@@ -616,9 +746,9 @@ text_sensor:
     icon: "mdi:timer-sand"
     update_interval: never
     lambda: |-
-      if (id(active_zone) < 0) return std::string("0s");
-      uint32_t elapsed = (millis() - id(phase_start_ms)) / 1000;
-      uint32_t remaining = (elapsed < id(phase_duration_s)) ? (id(phase_duration_s) - elapsed) : 0;
+      if (id(fsm_state) != 4 && id(fsm_state) != 5) return std::string("0s");
+      int32_t remaining_ms = (int32_t) (id(run_end_ms) - millis());
+      uint32_t remaining = remaining_ms > 0 ? (uint32_t) remaining_ms / 1000 : 0;
       char buf[24];
       snprintf(buf, sizeof(buf), "%dm %02ds", (int) (remaining / 60), (int) (remaining % 60));
       return std::string(buf);
@@ -629,9 +759,9 @@ text_sensor:
     icon: "mdi:progress-clock"
     update_interval: never
     lambda: |-
-      if (id(active_zone) < 0 || id(phase_duration_s) == 0) return std::string("0%");
-      uint32_t elapsed = (millis() - id(phase_start_ms)) / 1000;
-      uint32_t pct = elapsed * 100 / id(phase_duration_s);
+      if ((id(fsm_state) != 4 && id(fsm_state) != 5) || id(run_duration_s) == 0) return std::string("0%");
+      uint32_t elapsed = (millis() - id(fsm_phase_start_ms)) / 1000;
+      uint32_t pct = elapsed * 100 / id(run_duration_s);
       if (pct > 100) pct = 100;
       return std::to_string(pct) + "%";
 
@@ -643,7 +773,7 @@ button:
     name: ${name}_"Run All Zones Now"
     icon: "mdi:play-circle"
     on_press:
-      - script.execute: run_cycle
+      - script.execute: start_cycle
   - platform: template
     name: ${name}_"Stop All"
     icon: "mdi:stop-circle"
