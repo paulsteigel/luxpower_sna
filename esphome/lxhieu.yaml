@@ -75,6 +75,16 @@ substitutions:
   token: d9103e90992f10581e245378
   port: 8266
 
+# ESPHome batches restore_value/restore_mode writes and only actually commits
+# them to flash every flash_write_interval (default 60s), to limit flash wear.
+# Change a runtime/schedule value and pull power before the next commit and
+# that change is lost, back to whichever value was last actually flushed.
+# These fields (watering duration, schedule times) only get touched by hand
+# once in a while, not continuously, so writing far more often costs nothing
+# real in flash wear -- shorten the window instead of leaving edits at risk.
+preferences:
+  flash_write_interval: 1s
+
 esphome:
   name: ${name}
   friendly_name: Sprinkler Controller
@@ -115,6 +125,12 @@ esphome:
 
 esp8266:
   board: esp01_1m
+  # Default (false) backs restore_value/restore_mode with RTC memory, which
+  # survives a software restart or deep sleep but is WIPED by an actual power
+  # loss (RTC memory needs continuous power to hold its contents) -- exactly
+  # what was losing zone1_runtime/zone2_runtime/schedule times on unplug.
+  # true switches them to real flash instead, which does survive power loss.
+  restore_from_flash: true
 
 wifi:
   ssid: HOME
