@@ -78,6 +78,23 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: Sprinkler Controller
+  # The 3 irrigation relays are driven by the relay board's OWN separate MCU
+  # (see HARDWARE NOTE up top), which keeps its own relay state independent
+  # of the ESP -- an ESP reboot (crash, OTA, watchdog, power blip on just the
+  # ESP) does NOT reset the relay board, so a valve/pump left on before the
+  # reboot could stay on indefinitely while our globals here re-init to
+  # "idle" and never think to turn anything off. Force all 3 off on every
+  # boot so we always start from a known-safe physical state, regardless of
+  # what they were doing before. Real gaps between frames, same as everywhere
+  # else in this file -- blocking `delay:` is fine here, it's a one-shot boot
+  # sequence, not the ongoing control loop.
+  on_boot:
+    then:
+      - script.execute: {id: send_relay, relay: 1, turn_on: false}
+      - delay: 1s
+      - script.execute: {id: send_relay, relay: 2, turn_on: false}
+      - delay: 1s
+      - script.execute: {id: send_relay, relay: 3, turn_on: false}
 
 esp8266:
   board: esp01_1m

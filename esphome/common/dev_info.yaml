@@ -10,6 +10,10 @@ text_sensor:
     id: uptime_human
     icon: mdi:clock-start
 
+switch:
+  - platform: restart
+    name: "${name} Restart"
+
 sensor:
   - platform: wifi_signal
     entity_category: diagnostic
