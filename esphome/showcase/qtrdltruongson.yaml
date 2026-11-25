@@ -1,0 +1,1110 @@
+# qtrdltruongson.yaml - Sprinkler controller (3 zones + pump), direct GPIO relays
+#
+# HARDWARE
+#   Relay 1 = Zone 1 valve   (GPIO15)
+#   Relay 2 = Zone 2 valve   (GPIO14)
+#   Relay 3 = Zone 3 valve   (GPIO12)
+#   Relay 4 = Pump           (GPIO13)
+#
+# The relays are driven directly by ESP GPIOs (not through a UART relay board
+# like lxhieu), so send_relay below just toggles the GPIO switches. Everything
+# else (state machine, interlock timing, scheduling) is the same logic as
+# lxhieu.yaml, extended from 2 zones to 3 zones.
+#
+# WHY THIS ISN'T USING THE `sprinkler:` COMPONENT
+# The custom `sprinkler:` component could leave valves stuck open on shutdown
+# and has no pump interlock. Irrigation sequencing is implemented directly in
+# ESPHome YAML as a non-blocking state machine (FSM) instead.
+#
+# INTERLOCK DESIGN (non-blocking state machine, not blocking scripts)
+# Two globals describe all irrigation state:
+#   requested_zone -- what the user/schedule currently wants (-1/0/1/2),
+#                     updated instantly, any number of times, at any moment.
+#   fsm_state      -- what is physically happening right now: IDLE(0),
+#                     STOPPING_PUMP(1), CLOSING_VALVE(2), OPENING_VALVE(3),
+#                     RUNNING(4), OVERLAP_CLOSING(5).
+# Every 1s the FSM compares requested_zone with what it is currently
+# running/transitioning towards and issues at most ONE relay command per tick,
+# spaced by real settle delays (5s pump, 10s valve, 3s pre-pump) timed with
+# millis(), never a blocking `delay:`. Flipping requested_zone back and forth
+# rapidly only changes an int; the FSM acts on its CURRENT value when a timer
+# elapses, so repeated presses can never re-toggle a relay that is already
+# where it needs to be.
+#
+# Start from idle / stop to idle: pump off -> settle -> valve off, or
+# valve on -> settle -> pump on (pump is genuinely started/stopped).
+# Live zone-to-zone handoff: the pump keeps running. The new valve opens first,
+# both valves stay open briefly (overlap), then the old valve closes. This
+# avoids water hammer (caused by the pump pushing into a fully closed system)
+# and avoids cycling the pump on every zone change.
+#
+# MODES
+#   Auto Mode ON  -> schedules run automatically (days + up to 3 start times)
+#   Auto Mode OFF -> Manual: schedules are ignored, control zones by hand
+#
+# First boot default = Manual (Auto Mode OFF), so nothing waters until you
+# turn Auto on.
+
+substitutions:
+  name: qtrdltruongson
+  token: 5df546c8754376c03774cbc4
+  port: 8266
+
+# ESPHome batches restore_value/restore_mode writes and only commits them to
+# flash every flash_write_interval (default 60s). Runtime/schedule values are
+# only edited occasionally, so commit quickly to avoid losing an edit if power
+# is pulled right after changing it.
+preferences:
+  flash_write_interval: 1s
+
+esphome:
+  name: ${name}
+  friendly_name: Qtr Farm Controller
+  # On a deliberate restart (button/API) cut the pump first, right away.
+  # Note: on a real reset/power loss all GPIO relays drop together (all
+  # relays use restore_mode ALWAYS_OFF), so a pump-first ordering is only
+  # possible here, not on a crash.
+  on_shutdown:
+    then:
+      - switch.turn_off: pump_relay
+  # Load the RTC time into the system clock right after boot, so schedules work
+  # with no WiFi/internet (the ds1307 component otherwise waits up to 15 min).
+  on_boot:
+    priority: -100
+    then:
+      - ds1307.read_time:
+          id: ds_rtc
+
+esp8266:
+  board: esp01_1m
+  # Back restore_value/restore_mode with real flash instead of RTC memory.
+  # RTC memory is wiped on power loss, which loses zone runtimes and
+  # schedule times when the device is unplugged.
+  restore_from_flash: true
+
+wifi:
+  # 0s = never auto-reboot when WiFi/MQTT is down (default 15min). A reboot
+  # drops every relay mid-cycle; the FSM + RTC keep irrigating while offline.
+  reboot_timeout: 0s
+  #use_address: ${name}.freemyip.com
+  ssid: HOME
+  password: ngoc12345
+  # No fallback AP: without captive_portal/web_server it is unusable anyway.
+
+# UART0 (TX0/RX0) is now the RS485 link below, so serial console logging is
+# off (logs still go to MQTT's default log_topic).
+logger:
+  level: INFO
+  baud_rate: 0
+
+# ESP-07 here has only 1MB flash, so OTA needs the firmware under ~500KB.
+# ota_http.yaml (http OTA + web_server) and captive_portal are left out for
+# that reason; plain ESPHome OTA (same port/password as before) stays.
+ota:
+  - platform: esphome
+    port: ${port}
+    password: !secret ota_password
+
+mqtt:
+  broker: myhome.sfdp.net
+  username: mqtt_user
+  password: D1ndh1sk@
+  client_id: ${name}_mqtt
+  reboot_timeout: 0s
+
+# status_led removed: GPIO5 is now the I2C SCL line of the RTC module.
+
+# DS3231 RTC (I2C): SDA = GPIO4, SCL = GPIO5. Keeps time with no internet.
+# DS3231 is register-compatible with the DS1307 time registers, so the
+# ds1307 platform drives it fine.
+i2c:
+  sda: GPIO4
+  scl: GPIO5
+  scan: true
+
+time:
+  - platform: ds1307
+    id: ds_rtc
+    address: 0x68
+  # `my_time` (sntp) is defined in common/dyndns.yaml; extend it so every
+  # successful NTP sync refreshes the RTC.
+  - id: !extend my_time
+    on_time_sync:
+      - ds1307.write_time:
+          id: ds_rtc
+
+
+packages:
+  remote_packages:
+    url: https://github.com/paulsteigel/luxpower_sna
+    ref: main
+    refresh: 0s
+    files:
+      - esphome/common/dyndns.yaml
+      - esphome/common/dev_info.yaml
+
+# RS485 weather link (TTL<->RS485 module on UART0, the only UART on ESP-07).
+# Wiring is STRAIGHT (this module's pin names are from the MCU's point of view):
+# module TXD <-> ESP TX (GPIO1), module RXD <-> ESP RX (GPIO3).
+# ESP is the master: every 5s it sends "?\n" and the slave answers with one line
+#   T=28.5,H=70.2,R=0\n   (R: 1 = raining)
+uart:
+  id: rs485_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+  rx_buffer_size: 256
+
+interval:
+  # Poll the schedule every 15s (the script itself makes sure a schedule fires only once per minute)
+  - interval: 15s
+    then:
+      - script.execute: check_schedule
+
+  # Ask the weather slave for a reading.
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(baud_state) == 0;'   # paused while a baud change is negotiated
+          then:
+            - uart.write: "?\n"
+
+  # Drain the RS485 UART (HW FIFO is only 128 bytes, so poll often) and run the
+  # baud-change negotiation (see the "RS485 Baud" select below).
+  - interval: 20ms
+    then:
+      - lambda: |-
+          static uint32_t n_bytes = 0, last_log = 0, last_poll = 0;
+          uint32_t now = millis();
+          auto set_baud = [&](int b) {
+            id(rs485_uart).set_baud_rate(b);
+            id(rs485_uart).load_settings(false);
+            id(rx_buf).clear();
+          };
+          auto send_req = [&]() {
+            id(rs485_uart).write_str(("B=" + std::to_string(id(baud_new)) + "\n").c_str());
+          };
+          // Baud-change state machine: 1 = request sent, wait for slave's "OK B=n";
+          // 2 = switched, verify with a real reading; 3 = reverted, let the slave catch up.
+          switch (id(baud_state)) {
+            case 1:
+              if (now - id(baud_t) > 1500) {
+                if (id(baud_tries) < 3) {
+                  id(baud_tries)++;
+                  id(baud_t) = now;
+                  send_req();
+                } else {
+                  id(baud_state) = 0;
+                  id(baud_fix) = true;
+                  ESP_LOGW("rs485", "baud %d: no ack from slave, staying at %d", id(baud_new), id(baud_cur));
+                }
+              }
+              break;
+            case 2:
+              if (now - last_poll > 1000) {
+                last_poll = now;
+                id(rs485_uart).write_str("?\n");
+              }
+              if (now - id(baud_t) > 6000) {
+                set_baud(id(baud_cur));
+                id(baud_state) = 3;
+                id(baud_t) = now;
+                id(baud_fix) = true;
+                ESP_LOGW("rs485", "baud %d: no valid reading, back to %d", id(baud_new), id(baud_cur));
+              }
+              break;
+            case 3:
+              if (now - id(baud_t) > 4000) id(baud_state) = 0;
+              break;
+          }
+          if (id(baud_fix)) {
+            id(baud_fix) = false;
+            id(rs485_baud).publish_state(std::to_string(id(baud_cur)));
+          }
+          uint8_t c;
+          while (id(rs485_uart).available() && id(rs485_uart).read_byte(&c)) {
+            n_bytes++;
+            if (c != '\n') {
+              if (c != '\r') {
+                // Noise without a newline: drop the old junk instead of freezing on it,
+                // so the next real line is not lost too.
+                if (id(rx_buf).size() >= 64) id(rx_buf).clear();
+                id(rx_buf) += (char) c;
+              }
+              continue;
+            }
+            float t, h;
+            int r;
+            size_t k = id(rx_buf).find("OK B=");
+            if (k != std::string::npos) {  // slave heard our baud request
+              if (id(baud_state) == 1 && atoi(id(rx_buf).c_str() + k + 5) == id(baud_new)) {
+                set_baud(id(baud_new));
+                id(baud_state) = 2;
+                id(baud_t) = now;
+                last_poll = 0;
+                ESP_LOGI("rs485", "ack received, switched to %d, verifying", id(baud_new));
+              }
+              id(rx_buf).clear();
+              continue;
+            }
+            // Parse from the LAST "T=": a collision/lost newline can glue junk (or a
+            // previous half line) in front of an otherwise intact reading.
+            size_t p = id(rx_buf).rfind("T=");
+            if (p != std::string::npos && sscanf(id(rx_buf).c_str() + p, "T=%f,H=%f,R=%d", &t, &h, &r) == 3 &&
+                t > -40 && t < 85 && h >= 0 && h <= 100) {
+              id(weather_temp).publish_state(t);
+              id(weather_hum).publish_state(h);
+              id(weather_rain).publish_state(r != 0);
+              id(last_rx_ms) = millis();
+              id(rx_seen) = true;
+              id(rs485_ok_count).publish_state(++id(rs_ok));
+              if (id(baud_state) == 2) {  // a real reading at the new speed = change succeeded
+                id(baud_cur) = id(baud_new);
+                id(baud_state) = 0;
+                ESP_LOGI("rs485", "baud change to %d OK", id(baud_cur));
+              }
+              ESP_LOGI("rs485", "T=%.1f H=%.1f R=%d", t, h, r);
+            } else {
+              ESP_LOGW("rs485", "bad line (%d bytes): %s", (int) id(rx_buf).size(), id(rx_buf).c_str());
+              id(rs485_bad_count).publish_state(++id(rs_bad));
+            }
+            id(rx_buf).clear();
+          }
+          // Diagnostic: total bytes seen on RX0 (0 => nothing reaches the ESP at all).
+          if (millis() - last_log > 5000) {
+            last_log = millis();
+            ESP_LOGI("rs485", "rx bytes total=%u", (unsigned) n_bytes);
+          }
+          // No valid line for 60s -> mark sensors unavailable instead of showing stale values.
+          if (id(rx_seen) && millis() - id(last_rx_ms) > 60000) {
+            id(rx_seen) = false;
+            id(weather_temp).publish_state(NAN);
+            id(weather_hum).publish_state(NAN);
+          }
+
+  # Adaptive status refresh:
+  #   - something is running/transitioning -> refresh status text sensors every 1s
+  #   - idle                               -> refresh every 10s (only needed to re-sync
+  #                                           after an MQTT reconnect)
+  - interval: 1s
+    then:
+      - lambda: |-
+          bool active = id(fsm_state) != 0;
+          id(status_tick)++;
+          if (active || active != id(was_active) || id(status_tick) >= 10) {
+            id(status_tick) = 0;
+            id(was_active) = active;
+            id(active_zone_text).update();
+            id(time_remaining).update();
+            id(progress_percent).update();
+          }
+
+  # --- Irrigation state machine tick. See the INTERLOCK DESIGN comment up top. ---
+  # States: IDLE=0, STOPPING_PUMP=1, CLOSING_VALVE=2, OPENING_VALVE=3, RUNNING=4,
+  # OVERLAP_CLOSING=5. Zones are 0..2 and map to relays 1..3; the pump is relay 4.
+  #
+  # Never issues more than one relay/pump command per tick. The tick stays at
+  # 1s even when idle so the first reaction to a button press is never delayed.
+  - interval: 1s
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          int rz = id(requested_zone);
+          int az = id(active_zone);
+
+          auto zone_enabled = [&](int z) -> bool {
+            switch (z) {
+              case 0: return id(enable_zone1).state;
+              case 1: return id(enable_zone2).state;
+              case 2: return id(enable_zone3).state;
+            }
+            return false;
+          };
+          auto zone_runtime = [&](int z) -> int {
+            switch (z) {
+              case 0: return (int) id(zone1_runtime).state;
+              case 1: return (int) id(zone2_runtime).state;
+              case 2: return (int) id(zone3_runtime).state;
+            }
+            return 0;
+          };
+
+          switch (id(fsm_state)) {
+            case 0: // IDLE
+              if (rz >= 0) {
+                id(active_zone) = rz;
+                id(send_relay).execute(rz + 1, true);
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 3;
+                ESP_LOGI("sprinkler_fsm", "IDLE -> OPENING_VALVE zone=%d", rz);
+              }
+              break;
+
+            case 1: // STOPPING_PUMP: pump-off sent, but the pump/pipe still has momentum for a
+                    // moment after losing power. Closing the valve too soon risks hammer just as
+                    // much as closing it while the pump is still driven, so wait a real 5s.
+              if (now - id(fsm_phase_start_ms) >= 5000) {
+                if (az >= 0) id(send_relay).execute(az + 1, false);
+                id(active_zone) = -1;
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 2;
+                ESP_LOGI("sprinkler_fsm", "STOPPING_PUMP -> CLOSING_VALVE (was zone=%d)", az);
+              }
+              break;
+
+            case 2: // CLOSING_VALVE: valve-off sent, wait to settle, then open whatever is requested (if anything)
+              if (now - id(fsm_phase_start_ms) >= 10000) {
+                if (rz >= 0) {
+                  id(active_zone) = rz;
+                  id(send_relay).execute(rz + 1, true);
+                  id(fsm_phase_start_ms) = now;
+                  id(fsm_state) = 3;
+                  ESP_LOGI("sprinkler_fsm", "CLOSING_VALVE -> OPENING_VALVE zone=%d", rz);
+                } else {
+                  id(fsm_state) = 0;
+                  ESP_LOGI("sprinkler_fsm", "CLOSING_VALVE -> IDLE");
+                }
+              }
+              break;
+
+            case 3: // OPENING_VALVE: valve-on sent for active_zone, wait to settle
+              if (now - id(fsm_phase_start_ms) >= 3000) {
+                if (rz == az) {
+                  id(send_relay).execute(4, true);
+                  int dur = zone_runtime(az);
+                  id(run_duration_s) = dur;
+                  id(run_end_ms) = now + (uint32_t) dur * 1000;
+                  id(fsm_phase_start_ms) = now;
+                  id(fsm_state) = 4;
+                  ESP_LOGI("sprinkler_fsm", "OPENING_VALVE -> RUNNING zone=%d duration=%ds", az, dur);
+                } else {
+                  // The user changed their mind before the pump ever started. The pump was
+                  // never on, so just close what was just opened.
+                  if (az >= 0) id(send_relay).execute(az + 1, false);
+                  id(active_zone) = -1;
+                  id(fsm_phase_start_ms) = now;
+                  id(fsm_state) = 2;
+                  ESP_LOGI("sprinkler_fsm", "OPENING_VALVE -> CLOSING_VALVE (retarget, was zone=%d)", az);
+                }
+              }
+              break;
+
+            case 4: { // RUNNING
+              bool must_transition = (rz != az);
+              if (!must_transition && (int32_t) (now - id(run_end_ms)) >= 0) {
+                // Run time elapsed. In a cycle with Auto Advance on, move to the next
+                // enabled zone; otherwise go idle.
+                int next = -1;
+                if (id(cycle_mode) && id(auto_advance).state) {
+                  for (int z = az + 1; z < 3; z++) {
+                    if (zone_enabled(z)) { next = z; break; }
+                  }
+                }
+                id(requested_zone) = next;
+                if (next < 0) id(cycle_mode) = false;
+                rz = next;
+                must_transition = true;
+              }
+              if (must_transition && rz < 0) {
+                // Genuine stop: the pump really does need to go off here
+                id(send_relay).execute(4, false);
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 1;
+                ESP_LOGI("sprinkler_fsm", "RUNNING -> STOPPING_PUMP (zone=%d -> idle)", az);
+              } else if (must_transition) {
+                // Live handoff to a different zone: the pump keeps running the whole time.
+                // Open the new valve first and only close the old one after a short overlap
+                // (see OVERLAP_CLOSING below).
+                id(handoff_old_zone) = az;
+                id(active_zone) = rz;
+                id(send_relay).execute(rz + 1, true);
+                int dur = zone_runtime(rz);
+                id(run_duration_s) = dur;
+                id(run_end_ms) = now + (uint32_t) dur * 1000;
+                id(fsm_phase_start_ms) = now;
+                id(fsm_state) = 5;
+                ESP_LOGI("sprinkler_fsm", "RUNNING -> OVERLAP_CLOSING zone=%d -> %d, pump stays on", az, rz);
+              }
+              break;
+            }
+
+            case 5: { // OVERLAP_CLOSING: new valve open + pump still on; close the old valve
+                      // once the overlap window elapses. Longer overlap for the scheduled
+                      // auto-advance (nobody is waiting on it), short for a manual switch.
+              uint32_t overlap_ms = id(cycle_mode) ? 3000 : 1000;
+              if (now - id(fsm_phase_start_ms) >= overlap_ms) {
+                int old_zone = id(handoff_old_zone);
+                if (old_zone >= 0) id(send_relay).execute(old_zone + 1, false);
+                id(fsm_state) = 4;
+                ESP_LOGI("sprinkler_fsm", "OVERLAP_CLOSING -> RUNNING (closed old zone=%d)", old_zone);
+              }
+              break;
+            }
+          }
+
+globals:
+  - id: rx_buf
+    type: std::string
+  - id: last_rx_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: rx_seen
+    type: bool
+    initial_value: 'false'
+  - id: rs_ok          # valid readings / rejected lines since boot (published as diagnostic sensors)
+    type: int
+    initial_value: '0'
+  - id: rs_bad
+    type: int
+    initial_value: '0'
+  - id: baud_cur       # speed the link is really running at (starts = uart: baud_rate)
+    type: int
+    initial_value: '9600'
+  - id: baud_new
+    type: int
+    initial_value: '9600'
+  - id: baud_state     # 0 idle, 1 wait ack, 2 verify at new baud, 3 reverted
+    type: int
+    initial_value: '0'
+  - id: baud_tries
+    type: int
+    initial_value: '0'
+  - id: baud_t
+    type: uint32_t
+    initial_value: '0'
+  - id: baud_fix       # ask the loop to re-publish the select to baud_cur
+    type: bool
+    initial_value: 'false'
+  - id: last_trigger_key
+    type: int
+    initial_value: '-1'
+  - id: status_tick
+    type: int
+    initial_value: '0'
+  - id: was_active
+    type: bool
+    initial_value: 'true'   # true => the very first tick publishes the initial state right away
+  - id: active_zone
+    type: int
+    initial_value: '-1'      # -1 = idle, 0/1/2 = the zone whose valve is physically open right now
+  - id: requested_zone
+    type: int
+    initial_value: '-1'      # -1 = nothing wanted, 0/1/2 = zone the user/schedule currently wants running
+  - id: cycle_mode
+    type: bool
+    initial_value: 'false'   # true while running an auto "all zones" sequence (see start_cycle)
+  - id: fsm_state
+    type: int
+    initial_value: '0'       # IDLE=0, STOPPING_PUMP=1, CLOSING_VALVE=2, OPENING_VALVE=3, RUNNING=4, OVERLAP_CLOSING=5
+  - id: handoff_old_zone
+    type: int
+    initial_value: '-1'      # zone whose valve OVERLAP_CLOSING still needs to close
+  - id: fsm_phase_start_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: run_end_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: run_duration_s
+    type: uint32_t
+    initial_value: '0'
+
+# ---------------------------------------------------------------------------
+# Irrigation control - these just set globals; the FSM `interval:` above is
+# what actually drives the relays. See the INTERLOCK DESIGN comment up top.
+# ---------------------------------------------------------------------------
+script:
+  # Switches one physical relay. relay: 1..3 = zone valves, 4 = pump.
+  # Only the FSM (and on_shutdown) should call this.
+  - id: send_relay
+    mode: single
+    parameters:
+      relay: int
+      turn_on: bool
+    then:
+      - logger.log:
+          format: "relay=%d turn_on=%d"
+          args: [relay, (int) turn_on]
+          tag: send_relay
+      - lambda: |-
+          switch (relay) {
+            case 1: if (turn_on) id(relay1).turn_on(); else id(relay1).turn_off(); break;
+            case 2: if (turn_on) id(relay2).turn_on(); else id(relay2).turn_off(); break;
+            case 3: if (turn_on) id(relay3).turn_on(); else id(relay3).turn_off(); break;
+            case 4: if (turn_on) id(pump_relay).turn_on(); else id(pump_relay).turn_off(); break;
+          }
+
+  # Starts the "run every enabled zone" sequence from the first enabled zone.
+  # The FSM's RUNNING case advances to the next enabled zone on its own (when
+  # Auto Advance is on) once a zone's duration elapses.
+  - id: start_cycle
+    mode: single
+    then:
+      - lambda: |-
+          bool en[3] = {id(enable_zone1).state, id(enable_zone2).state, id(enable_zone3).state};
+          int first = -1;
+          for (int z = 0; z < 3; z++) {
+            if (en[z]) { first = z; break; }
+          }
+          id(cycle_mode) = (first >= 0);
+          id(requested_zone) = first;
+
+  # Immediately requests idle. The FSM tears down whatever is physically open
+  # (from any state - running, mid-open, mid-close) on its own; this never
+  # touches a relay directly, so it can't race with the FSM.
+  - id: stop_watering
+    mode: single
+    then:
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = -1;
+
+  # Runs every 15s (see interval:). Starts a full cycle when:
+  #   Auto Mode is ON, no rain delay, today is enabled, and the current HH:MM
+  #   matches an enabled schedule. Skipped if a cycle is already running.
+  - id: check_schedule
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              auto now = id(my_time).now();
+              if (!now.is_valid()) return false;
+              if (!id(auto_mode).state) return false;
+              if (id(rain_delay_24h).state || id(rain_delay_48h).state) return false;
+              if (id(fsm_state) != 0) return false;
+
+              // ESPHome day_of_week: 1 = Sunday ... 7 = Saturday
+              bool day_ok = false;
+              switch (now.day_of_week) {
+                case 1: day_ok = id(day_sun).state; break;
+                case 2: day_ok = id(day_mon).state; break;
+                case 3: day_ok = id(day_tue).state; break;
+                case 4: day_ok = id(day_wed).state; break;
+                case 5: day_ok = id(day_thu).state; break;
+                case 6: day_ok = id(day_fri).state; break;
+                case 7: day_ok = id(day_sat).state; break;
+              }
+              if (!day_ok) return false;
+
+              auto matches = [&](const std::string &hhmm) -> bool {
+                int h = -1, m = -1;
+                if (sscanf(hhmm.c_str(), "%d:%d", &h, &m) != 2) return false;
+                return h == now.hour && m == now.minute;
+              };
+
+              bool due = (id(schedule1_enabled).state && matches(id(s1_time).state)) ||
+                         (id(schedule2_enabled).state && matches(id(s2_time).state)) ||
+                         (id(schedule3_enabled).state && matches(id(s3_time).state));
+              if (!due) return false;
+
+              // Fire only once per minute (the script is polled every 15s)
+              int key = now.day_of_year * 1440 + now.hour * 60 + now.minute;
+              if (key == id(last_trigger_key)) return false;
+              id(last_trigger_key) = key;
+              return true;
+          then:
+            - logger.log: "Schedule due - starting full cycle"
+            - script.execute: start_cycle
+
+  - id: rain_delay_24h_timer
+    mode: restart
+    then:
+      - delay: 24h
+      - switch.turn_off: rain_delay_24h
+
+  - id: rain_delay_48h_timer
+    mode: restart
+    then:
+      - delay: 48h
+      - switch.turn_off: rain_delay_48h
+
+# ---------------------------------------------------------------------------
+# Numbers: per-zone run duration
+# ---------------------------------------------------------------------------
+number:
+  - platform: template
+    id: zone1_runtime
+    name: ${name}_"Zone 1 Runtime"
+    icon: "mdi:timer"
+    unit_of_measurement: s
+    min_value: 10
+    max_value: 1800
+    step: 10
+    initial_value: 300
+    restore_value: true
+    optimistic: true
+    entity_category: config
+  - platform: template
+    id: zone2_runtime
+    name: ${name}_"Zone 2 Runtime"
+    icon: "mdi:timer"
+    unit_of_measurement: s
+    min_value: 10
+    max_value: 1800
+    step: 10
+    initial_value: 300
+    restore_value: true
+    optimistic: true
+    entity_category: config
+  - platform: template
+    id: zone3_runtime
+    name: ${name}_"Zone 3 Runtime"
+    icon: "mdi:timer"
+    unit_of_measurement: s
+    min_value: 10
+    max_value: 1800
+    step: 10
+    initial_value: 300
+    restore_value: true
+    optimistic: true
+    entity_category: config
+
+# ---------------------------------------------------------------------------
+# Switches
+# ---------------------------------------------------------------------------
+switch:
+  # --- Physical relays (internal: only the FSM drives them via send_relay) ---
+  - platform: gpio
+    pin: GPIO15 #or GPIO15 to avoid brief power-on at boot
+    name: ${name}_Relay1
+    id: relay1
+    internal: true
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    pin: GPIO14
+    name: ${name}_Relay2
+    id: relay2
+    internal: true
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    pin: GPIO12
+    name: ${name}_Relay3
+    id: relay3
+    internal: true
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    pin: GPIO13
+    name: ${name}_Relay4 Pump
+    id: pump_relay
+    internal: true
+    restore_mode: ALWAYS_OFF
+
+  # --- Zone controls: just tell the FSM what is wanted.
+  # The switch position reflects the user's INTENT (requested_zone), not
+  # whether the valve has physically caught up yet - so it flips instantly
+  # and doesn't invite repeat presses while the FSM is still settling.
+  - platform: template
+    id: zone1_switch
+    name: ${name}_"Zone 1"
+    icon: "mdi:sprinkler-variant"
+    lambda: |-
+      return id(requested_zone) == 0;
+    turn_on_action:
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = 0;
+    turn_off_action:
+      - script.execute: stop_watering
+
+  - platform: template
+    id: zone2_switch
+    name: ${name}_"Zone 2"
+    icon: "mdi:sprinkler-variant"
+    lambda: |-
+      return id(requested_zone) == 1;
+    turn_on_action:
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = 1;
+    turn_off_action:
+      - script.execute: stop_watering
+
+  - platform: template
+    id: zone3_switch
+    name: ${name}_"Zone 3"
+    icon: "mdi:sprinkler-variant"
+    lambda: |-
+      return id(requested_zone) == 2;
+    turn_on_action:
+      - lambda: |-
+          id(cycle_mode) = false;
+          id(requested_zone) = 2;
+    turn_off_action:
+      - script.execute: stop_watering
+
+  - platform: template
+    id: enable_zone1
+    name: ${name}_"Enable Zone 1"
+    icon: "mdi:sprinkler-variant"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    id: enable_zone2
+    name: ${name}_"Enable Zone 2"
+    icon: "mdi:sprinkler-variant"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    id: enable_zone3
+    name: ${name}_"Enable Zone 3"
+    icon: "mdi:sprinkler-variant"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  # --- Master switch: ON = run the full cycle, OFF = stop everything ---
+  - platform: template
+    id: master_switch
+    name: ${name}_"Sprinkler Master"
+    lambda: |-
+      return id(requested_zone) >= 0;
+    turn_on_action:
+      - script.execute: start_cycle
+    turn_off_action:
+      - script.execute: stop_watering
+
+  # --- Must be ON for a full cycle to move on from one zone to the next. ---
+  #     If OFF, the controller stops after the first zone finishes.
+  - platform: template
+    id: auto_advance
+    name: ${name}_"Auto Advance"
+    icon: "mdi:skip-next"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  # --- Mode: ON = Auto (schedules run), OFF = Manual ---
+  # Changing mode stops anything currently running, to start from a clean state.
+  - platform: template
+    id: auto_mode
+    name: ${name}_"Auto Mode"
+    icon: "mdi:calendar-clock"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: stop_watering
+    on_turn_off:
+      - script.execute: stop_watering
+
+  # --- Day-of-week toggles ---
+  - platform: template
+    id: day_sun
+    name: ${name}_Sunday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_mon
+    name: ${name}_Monday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_tue
+    name: ${name}_Tuesday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_wed
+    name: ${name}_Wednesday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_thu
+    name: ${name}_Thursday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_fri
+    name: ${name}_Friday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: day_sat
+    name: ${name}_Saturday
+    icon: "mdi:calendar-range"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+
+  # --- Enable/disable each of the 3 start times ---
+  - platform: template
+    id: schedule1_enabled
+    name: ${name}_Enable Schedule 1
+    icon: "mdi:clock-outline"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: schedule2_enabled
+    name: ${name}_Enable Schedule 2
+    icon: "mdi:clock-outline"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+  - platform: template
+    id: schedule3_enabled
+    name: ${name}_Enable Schedule 3
+    icon: "mdi:clock-outline"
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+
+  # --- Rain delay (auto-resets; turning it off manually cancels the timer) ---
+  # Always starts OFF after a reboot, so a delay can never get stuck ON.
+  - platform: template
+    id: rain_delay_24h
+    name: ${name}_Rain Delay 24h
+    icon: "mdi:weather-cloudy-clock"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - script.execute: rain_delay_24h_timer
+    turn_off_action:
+      - script.stop: rain_delay_24h_timer
+  - platform: template
+    id: rain_delay_48h
+    name: ${name}_Rain Delay 48h
+    icon: "mdi:weather-cloudy-clock"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - script.execute: rain_delay_48h_timer
+    turn_off_action:
+      - script.stop: rain_delay_48h_timer
+
+# ---------------------------------------------------------------------------
+# Schedule start times, entered as "HH:MM" (24h)
+# (Home Assistant has no MQTT "time" entity, so a validated text field is used.)
+# ---------------------------------------------------------------------------
+text:
+  - platform: template
+    id: s1_time
+    name: ${name}_"Schedule 1 Start Time"
+    icon: "mdi:clock-start"
+    mode: text
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "06:00"
+  - platform: template
+    id: s2_time
+    name: ${name}_"Schedule 2 Start Time"
+    icon: "mdi:clock-start"
+    mode: text
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "12:00"
+  - platform: template
+    id: s3_time
+    name: ${name}_"Schedule 3 Start Time"
+    icon: "mdi:clock-start"
+    mode: text
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "17:00"
+
+# ---------------------------------------------------------------------------
+# Status text sensors
+# update_interval: never -> refreshed by the adaptive 1s interval above
+# ---------------------------------------------------------------------------
+text_sensor:
+  # Clock the schedules actually use (RTC or NTP). Lets you verify the RTC in HA
+  # without debug logging: after an offline power-cycle it must still be correct.
+  - platform: template
+    name: ${name}_"Clock"
+    icon: "mdi:clock-outline"
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      auto t = id(my_time).now();
+      if (!t.is_valid()) return std::string("no time");
+      return t.strftime("%Y-%m-%d %H:%M:%S");
+
+  - platform: template
+    id: active_zone_text
+    name: ${name}_"Active Zone"
+    icon: "mdi:sprinkler-variant"
+    update_interval: never
+    # Every transitional state shows a live countdown to its next action,
+    # so a several-second wait reads as "counting down to X", not "stuck".
+    lambda: |-
+      int rz = id(requested_zone);
+      const char *target = (rz == 0) ? "Zone 1" : (rz == 1) ? "Zone 2" : (rz == 2) ? "Zone 3" : "Idle";
+      uint32_t elapsed = millis() - id(fsm_phase_start_ms);
+      char buf[48];
+      switch (id(fsm_state)) {
+        case 1: {
+          uint32_t left = elapsed < 5000 ? (5000 - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "Stopping pump, %ds to %s...", (int) left, target);
+          return std::string(buf);
+        }
+        case 2: {
+          uint32_t left = elapsed < 10000 ? (10000 - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "Valve settling, %ds to %s...", (int) left, target);
+          return std::string(buf);
+        }
+        case 3: {
+          uint32_t left = elapsed < 3000 ? (3000 - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "Opening %s, %ds to pump on...", target, (int) left);
+          return std::string(buf);
+        }
+        case 5: {
+          uint32_t total = id(cycle_mode) ? 3000 : 1000;
+          uint32_t left = elapsed < total ? (total - elapsed) / 1000 + 1 : 0;
+          snprintf(buf, sizeof(buf), "%s running, closing old valve in %ds...", target, (int) left);
+          return std::string(buf);
+        }
+        case 4: return std::string(target);
+        default: return std::string("Idle");
+      }
+
+  - platform: template
+    id: time_remaining
+    name: ${name}_"Time Remaining"
+    icon: "mdi:timer-sand"
+    update_interval: never
+    lambda: |-
+      if (id(fsm_state) != 4 && id(fsm_state) != 5) return std::string("0s");
+      int32_t remaining_ms = (int32_t) (id(run_end_ms) - millis());
+      uint32_t remaining = remaining_ms > 0 ? (uint32_t) remaining_ms / 1000 : 0;
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%dm %02ds", (int) (remaining / 60), (int) (remaining % 60));
+      return std::string(buf);
+
+  - platform: template
+    id: progress_percent
+    name: ${name}_"Progress %"
+    icon: "mdi:progress-clock"
+    update_interval: never
+    lambda: |-
+      if ((id(fsm_state) != 4 && id(fsm_state) != 5) || id(run_duration_s) == 0) return std::string("0%");
+      uint32_t elapsed = (millis() - id(fsm_phase_start_ms)) / 1000;
+      uint32_t pct = elapsed * 100 / id(run_duration_s);
+      if (pct > 100) pct = 100;
+      return std::to_string(pct) + "%";
+
+# ---------------------------------------------------------------------------
+# Buttons (work in both modes)
+# ---------------------------------------------------------------------------
+button:
+  - platform: template
+    name: ${name}_"Run All Zones Now"
+    icon: "mdi:play-circle"
+    on_press:
+      - script.execute: start_cycle
+  - platform: template
+    name: ${name}_"Stop All"
+    icon: "mdi:stop-circle"
+    on_press:
+      - script.execute: stop_watering
+
+# ---------------------------------------------------------------------------
+# Weather values received over RS485 (published by the interval: lambda above)
+# ---------------------------------------------------------------------------
+sensor:
+  - platform: template
+    id: weather_temp
+    name: ${name}_"Temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+  - platform: template
+    id: weather_hum
+    name: ${name}_"Humidity"
+    unit_of_measurement: "%"
+    device_class: humidity
+    accuracy_decimals: 1
+  # Link quality counters since boot (read them the next morning to judge a soak test).
+  - platform: template
+    id: rs485_ok_count
+    name: ${name}_"RS485 OK Lines"
+    icon: "mdi:check-network"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    lambda: 'return id(rs_ok);'   # also published every 30s so a reboot never leaves a stale retained value
+    update_interval: 30s
+  - platform: template
+    id: rs485_bad_count
+    name: ${name}_"RS485 Bad Lines"
+    icon: "mdi:alert-network"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    lambda: 'return id(rs_bad);'
+    update_interval: 30s
+
+# Change the RS485 speed live from HA (to find where the long cable stops working).
+# Negotiated with the slave: ESP sends "B=19200", slave answers "OK B=19200" at the old
+# speed, both switch, ESP verifies with a real reading and falls back if that fails.
+# Not persisted: always boots at the uart: baud_rate above (9600).
+select:
+  - platform: template
+    id: rs485_baud
+    name: ${name}_"RS485 Baud"
+    icon: "mdi:speedometer"
+    entity_category: config
+    optimistic: true
+    options: ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"]
+    initial_option: "9600"
+    set_action:
+      - lambda: |-
+          int nb = atoi(x.c_str());
+          if (id(baud_state) != 0 || nb == id(baud_cur)) {
+            id(baud_fix) = true;  // busy or no change: snap the select back to the real speed
+            return;
+          }
+          id(baud_new) = nb;
+          id(baud_tries) = 1;
+          id(baud_state) = 1;
+          id(baud_t) = millis();
+          id(rs485_uart).write_str(("B=" + std::to_string(nb) + "\n").c_str());
+          ESP_LOGI("rs485", "asking slave to switch to %d", nb);
+
+binary_sensor:
+  - platform: template
+    id: weather_rain
+    name: ${name}_"Rain"
+    device_class: moisture
+
+# ---------------------------------------------------------------------------
+# Optional: DS18B20 temperature sensor (was on GPIO2 in the old roof_top_garden config).
+# Uncomment only if this device has one, and replace the address with your sensor's.
+# (If you do, merge its `sensor:` entry into the `sensor:` block above.)
+# ---------------------------------------------------------------------------
+#one_wire:
+#  - platform: gpio
+#    id: dallas_bus
+#    pin: GPIO2
+#
+#sensor:
+#  - platform: dallas_temp
+#    address: 0x183c01d075221a28
+#    name: ${name}_"Temperature"
+#    update_interval: 120s
+#    accuracy_decimals: 2

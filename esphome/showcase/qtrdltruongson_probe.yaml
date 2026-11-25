@@ -1,0 +1,40 @@
+# Tiny firmware (~300KB) to read the REAL flash size of the ESP-07 over OTA.
+# Flash it over OTA, read the "Flash Real Size" entity (MQTT/HA), then flash
+# qtrdltruongson.yaml over OTA again (fits, because this one is small).
+substitutions:
+  name: qtrdltruongson
+  port: 8266
+
+esphome:
+  name: ${name}
+
+esp8266:
+  board: esp01_1m
+
+wifi:
+  reboot_timeout: 0s
+  ssid: HOME
+  password: ngoc12345
+
+logger:
+  level: INFO
+
+ota:
+  - platform: esphome
+    port: ${port}
+    password: !secret ota_password
+
+mqtt:
+  broker: myhome.sfdp.net
+  username: mqtt_user
+  password: D1ndh1sk@
+  client_id: ${name}_mqtt
+
+text_sensor:
+  - platform: template
+    name: ${name}_"Flash Real Size"
+    update_interval: 30s
+    lambda: |-
+      char b[64];
+      snprintf(b, sizeof(b), "real=%uKB configured=%uKB", ESP.getFlashChipRealSize() / 1024, ESP.getFlashChipSize() / 1024);
+      return std::string(b);

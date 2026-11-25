@@ -1,0 +1,89 @@
+# Merge these pieces into the qtrdltruongson.yaml you actually build from.
+# ESP = master: sends "?\n" every 5s, slave (PC/sensor) answers "T=28.5,H=70.2,R=0\n".
+# Wiring is STRAIGHT: module TXD <-> ESP TX (GPIO1), module RXD <-> ESP RX (GPIO3).
+
+# 1) logger: UART0 now belongs to RS485 -> change your existing block to:
+logger:
+  level: INFO
+  baud_rate: 0
+
+# 2) new top-level block (any place):
+uart:
+  id: rs485_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+  rx_buffer_size: 256
+
+# 3) append these two items to your existing `interval:` list:
+interval:
+  - interval: 5s
+    then:
+      - uart.write: "?\n"
+  - interval: 20ms
+    then:
+      - lambda: |-
+          static uint32_t n_bytes = 0, last_log = 0;
+          uint8_t c;
+          while (id(rs485_uart).available() && id(rs485_uart).read_byte(&c)) {
+            n_bytes++;
+            if (c != '\n') {
+              if (c != '\r' && id(rx_buf).size() < 64) id(rx_buf) += (char) c;
+              continue;
+            }
+            float t, h;
+            int r;
+            if (sscanf(id(rx_buf).c_str(), "T=%f,H=%f,R=%d", &t, &h, &r) == 3) {
+              id(weather_temp).publish_state(t);
+              id(weather_hum).publish_state(h);
+              id(weather_rain).publish_state(r != 0);
+              id(last_rx_ms) = millis();
+              id(rx_seen) = true;
+              ESP_LOGI("rs485", "T=%.1f H=%.1f R=%d", t, h, r);
+            } else {
+              ESP_LOGW("rs485", "bad line (%d bytes): %s", (int) id(rx_buf).size(), id(rx_buf).c_str());
+            }
+            id(rx_buf).clear();
+          }
+          if (millis() - last_log > 5000) {
+            last_log = millis();
+            ESP_LOGI("rs485", "rx bytes total=%u", (unsigned) n_bytes);
+          }
+          // No valid line for 60s -> mark sensors unavailable instead of showing stale values.
+          if (id(rx_seen) && millis() - id(last_rx_ms) > 60000) {
+            id(rx_seen) = false;
+            id(weather_temp).publish_state(NAN);
+            id(weather_hum).publish_state(NAN);
+          }
+
+# 4) append these three items to your existing `globals:` list:
+globals:
+  - id: rx_buf
+    type: std::string
+  - id: last_rx_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: rx_seen
+    type: bool
+    initial_value: 'false'
+
+# 5) new top-level blocks (you have no sensor:/binary_sensor: yet):
+sensor:
+  - platform: template
+    id: weather_temp
+    name: ${name}_"Temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+  - platform: template
+    id: weather_hum
+    name: ${name}_"Humidity"
+    unit_of_measurement: "%"
+    device_class: humidity
+    accuracy_decimals: 1
+
+binary_sensor:
+  - platform: template
+    id: weather_rain
+    name: ${name}_"Rain"
+    device_class: moisture
