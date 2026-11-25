@@ -27,5 +27,5 @@ button:
     entity_category: config
     on_press:
       - ota.http_request.flash:
-          md5_url: http://ota.sfdp.net/irrigation/${name}/${name}.md5
-          url: http://ota.sfdp.net/irrigation/${name}/${name}.bin.gz
+          md5_url: http://ota.sfdp.net/${name}/${name}.md5
+          url: http://ota.sfdp.net/${name}/${name}.bin.gz
