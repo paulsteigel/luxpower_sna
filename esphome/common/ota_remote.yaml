@@ -108,6 +108,7 @@ script:
       - mqtt.publish:
           topic: ota/${name}/status
           retain: true
+          qos: 1
           payload: !lambda "return id(fw_info).state;"
 
   - id: ota_remote_cmd
