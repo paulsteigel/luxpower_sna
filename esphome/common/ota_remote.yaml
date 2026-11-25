@@ -1,0 +1,200 @@
+# ============================================================
+# ota_remote.yaml - firmware update pulled from http://ota.sfdp.net/${name}/
+#
+# Flow: Install (build) in the ESPHome dashboard -> the VM job ota-publish copies the
+# firmware + md5 + manifest to http://ota.sfdp.net/<name>/ within a minute ->
+# press "Firmware Update" on the device (or send a command from the server).
+# The device flashes only if the server's build is NEWER than the one it runs
+# (build time), so no version number to bump and no flashing the same build twice.
+#
+# Use (remote package):
+#   packages:
+#     remote_packages:
+#       url: https://github.com/paulsteigel/luxpower_sna
+#       ref: main
+#       files:
+#         - esphome/common/ota_remote.yaml
+# Needs mqtt: (commands/status) and does NOT need ota_http_esp8266.yaml (replaces it).
+# The first install of a firmware with this package goes the old way (dashboard / native OTA).
+#
+# Device YAML needs: substitutions name (= esphome name). Optional:
+#   ota_safe: C++ expression, true = flashing allowed now (default "true").
+#             Irrigation: "id(fsm_state) == 0 && id(requested_zone) < 0".
+#             When false the install waits and runs as soon as it turns true.
+#
+# From the server (VM):  sudo ota-push <name> [check|install|force]  /  sudo ota-push all
+#   MQTT ota/<name> or ota/all, payload check | install | force; answers on ota/<name>/status.
+# ============================================================
+
+substitutions:
+  ota_safe: "true"
+
+http_request:
+  verify_ssl: false
+  useragent: esphome/ota
+
+ota:
+  - platform: http_request
+    id: ota_http
+
+update:
+  # Only used to read the manifest (internal: its own "same version?" test does
+  # not fit build-time numbers; the scripts below decide).
+  - platform: http_request
+    id: fw_update
+    internal: true
+    source: http://ota.sfdp.net/${name}/${name}.json
+    update_interval: never
+
+globals:
+  - id: ota_pending
+    type: int          # 0 none, 1 install if newer, 2 force
+    initial_value: "0"
+  - id: ota_boot_reported
+    type: bool
+    initial_value: "false"
+
+button:
+  - platform: template
+    name: Firmware Update
+    icon: mdi:cloud-download
+    entity_category: config
+    on_press:
+      - script.execute:
+          id: ota_remote_cmd
+          cmd: install
+          own: false
+
+text_sensor:
+  - platform: template
+    id: fw_info
+    name: Firmware
+    icon: mdi:chip
+    entity_category: diagnostic
+    update_interval: never
+  - platform: mqtt_subscribe
+    id: ota_cmd_own
+    internal: true
+    topic: ota/${name}
+    on_value:
+      - script.execute:
+          id: ota_remote_cmd
+          cmd: !lambda "return x;"
+          own: true
+  - platform: mqtt_subscribe
+    id: ota_cmd_all
+    internal: true
+    topic: ota/all
+    on_value:
+      - script.execute:
+          id: ota_remote_cmd
+          cmd: !lambda "return x;"
+          own: false
+
+script:
+  - id: ota_status
+    mode: queued
+    parameters:
+      msg: string
+    then:
+      - lambda: |-
+          char mine[Application::BUILD_TIME_STR_SIZE];
+          App.get_build_time_string(mine);
+          auto *u = id(fw_update);
+          std::string server = u->update_info.summary.empty() ? std::string("?") : u->update_info.summary;
+          std::string line = msg + " | running " + mine + " | server " + server;
+          ESP_LOGI("ota_remote", "%s", line.c_str());
+          id(fw_info).publish_state(line);
+      - mqtt.publish:
+          topic: ota/${name}/status
+          retain: true
+          payload: !lambda "return id(fw_info).state;"
+
+  - id: ota_remote_cmd
+    mode: single
+    parameters:
+      cmd: string
+      own: bool
+    then:
+      - if:
+          condition:
+            lambda: 'return cmd == "check" || cmd == "install" || cmd == "force";'
+          then:
+            # Clear a retained command on our own topic so it never repeats after a reboot.
+            - if:
+                condition:
+                  lambda: "return own;"
+                then:
+                  - mqtt.publish:
+                      topic: ota/${name}
+                      payload: ""
+                      retain: true
+            - component.update: fw_update
+            - delay: 5s
+            - lambda: |-
+                if (cmd == "install") id(ota_pending) = 1;
+                else if (cmd == "force") id(ota_pending) = 2;
+            - script.execute:
+                id: ota_status
+                msg: !lambda |-
+                  auto &info = id(fw_update)->update_info;
+                  if (info.latest_version.empty()) return std::string("no manifest on server");
+                  uint32_t srv = strtoul(info.latest_version.c_str(), nullptr, 10);
+                  return std::string(srv > (uint32_t) App.get_build_time() ? "newer build on server" : "up to date");
+            - script.execute: ota_try_install
+
+  - id: ota_try_install
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: "return id(ota_pending) != 0;"
+          then:
+            - if:
+                condition:
+                  lambda: "return ${ota_safe};"
+                then:
+                  - lambda: |-
+                      auto &info = id(fw_update)->update_info;
+                      uint32_t srv = info.latest_version.empty() ? 0 : strtoul(info.latest_version.c_str(), nullptr, 10);
+                      bool newer = srv > (uint32_t) App.get_build_time();
+                      bool go = !info.firmware_url.empty() && (id(ota_pending) == 2 || newer);
+                      id(ota_pending) = go ? -1 : 0;   // -1 = flash now
+                  - if:
+                      condition:
+                        lambda: "return id(ota_pending) == -1;"
+                      then:
+                        - lambda: "id(ota_pending) = 0;"
+                        - script.execute:
+                            id: ota_status
+                            msg: installing
+                        - delay: 2s
+                        - update.perform:
+                            id: fw_update
+                            force_update: true
+                else:
+                  - script.execute:
+                      id: ota_status
+                      msg: "busy, install waits"
+
+  - id: ota_check_quiet
+    mode: single
+    then:
+      - component.update: fw_update
+      - delay: 5s
+      - script.execute:
+          id: ota_status
+          msg: booted
+
+interval:
+  - interval: 60s
+    then:
+      # A postponed install runs as soon as ota_safe allows it.
+      - script.execute: ota_try_install
+      # Tell the server which build is running, once after each boot.
+      - if:
+          condition:
+            lambda: "return !id(ota_boot_reported) && mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected();"
+          then:
+            - lambda: "id(ota_boot_reported) = true;"
+            - script.execute: ota_check_quiet
