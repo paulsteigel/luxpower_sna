@@ -56,7 +56,7 @@ globals:
 
 button:
   - platform: template
-    name: Firmware Update
+    name: "${name} Firmware Update"
     icon: mdi:cloud-download
     entity_category: config
     on_press:
@@ -68,7 +68,7 @@ button:
 text_sensor:
   - platform: template
     id: fw_info
-    name: Firmware
+    name: "${name} Firmware"
     icon: mdi:chip
     entity_category: diagnostic
     update_interval: never
